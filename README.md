@@ -1,10 +1,10 @@
-# Sandboxes of the sea
+# SecVF
 
 A macOS application for managing and running multiple Linux and macOS virtual machines using the Virtualization framework.
 
 ## Overview
 
-Sandboxes of the sea (formerly GUILinuxVirtualMachineSampleApp) is a VM management application that allows you to create, manage, and run multiple virtual machines on your Mac. The app provides a library interface for organizing your VMs and supports both Linux and macOS guests.
+SecVF (formerly Sandboxes of the sea) is a VM management application that allows you to create, manage, and run multiple virtual machines on your Mac. The app provides a library interface for organizing your VMs and supports both Linux and macOS guests.
 
 [class_VZVirtualMachineConfiguration]:https://developer.apple.com/documentation/virtualization/vzvirtualmachineconfiguration
 [class_VZLinuxBootLoader]:https://developer.apple.com/documentation/virtualization/vzlinuxbootloader
@@ -41,7 +41,7 @@ Before you run the sample program, you need to download an ISO installation imag
 
 - Note: The default deployment target is macOS 14. If you need to build for a different version of macOS, change the deployment target as appropriate.
 
-1. Launch Xcode and open `GUILinuxVirtualMachineSampleApp.xcodeproj`.
+1. Launch Xcode and open `SecVF.xcodeproj`.
 
 2. Navigate to the Signing & Capabilities panel and select your team ID.
 
@@ -49,9 +49,9 @@ Before you run the sample program, you need to download an ISO installation imag
 
 ### First Launch
 
-When you launch Sandboxes of the sea, you'll see the **Virtual Machine Library** window displaying all your VMs.
+When you launch SecVF, you'll see the **Virtual Machine Library** window displaying all your VMs.
 
-**If you have an old VM**: If you previously used this app and have a `GUI Linux VM.bundle` in your home directory, it will be automatically migrated to the new library at `~/VirtualMachines/`.
+**If you have an old VM**: If you previously used this app and have a `GUI Linux VM.bundle` in your home directory, or VMs in `~/VirtualMachines/`, they will be automatically migrated to the new library structure at `~/.avf/Linux/` or `~/.avf/MacOS/`.
 
 ### Creating a New VM
 
@@ -70,17 +70,23 @@ When you launch Sandboxes of the sea, you'll see the **Virtual Machine Library**
 
 ### VM Storage
 
-VMs are stored in `~/VirtualMachines/` with each VM in its own bundle:
+VMs are organized by OS type in `~/.avf/` with each VM in its own bundle:
 
 ```
-~/VirtualMachines/
-  ├── Ubuntu.bundle/
-  │   ├── Disk.img           # Main disk image
-  │   ├── NVRAM              # EFI variable store
-  │   ├── MachineIdentifier  # VZGenericMachineIdentifier data
-  │   └── metadata.json      # VM configuration metadata
-  └── macOS Sonoma.bundle/
-      └── ...
+~/.avf/
+  ├── Linux/
+  │   └── Ubuntu.bundle/
+  │       ├── Disk.img           # Main disk image
+  │       ├── NVRAM              # EFI variable store
+  │       ├── MachineIdentifier  # VZGenericMachineIdentifier data
+  │       └── metadata.json      # VM configuration metadata
+  └── MacOS/
+      └── macOS Sonoma.bundle/
+          ├── Disk.img
+          ├── NVRAM
+          ├── MachineIdentifier
+          ├── metadata.json
+          └── UniversalMac_15.0_24A335_Restore.ipsw  # macOS restore image (downloaded)
 ```
 
 ### Managing VMs
