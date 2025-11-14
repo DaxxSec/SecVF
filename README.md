@@ -1,210 +1,243 @@
 # SecVF
 
-A macOS application for managing and running multiple Linux and macOS virtual machines using the Virtualization framework.
+A native macOS application for managing and running multiple Linux and macOS virtual machines using Apple's Virtualization framework.
 
 ## Overview
 
-SecVF (formerly Sandboxes of the sea) is a VM management application that allows you to create, manage, and run multiple virtual machines on your Mac. The app provides a library interface for organizing your VMs and supports both Linux and macOS guests.
+SecVF (Computer Security Incident Response Team Virtual Framework) is a production-ready VM management application that provides a clean, intuitive GUI for creating, managing, and running multiple virtual machines on your Mac. The application leverages Apple's native Virtualization framework to deliver superior performance and integration compared to traditional solutions.
 
-[class_VZVirtualMachineConfiguration]:https://developer.apple.com/documentation/virtualization/vzvirtualmachineconfiguration
-[class_VZLinuxBootLoader]:https://developer.apple.com/documentation/virtualization/vzlinuxbootloader
-[class_VZVirtualMachine]:https://developer.apple.com/documentation/virtualization/vzvirtualmachine
-[property_bootLoader]:https://developer.apple.com/documentation/virtualization/vzvirtualmachineconfiguration/3656716-bootloader
-[method_start]:https://developer.apple.com/documentation/virtualization/vzvirtualmachine/3656826-start
-[method_guestDidStop]:https://developer.apple.com/documentation/virtualization/vzvirtualmachinedelegate/3656730-guestdidstop
+## Why Apple Virtualization Framework?
 
-## Download a Linux installation image 
+SecVF uses Apple's native Virtualization framework instead of QEMU-based solutions, offering significant advantages:
 
-Before you run the sample program, you need to download an ISO installation image from a Linux distribution website. Some common Linux distributions include:
+### Performance Benefits
+- **Hardware-accelerated virtualization** - Direct access to Apple's hypervisor for near-native performance
+- **Optimized for Apple Silicon** - Designed specifically for M-series chips with exceptional efficiency
+- **Lower resource overhead** - Minimal CPU and memory overhead compared to QEMU emulation layers
+- **Native graphics acceleration** - Seamless integration with macOS graphics stack
 
-- [Debian](https://www.debian.org/distrib/)
-- [Fedora](https://getfedora.org/en/workstation/download/)
-- [Ubuntu](https://ubuntu.com/download/desktop)
+### Integration & User Experience
+- **Automatic display scaling** - VMs resize instantly when you change the window size
+- **Native clipboard sharing** - Copy/paste between host and guest without configuration
+- **macOS guest support** - Run macOS VMs with full Apple support (not possible with QEMU)
+- **Rosetta translation** - Run x86_64 binaries in ARM Linux VMs using Apple's Rosetta
+- **SPICE agent support** - Enhanced Linux integration for clipboard, display, and more
 
+### Reliability & Maintenance
+- **Apple-supported** - Official framework maintained by Apple
+- **Regular updates** - Improvements with each macOS release
+- **Security hardened** - Built-in sandboxing and entitlement system
+- **Simplified architecture** - No complex QEMU/KVM setup or kernel extensions
 
-- Important: The Virtualization framework can run Linux VMs on a Mac with Apple silicon, and on an Intel-based Mac. The Linux ISO image you download must support the CPU architecture of your Mac. For a Mac with Apple silicon, download a Linux ISO image for ARM, which is usually indicated by `aarch64` or `arm64` in the image filename. For an Intel-based Mac, download a Linux ISO image for Intel-compatible CPUs, which is usually indicated by `x86_64` or `amd64` in the image filename.
-
-- Note: If you need to run Intel Linux binaries in ARM Linux on a Mac with Apple silicon, the Virtualization framework supports this capability using the Rosetta translation environment. For more information, see [Running Intel Binaries in Linux VMs with Rosetta](https://developer.apple.com/documentation/virtualization/running_intel_binaries_in_linux_vms_with_rosetta).
-
+While QEMU is excellent for cross-platform compatibility and exotic architectures, the Virtualization framework is purpose-built for macOS and delivers the best experience when running Linux and macOS guests on Apple hardware.
 
 ## Features
 
-- **VM Library Management**: Browse all your VMs in a convenient table view
-- **Create New VMs**: Configure CPU, memory, disk size, OS type, and Rosetta support
-- **Import Existing VMs**: Import VM bundles from anywhere on your system
-- **Clone VMs**: Duplicate existing VMs with a new name
-- **Rename & Delete**: Organize your VM collection
-- **Multi-VM Support**: Manage multiple VMs (runs one at a time)
-- **Auto-Migration**: Automatically migrates old single-VM setup to the new library structure
+### VM Library Management
+- **Visual VM Library** - Browse all your VMs in a clean table view with key details
+- **Organization by OS Type** - VMs automatically organized into Linux and macOS directories
+- **Quick Actions** - Double-click to start, right-click for options
+- **Status Indicators** - See which VMs are running, stopped, or starting at a glance
+- **Auto-Migration** - Automatically migrates VMs from legacy locations on first launch
+
+### VM Creation & Configuration
+- **Multi-OS Support** - Create both Linux and macOS virtual machines
+- **Flexible Configuration**:
+  - Custom CPU core allocation
+  - Configurable memory (RAM) size
+  - Adjustable virtual disk size
+  - OS type selection (Linux/macOS)
+  - Rosetta support for running x86_64 binaries on ARM Linux
+
+### Linux VM Creation
+1. Click **New** in the VM Library
+2. Configure VM resources (CPU, memory, disk)
+3. Select **Linux** as OS type
+4. Enable **Install from ISO** checkbox
+5. Click **Select ISO** and choose your Linux distribution ISO
+6. The VM boots into the installer - complete installation as normal
+
+**Supported Linux Distributions**: Any distribution compatible with ARM64/aarch64 (Apple Silicon) or x86_64 (Intel). Popular choices include:
+- [Ubuntu](https://ubuntu.com/download/desktop) (ARM64 for Apple Silicon, AMD64 for Intel)
+- [Debian](https://www.debian.org/distrib/)
+- [Fedora](https://getfedora.org/en/workstation/download/)
+
+> **Note**: The Virtualization framework requires matching the Linux ISO architecture to your Mac's CPU. Download ARM64/aarch64 images for Apple Silicon Macs, or x86_64/amd64 images for Intel Macs.
+
+### macOS VM Creation
+1. Click **New** in the VM Library
+2. Configure VM resources (CPU, memory, disk)
+3. Select **macOS** as OS type
+4. Click **Create**
+5. SecVF automatically:
+   - Checks for the latest macOS restore image (IPSW)
+   - Uses cached IPSW if version matches (no re-download)
+   - Downloads only if missing or outdated
+   - Prepares the VM and starts installation
+
+> **Smart IPSW Management**: When creating additional macOS VMs, SecVF checks if your cached IPSW matches Apple's latest version. If it matches, the cached version is reused instantly. If outdated, the old IPSW is removed and the latest version is downloaded automatically.
+
+### VM Management Operations
+
+#### Starting VMs
+- **Double-click** any VM in the library to start it
+- Or select a VM and click the **Start** button
+- VM window opens with full graphics, keyboard, and mouse support
+- Automatic display scaling when resizing the window
+
+#### Cloning VMs
+- Select a VM and click **Clone**
+- Enter a new name for the cloned VM
+- Creates a complete copy with a new machine identifier
+- Perfect for creating multiple test environments
+
+#### Importing VMs
+- Click **Import** to add existing VM bundles
+- Select a `.bundle` directory from anywhere on your system
+- Automatically detects VM configuration and adds to library
+- Useful for sharing VMs or restoring from backup
+
+#### Renaming VMs
+- Select a VM and click **Rename**
+- Enter a new name
+- Bundle directory and all references updated automatically
+
+#### Deleting VMs
+- Select a VM and click **Delete**
+- Confirmation prompt (deletion is permanent)
+- Removes VM bundle and all associated files
 
 ## Getting Started
 
-- Note: The default deployment target is macOS 14. If you need to build for a different version of macOS, change the deployment target as appropriate.
+### Requirements
+- macOS 14.0 or later
+- Xcode (for building from source)
+- Apple Developer account (for code signing)
 
-1. Launch Xcode and open `SecVF.xcodeproj`.
+### Building & Running
 
-2. Navigate to the Signing & Capabilities panel and select your team ID.
-
-3. Build and run the application.
+1. Clone the repository and open `SecVF.xcodeproj` in Xcode
+2. Navigate to **Signing & Capabilities** and select your team ID
+3. Build and run the application (⌘R)
 
 ### First Launch
 
-When you launch SecVF, you'll see the **Virtual Machine Library** window displaying all your VMs.
+When you launch SecVF for the first time, you'll see the **Virtual Machine Library** window.
 
-**If you have an old VM**: If you previously used this app and have a `GUI Linux VM.bundle` in your home directory, or VMs in `~/VirtualMachines/`, they will be automatically migrated to the new library structure at `~/.avf/Linux/` or `~/.avf/MacOS/`.
+**Migration**: If you have VMs from previous versions in `~/GUI Linux VM.bundle/` or `~/VirtualMachines/`, they will be automatically migrated to the new organized structure at `~/.avf/Linux/` or `~/.avf/MacOS/`.
 
-### Creating a New VM
+## VM Storage Structure
 
-1. Click the **New** button in the VM Library window
-2. Configure your VM:
-   - **Name**: Give your VM a descriptive name
-   - **OS Type**: Select Linux or macOS from the dropdown
-   - **CPU Cores**: Number of CPU cores to allocate (default: 2)
-   - **Memory (GB)**: Amount of RAM to allocate (default: 4 GB)
-   - **Disk (GB)**: Virtual disk size (default: 64 GB)
-   - **Enable Rosetta**: Check to enable x86_64 emulation on ARM Macs (for running Intel binaries in ARM Linux)
-   - **Install from ISO**: Check to install from an ISO image
-3. Click **Select ISO** to choose your installation ISO file
-4. The VM will boot into the installer. Follow the OS installation instructions.
-5. When installation completes, the VM is ready to use.
-
-### VM Storage
-
-VMs are organized by OS type in `~/.avf/` with each VM in its own bundle:
+VMs are organized by OS type in a hidden `.avf` directory in your home folder:
 
 ```
 ~/.avf/
   ├── Linux/
   │   └── Ubuntu.bundle/
-  │       ├── Disk.img           # Main disk image
+  │       ├── Disk.img           # Virtual disk image
   │       ├── NVRAM              # EFI variable store
-  │       ├── MachineIdentifier  # VZGenericMachineIdentifier data
-  │       └── metadata.json      # VM configuration metadata
+  │       ├── MachineIdentifier  # Unique VM identifier
+  │       └── metadata.json      # VM configuration
   └── MacOS/
       └── macOS Sonoma.bundle/
           ├── Disk.img
           ├── NVRAM
           ├── MachineIdentifier
           ├── metadata.json
-          └── UniversalMac_15.0_24A335_Restore.ipsw  # macOS restore image (downloaded)
+          └── UniversalMac_15.0_24A335_Restore.ipsw  # macOS installer
 ```
 
-### Managing VMs
+Each VM is self-contained in its own `.bundle` directory with all necessary files.
 
-- **Start a VM**: Select a VM from the library and click **Start** (or double-click the VM)
-- **Import a VM**: Click **Import** and select an existing VM bundle
-- **Clone a VM**: Select a VM and click **Clone** to create a duplicate
-- **Rename a VM**: Select a VM and click **Rename**
-- **Delete a VM**: Select a VM and click **Delete** (this cannot be undone)
+## Advanced Features
 
+### Rosetta Support (Apple Silicon Only)
 
-## Install GUI Linux from an ISO image
+SecVF supports Apple's Rosetta translation environment for running x86_64 (Intel) binaries inside ARM Linux VMs:
 
-The sample app configures a `VZDiskImageStorageDeviceAttachment` object with the downloaded ISO image attached, and creates a `VZUSBMassStorageDeviceConfiguration` with it to emulate a USB thumb drive that's plugged in to the VM.
+1. When creating a Linux VM on Apple Silicon, check **Enable Rosetta**
+2. After installing Linux, install `rosetta` support in the guest
+3. Run x86_64 Linux binaries transparently on ARM Linux
 
-``` swift
-private func createUSBMassStorageDeviceConfiguration() -> VZUSBMassStorageDeviceConfiguration {
-    guard let intallerDiskAttachment = try? VZDiskImageStorageDeviceAttachment(url: installerISOPath!, readOnly: true) else {
-        fatalError("Failed to create installer's disk attachment.")
-    }
+See Apple's documentation: [Running Intel Binaries in Linux VMs with Rosetta](https://developer.apple.com/documentation/virtualization/running_intel_binaries_in_linux_vms_with_rosetta)
 
-    return VZUSBMassStorageDeviceConfiguration(attachment: intallerDiskAttachment)
-}
-```
+### Copy & Paste Support
 
+SecVF includes SPICE agent support for seamless clipboard integration between macOS host and Linux guests.
 
-## Set up the VM
+**Setup for Linux VMs**:
+1. Install the SPICE agent in your Linux guest:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt install spice-vdagent
 
-The sample app uses a [`VZVirtualMachineConfiguration`][class_VZVirtualMachineConfiguration] object to configure the basic characteristics of the VM, such as the CPU count, memory size, various device configurations, and a `VZEFIBootloader` to load the Linux operating system into the VM.
+   # Fedora
+   sudo dnf install spice-vdagent
+   ```
+2. Copy/paste text and images between macOS and the Linux VM
 
-``` swift
-let virtualMachineConfiguration = VZVirtualMachineConfiguration()
+### Network Configuration
 
-virtualMachineConfiguration.cpuCount = computeCPUCount()
-virtualMachineConfiguration.memorySize = computeMemorySize()
+All VMs use NAT networking by default, providing:
+- Automatic internet access through the host's network connection
+- Isolated network environment for security
+- No additional network configuration required
 
-let platform = VZGenericPlatformConfiguration()
-let bootloader = VZEFIBootLoader()
-let disksArray = NSMutableArray()
+## Security & Malware Analysis
 
-if needsInstall {
-    // This is a fresh install: Create a new machine identifier and EFI variable store,
-    // and configure a USB mass storage device to boot the ISO image.
-    platform.machineIdentifier = createAndSaveMachineIdentifier()
-    bootloader.variableStore = createEFIVariableStore()
-    disksArray.add(createUSBMassStorageDeviceConfiguration())
-} else {
-    // The VM is booting from a disk image that already has the OS installed.
-    // Retrieve the machine identifier and EFI variable store that were saved to
-    // disk during installation.
-    platform.machineIdentifier = retrieveMachineIdentifier()
-    bootloader.variableStore = retrieveEFIVariableStore()
-}
+SecVF is specifically designed for **security research and malware analysis** in isolated sandbox environments. The application includes comprehensive security monitoring and containment features to protect your host system while analyzing potentially malicious code.
 
-virtualMachineConfiguration.platform = platform
-virtualMachineConfiguration.bootLoader = bootloader
+### Key Security Features
 
-disksArray.add(createBlockDeviceConfiguration())
-guard let disks = disksArray as? [VZStorageDeviceConfiguration] else {
-    fatalError("Invalid disksArray.")
-}
-virtualMachineConfiguration.storageDevices = disks
+- **Real-time Security Monitoring** - Active monitoring of VM filesystem, resource usage, and state changes
+- **Containment Enforcement** - Hardware-enforced VM isolation via Apple's hypervisor
+- **Breakout Detection** - Automated detection of potential escape attempts
+- **Security Event Logging** - Detailed logs of all VM activity in `~/.avf/logs/`
+- **Download Validation** - Multi-layer security for macOS IPSW downloads
+- **Resource Monitoring** - Detection of CPU/memory exhaustion attacks
 
-virtualMachineConfiguration.networkDevices = [createNetworkDeviceConfiguration()]
-virtualMachineConfiguration.graphicsDevices = [createGraphicsDeviceConfiguration()]
-virtualMachineConfiguration.audioDevices = [createInputAudioDeviceConfiguration(), createOutputAudioDeviceConfiguration()]
+### Security Recommendations
 
-virtualMachineConfiguration.keyboards = [VZUSBKeyboardConfiguration()]
-virtualMachineConfiguration.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
-virtualMachineConfiguration.consoleDevices = [createSpiceAgentConsoleDeviceConfiguration()]
+When analyzing malware or untrusted software:
+- ✅ Use dedicated VMs for each analysis session
+- ✅ Monitor security logs: `tail -f ~/.avf/logs/security-$(date +%Y-%m-%d).log`
+- ✅ Review console output for security warnings on VM start
+- ⚠️ Be aware: VMs have internet access - malware can communicate externally
+- ⚠️ Delete infected VMs after analysis - do not clone or export
 
-try! virtualMachineConfiguration.validate()
-virtualMachine = VZVirtualMachine(configuration: virtualMachineConfiguration)
-```
+### Complete Security Documentation
 
-## Enable copy-and-paste support between the host and the guest
+**For detailed security information, threat model, best practices, and incident response procedures, see:**
 
-In macOS 13 and later, the Virtualization framework supports copy-and-paste of text and images between the Mac host and Linux guests through the SPICE agent clipboard-sharing capability. The example below shows the steps for configuring `VZVirtioConsoleDeviceConfiguration` and `VZSpiceAgentPortAttachment` to enable this capability:
-``` swift
-private func createSpiceAgentConsoleDeviceConfiguration() -> VZVirtioConsoleDeviceConfiguration {
-    let consoleDevice = VZVirtioConsoleDeviceConfiguration()
+**[📋 SECURITY.md](SECURITY.md)** - Complete security guide covering:
+- Threat model and attack scenarios
+- VM isolation architecture
+- Monitoring and detection capabilities
+- Best practices for malware analysis
+- Incident response procedures
+- Known limitations and hardening recommendations
 
-    let spiceAgentPort = VZVirtioConsolePortConfiguration()
-    spiceAgentPort.name = VZSpiceAgentPortAttachment.spiceAgentPortName
-    spiceAgentPort.attachment = VZSpiceAgentPortAttachment()
-    consoleDevice.ports[0] = spiceAgentPort
+## Troubleshooting
 
-    return consoleDevice
-}
-```
+### VM Won't Start
+- Verify the VM bundle directory exists in `~/.avf/Linux/` or `~/.avf/MacOS/`
+- Check that disk image, NVRAM, and MachineIdentifier files are present
+- Review console logs for specific error messages
 
-- Important: To use the copy-and-paste capability in Linux, the user needs to install the spice-vdagent package, which is available through most Linux package managers. Developers need to communicate this requirement to users of their apps.
+### Linux VM Installation Issues
+- Ensure the ISO matches your Mac's architecture (ARM64 for Apple Silicon, x86_64 for Intel)
+- Verify the ISO file is not corrupted (check SHA256 hash against official source)
+- Allocate sufficient memory (minimum 2GB, recommended 4GB+)
 
+### macOS VM Download Fails
+- Check internet connection
+- Verify you have sufficient disk space (macOS IPSWs are 12-15GB)
+- Ensure firewall isn't blocking Apple's CDN servers
 
-## Start the VM
+## License
 
-After building the configuration data for the VM, the sample app uses the `VZVirtualMachine` object to start the execution of the Linux guest operating system.
+See LICENSE.txt for details.
 
-Before calling the VM's [`start`][method_start] method, the sample app configures a delegate object to receive messages about the state of the virtual machine. When the Linux operating system shuts down, the VM calls the delegate's [`guestDidStop`][method_guestDidStop] method. In response, the delegate method prints a message and exits the sample.
+## Credits
 
-``` swift
-self.virtualMachineView.virtualMachine = self.virtualMachine
-
-if #available(macOS 14.0, *) {
-    // Configure the app to automatically respond changes in the display size.
-    self.virtualMachineView.automaticallyReconfiguresDisplay = true
-}
-
-self.virtualMachine.delegate = self
-self.virtualMachine.start(completionHandler: { (result) in
-    switch result {
-    case let .failure(error):
-        fatalError("Virtual machine failed to start with error: \(error)")
-
-    default:
-        print("Virtual machine successfully started.")
-    }
-})
-```
-
-The app sets the display to automatically resize when the window size changes.
+Built using Apple's [Virtualization framework](https://developer.apple.com/documentation/virtualization).

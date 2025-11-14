@@ -400,15 +400,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
             }
 
             self.virtualMachine.delegate = self
+
+            // SECURITY: Start security monitoring for this VM
+            VMSecurityMonitor.shared.startMonitoring(vm: self.vmConfig, virtualMachine: self.virtualMachine)
+
             self.virtualMachine.start(completionHandler: { (result) in
                 switch result {
                 case let .failure(error):
                     VMManager.shared.updateVMStatus(self.vmConfig, status: .stopped)
+                    // Stop security monitoring on failure
+                    VMSecurityMonitor.shared.stopMonitoring(vmID: self.vmConfig.id)
                     fatalError("Virtual machine failed to start with error: \(error)")
 
                 default:
                     print("Virtual machine successfully started.")
                     VMManager.shared.updateVMStatus(self.vmConfig, status: .running)
+
+                    // Log security recommendations
+                    let recommendations = VMSecurityMonitor.shared.getSecurityRecommendations(for: self.vmConfig)
+                    print("\n⚠️ SECURITY RECOMMENDATIONS:")
+                    for rec in recommendations {
+                        print("  \(rec)")
+                    }
+                    print("")
                 }
             })
         }
@@ -472,6 +486,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
 
     func guestDidStop(_ virtualMachine: VZVirtualMachine) {
         print("Guest did stop virtual machine.")
+
+        // SECURITY: Stop security monitoring
+        VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
 
         // Update status
         VMManager.shared.updateVMStatus(vmConfig, status: .stopped)

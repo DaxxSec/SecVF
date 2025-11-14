@@ -317,16 +317,29 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Create progress alert
         let progressAlert = NSAlert()
         progressAlert.messageText = "Downloading macOS"
-        progressAlert.informativeText = "Fetching restore image..."
+        progressAlert.informativeText = "Initializing..."
         progressAlert.alertStyle = .informational
         progressAlert.addButton(withTitle: "Cancel")
 
-        let progressIndicator = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 300, height: 20))
+        // Create a container view for progress bar and percentage label
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 45))
+
+        let progressIndicator = NSProgressIndicator(frame: NSRect(x: 0, y: 20, width: 300, height: 20))
         progressIndicator.style = .bar
         progressIndicator.isIndeterminate = false
         progressIndicator.minValue = 0
-        progressIndicator.maxValue = 1.0
-        progressAlert.accessoryView = progressIndicator
+        progressIndicator.maxValue = 100.0
+        containerView.addSubview(progressIndicator)
+
+        // Add percentage label below progress bar
+        let percentageLabel = NSTextField(labelWithString: "0%")
+        percentageLabel.frame = NSRect(x: 0, y: 0, width: 300, height: 20)
+        percentageLabel.alignment = .center
+        percentageLabel.font = NSFont.systemFont(ofSize: 11)
+        percentageLabel.textColor = .secondaryLabelColor
+        containerView.addSubview(percentageLabel)
+
+        progressAlert.accessoryView = containerView
 
         // Show alert in background
         DispatchQueue.main.async {
@@ -343,7 +356,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         installer.progressHandler = { [weak self] progress, message in
             DispatchQueue.main.async {
                 progressAlert.informativeText = message
-                progressIndicator.doubleValue = progress
+                let percentage = progress * 100.0
+                progressIndicator.doubleValue = percentage
+                percentageLabel.stringValue = String(format: "%.1f%%", percentage)
             }
         }
 
