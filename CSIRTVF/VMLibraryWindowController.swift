@@ -31,6 +31,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Set window delegate to handle close button
         window?.delegate = self
 
+        // Apply dark theme and add sidebar
+        applyDarkTheme()
+        addSidebar()
+
         // Configure table view
         tableView.dataSource = self
         tableView.delegate = self
@@ -59,6 +63,232 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Reload data
         tableView.reloadData()
+    }
+
+    // MARK: - Dark Theme & Sidebar
+
+    private func applyDarkTheme() {
+        guard let window = window, let contentView = window.contentView else { return }
+
+        // Set window appearance to dark
+        window.appearance = NSAppearance(named: .darkAqua)
+
+        // Dark background for content view
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.15, alpha: 1.0).cgColor
+
+        // Style table view with dark theme
+        tableView.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.18, alpha: 1.0)
+        tableView.enclosingScrollView?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.18, alpha: 1.0)
+        tableView.gridColor = NSColor(white: 0.25, alpha: 1.0)
+    }
+
+    private func addSidebar() {
+        guard let window = window, let contentView = window.contentView else { return }
+
+        let sidebarWidth: CGFloat = 250
+
+        // Create sidebar view
+        let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: sidebarWidth, height: contentView.bounds.height))
+        sidebar.autoresizingMask = [.height]
+        sidebar.wantsLayer = true
+
+        // Gradient background for sidebar
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.frame = sidebar.bounds
+        gradientLayer.colors = [
+            NSColor(red: 0.08, green: 0.12, blue: 0.24, alpha: 1.0).cgColor,  // Dark navy
+            NSColor(red: 0.12, green: 0.16, blue: 0.32, alpha: 1.0).cgColor   // Lighter navy
+        ]
+        gradientLayer.startPoint = CGPoint(x: 0, y: 1)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0)
+        gradientLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        sidebar.layer?.addSublayer(gradientLayer)
+
+        // Logo
+        let logoView = NSImageView(frame: NSRect(x: 40, y: contentView.bounds.height - 180, width: 170, height: 120))
+        logoView.imageScaling = .scaleProportionallyUpOrDown
+        logoView.image = createStylizedLogo()
+        logoView.autoresizingMask = [.minYMargin]
+        sidebar.addSubview(logoView)
+
+        // Title
+        let titleLabel = NSTextField(labelWithString: "SecVF")
+        titleLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 220, width: sidebarWidth - 40, height: 35)
+        titleLabel.alignment = .center
+        titleLabel.font = NSFont.systemFont(ofSize: 28, weight: .heavy)
+        titleLabel.textColor = NSColor(red: 0.4, green: 0.6, blue: 1.0, alpha: 1.0)  // Electric blue
+        titleLabel.isBordered = false
+        titleLabel.isEditable = false
+        titleLabel.drawsBackground = false
+        titleLabel.autoresizingMask = [.minYMargin]
+        sidebar.addSubview(titleLabel)
+
+        // Subtitle
+        let subtitleLabel = NSTextField(labelWithString: "VM Sandbox Environment")
+        subtitleLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 245, width: sidebarWidth - 40, height: 20)
+        subtitleLabel.alignment = .center
+        subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        subtitleLabel.textColor = NSColor(red: 0.6, green: 0.7, blue: 0.9, alpha: 1.0)
+        subtitleLabel.isBordered = false
+        subtitleLabel.isEditable = false
+        subtitleLabel.drawsBackground = false
+        subtitleLabel.autoresizingMask = [.minYMargin]
+        sidebar.addSubview(subtitleLabel)
+
+        // Separator line
+        let separator1 = createSeparator(y: contentView.bounds.height - 270, width: sidebarWidth)
+        separator1.autoresizingMask = [.minYMargin, .width]
+        sidebar.addSubview(separator1)
+
+        // Info section
+        let infoY = contentView.bounds.height - 310
+        addInfoLabel(to: sidebar, text: "Developed by", y: infoY, bold: false)
+        addInfoLabel(to: sidebar, text: "ItzDaxxy", y: infoY - 25, bold: true)
+        addInfoLabel(to: sidebar, text: "", y: infoY - 55, bold: false, color: NSColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 1.0))
+        addInfoLabel(to: sidebar, text: "itzdaxxy@users.noreply.github.com", y: infoY - 80, bold: false, color: NSColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 1.0))
+
+        // Separator line
+        let separator2 = createSeparator(y: 120, width: sidebarWidth)
+        separator2.autoresizingMask = [.maxYMargin, .width]
+        sidebar.addSubview(separator2)
+
+        // Stats/Info at bottom
+        let statsLabel = NSTextField(labelWithString: "🛡️ Malware Analysis\n🔒 Isolated Sandbox\n🌐 Virtual Networking")
+        statsLabel.frame = NSRect(x: 20, y: 20, width: sidebarWidth - 40, height: 80)
+        statsLabel.alignment = .left
+        statsLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        statsLabel.textColor = NSColor(white: 0.7, alpha: 1.0)
+        statsLabel.isBordered = false
+        statsLabel.isEditable = false
+        statsLabel.drawsBackground = false
+        statsLabel.autoresizingMask = [.maxYMargin]
+        sidebar.addSubview(statsLabel)
+
+        // Add sidebar to window
+        contentView.addSubview(sidebar, positioned: .above, relativeTo: nil)
+
+        // Adjust existing content to make room for sidebar
+        adjustContentForSidebar(sidebarWidth: sidebarWidth)
+    }
+
+    private func createStylizedLogo() -> NSImage {
+        let size = CGSize(width: 170, height: 120)
+        let image = NSImage(size: size)
+
+        image.lockFocus()
+
+        // Shield outline with glow
+        let shieldPath = NSBezierPath()
+        shieldPath.move(to: CGPoint(x: size.width * 0.5, y: size.height * 0.95))
+        shieldPath.curve(
+            to: CGPoint(x: size.width * 0.15, y: size.height * 0.65),
+            controlPoint1: CGPoint(x: size.width * 0.25, y: size.height * 0.88),
+            controlPoint2: CGPoint(x: size.width * 0.15, y: size.height * 0.75)
+        )
+        shieldPath.line(to: CGPoint(x: size.width * 0.15, y: size.height * 0.35))
+        shieldPath.curve(
+            to: CGPoint(x: size.width * 0.5, y: size.height * 0.05),
+            controlPoint1: CGPoint(x: size.width * 0.15, y: size.height * 0.2),
+            controlPoint2: CGPoint(x: size.width * 0.3, y: size.height * 0.05)
+        )
+        shieldPath.curve(
+            to: CGPoint(x: size.width * 0.85, y: size.height * 0.35),
+            controlPoint1: CGPoint(x: size.width * 0.7, y: size.height * 0.05),
+            controlPoint2: CGPoint(x: size.width * 0.85, y: size.height * 0.2)
+        )
+        shieldPath.line(to: CGPoint(x: size.width * 0.85, y: size.height * 0.65))
+        shieldPath.curve(
+            to: CGPoint(x: size.width * 0.5, y: size.height * 0.95),
+            controlPoint1: CGPoint(x: size.width * 0.85, y: size.height * 0.75),
+            controlPoint2: CGPoint(x: size.width * 0.75, y: size.height * 0.88)
+        )
+        shieldPath.close()
+
+        // Gradient fill
+        let gradient = NSGradient(colors: [
+            NSColor(red: 0.25, green: 0.45, blue: 0.95, alpha: 1.0),
+            NSColor(red: 0.35, green: 0.55, blue: 1.0, alpha: 1.0),
+            NSColor(red: 0.25, green: 0.45, blue: 0.95, alpha: 1.0)
+        ])
+        gradient?.draw(in: shieldPath, angle: -45)
+
+        // Eye symbol (security/monitoring)
+        let eyeOuter = NSBezierPath(ovalIn: NSRect(
+            x: size.width * 0.32,
+            y: size.height * 0.38,
+            width: size.width * 0.36,
+            height: size.height * 0.24
+        ))
+        NSColor.black.withAlphaComponent(0.4).setFill()
+        eyeOuter.fill()
+
+        // Pupil
+        let pupil = NSBezierPath(ovalIn: NSRect(
+            x: size.width * 0.43,
+            y: size.height * 0.43,
+            width: size.width * 0.14,
+            height: size.height * 0.14
+        ))
+        NSColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1.0).setFill()
+        pupil.fill()
+
+        // Highlight
+        let highlight = NSBezierPath(ovalIn: NSRect(
+            x: size.width * 0.47,
+            y: size.height * 0.49,
+            width: size.width * 0.06,
+            height: size.height * 0.06
+        ))
+        NSColor.white.setFill()
+        highlight.fill()
+
+        image.unlockFocus()
+        return image
+    }
+
+    private func createSeparator(y: CGFloat, width: CGFloat) -> NSBox {
+        let separator = NSBox(frame: NSRect(x: 20, y: y, width: width - 40, height: 1))
+        separator.boxType = .separator
+        separator.fillColor = NSColor(white: 0.3, alpha: 0.5)
+        return separator
+    }
+
+    private func addInfoLabel(to view: NSView, text: String, y: CGFloat, bold: Bool, color: NSColor = NSColor(white: 0.8, alpha: 1.0)) {
+        let label = NSTextField(labelWithString: text)
+        label.frame = NSRect(x: 20, y: y, width: 210, height: 20)
+        label.alignment = .center
+        label.font = bold ? NSFont.systemFont(ofSize: 13, weight: .bold) : NSFont.systemFont(ofSize: 11, weight: .regular)
+        label.textColor = color
+        label.isBordered = false
+        label.isEditable = false
+        label.drawsBackground = false
+        label.autoresizingMask = [.minYMargin]
+        view.addSubview(label)
+    }
+
+    private func adjustContentForSidebar(sidebarWidth: CGFloat) {
+        guard let window = window, let contentView = window.contentView else { return }
+
+        // Adjust all existing content to move right by sidebar width
+        for subview in contentView.subviews {
+            if subview.frame.minX < sidebarWidth {
+                // Skip the sidebar itself
+                continue
+            }
+            var frame = subview.frame
+            frame.origin.x += sidebarWidth
+            if let scrollView = subview as? NSScrollView {
+                frame.size.width -= sidebarWidth
+            }
+            subview.frame = frame
+        }
+
+        // Increase window width to accommodate sidebar
+        var windowFrame = window.frame
+        windowFrame.size.width += sidebarWidth
+        windowFrame.origin.x -= sidebarWidth / 2  // Keep window centered
+        window.setFrame(windowFrame, display: true, animate: false)
     }
 
     // MARK: - NSWindowDelegate

@@ -474,8 +474,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
         // Setup Monitoring menu
         setupMonitoringMenu()
 
-        // Show the VM library window
-        showLibraryWindow()
+        // Show splash screen
+        showSplashScreen()
+
+        // Show the VM library window after splash
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            self.showLibraryWindow()
+        }
+    }
+
+    private func showSplashScreen() {
+        let splash = SplashScreenWindow()
+        splash.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Monitoring Menu Setup
