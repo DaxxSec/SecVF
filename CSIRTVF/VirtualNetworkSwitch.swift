@@ -107,7 +107,7 @@ class VirtualNetworkSwitch {
     // MARK: - Port Management
 
     /// Connect a VM to the virtual switch
-    func connectVM(vmId: UUID, vmName: String) -> (FileHandle, FileHandle)? {
+    func connectVM(vmId: UUID, vmName: String) -> FileHandle? {
         return switchQueue.sync {
             guard isRunning else {
                 log("Cannot connect VM - switch not running", type: .error)
@@ -122,17 +122,16 @@ class VirtualNetworkSwitch {
 
             // Create socket pair for bidirectional communication
             var fds: [Int32] = [0, 0]
-            guard socketpair(AF_UNIX, SOCK_STREAM, 0, &fds) == 0 else {
+            guard socketpair(AF_UNIX, SOCK_DGRAM, 0, &fds) == 0 else {
                 log("Failed to create socket pair for VM: \(vmName)", type: .error)
                 return nil
             }
 
-            let readFd = fds[0]
-            let writeFd = fds[1]
+            let switchFd = fds[0]  // Switch side
+            let vmFd = fds[1]      // VM side
 
-            // Create file handles
-            let readHandle = FileHandle(fileDescriptor: readFd, closeOnDealloc: true)
-            let writeHandle = FileHandle(fileDescriptor: writeFd, closeOnDealloc: true)
+            // Switch keeps one end for packet forwarding
+            let switchHandle = FileHandle(fileDescriptor: switchFd, closeOnDealloc: true)
 
             // Create port entry
             let port = VirtualSwitchPort(vmId: vmId, vmName: vmName, socketPath: socketPath)
@@ -140,14 +139,12 @@ class VirtualNetworkSwitch {
             ports[vmId] = port
 
             // Start receiving packets from this VM
-            startReceiving(from: readHandle, vmId: vmId)
+            startReceiving(from: switchHandle, vmId: vmId)
 
             log("VM connected to virtual switch: \(vmName) [Port: \(ports.count)]")
 
-            // Return handles - VM will use these with VZFileHandleNetworkDeviceAttachment
-            // Note: We return the opposite ends - VM reads from writeFd, writes to readFd
-            return (FileHandle(fileDescriptor: writeFd, closeOnDealloc: false),
-                    FileHandle(fileDescriptor: readFd, closeOnDealloc: false))
+            // Return the VM's end of the socketpair (connected datagram socket)
+            return FileHandle(fileDescriptor: vmFd, closeOnDealloc: false)
         }
     }
 

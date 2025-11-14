@@ -26,8 +26,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     override func windowDidLoad() {
         super.windowDidLoad()
 
-        print("DEBUG: windowDidLoad - VM count: \(vmManager.virtualMachines.count)")
-
         // Set window delegate to handle close button
         window?.delegate = self
 
@@ -40,6 +38,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         tableView.delegate = self
         tableView.target = self
         tableView.doubleAction = #selector(startVM(_:))
+
+        // Load VMs asynchronously to avoid blocking main thread
+        vmManager.initializeAsync { [weak self] in
+            guard let self = self else { return }
+            print("DEBUG: VM initialization complete - VM count: \(self.vmManager.virtualMachines.count)")
+            self.tableView.reloadData()
+        }
 
         // Force the table to use view-based mode
         tableView.rowSizeStyle = .default
@@ -623,8 +628,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     private func refreshTable() {
-        vmManager.loadVirtualMachines()
-        DispatchQueue.main.async {
+        // Reload VMs from disk asynchronously
+        vmManager.initializeAsync { [weak self] in
+            guard let self = self else { return }
             print("DEBUG: Refreshing table with \(self.vmManager.virtualMachines.count) VMs")
             for (index, vm) in self.vmManager.virtualMachines.enumerated() {
                 print("  - [\(index)] \(vm.name)")
@@ -689,6 +695,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             weak var routerLabel: NSTextField?
             weak var routerPopup: NSPopUpButton?
             weak var networkPopup: NSPopUpButton?
+            weak var osPopup: NSPopUpButton?
             weak var vmManager: VMManager?
 
             @objc func osTypeChanged(_ sender: NSPopUpButton) {
@@ -705,7 +712,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             }
 
             private func updateNetworkUI() {
-                guard let osPopup = networkPopup?.superview?.subviews.compactMap({ $0 as? NSPopUpButton }).first(where: { $0.itemTitles.contains("macOS") }) else { return }
+                guard let osPopup = osPopup else { return }
 
                 let isMacOS = osPopup.titleOfSelectedItem == "macOS"
                 let isVirtual = networkPopup?.indexOfSelectedItem == 1
@@ -741,7 +748,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 routerPopup.removeAllItems()
 
                 // Get all Linux VMs that could act as routers
-                let linuxVMs = vmManager.vms.filter { $0.osType.lowercased().contains("linux") }
+                let linuxVMs = vmManager.virtualMachines.filter { $0.osType.lowercased().contains("linux") }
 
                 if linuxVMs.isEmpty {
                     routerPopup.addItem(withTitle: "No Linux VMs available")
@@ -756,10 +763,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
         let configDelegate = VMConfigDelegate()
         configDelegate.vmManager = vmManager
-        osPopup.target = configDelegate
-        osPopup.action = #selector(VMConfigDelegate.osTypeChanged(_:))
-        networkPopup.target = configDelegate
-        networkPopup.action = #selector(VMConfigDelegate.networkModeChanged(_:))
 
         // CPU count
         let cpuLabel = NSTextField(labelWithString: "CPU Cores:")
@@ -835,6 +838,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         configDelegate.routerLabel = routerLabel
         configDelegate.routerPopup = routerPopup
         configDelegate.networkPopup = networkPopup
+        configDelegate.osPopup = osPopup
+
+        // Set up delegate actions
+        osPopup.target = configDelegate
+        osPopup.action = #selector(VMConfigDelegate.osTypeChanged(_:))
+        networkPopup.target = configDelegate
+        networkPopup.action = #selector(VMConfigDelegate.networkModeChanged(_:))
 
         alert.accessoryView = view
 
@@ -870,7 +880,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
                     if osType.lowercased().contains("mac") {
                         // macOS VM - find router VM by name
-                        if let routerVM = vmManager.vms.first(where: { $0.name == selectedRouterName }) {
+                        if let routerVM = vmManager.virtualMachines.first(where: { $0.name == selectedRouterName }) {
                             newVM.networkConfig.routerVMId = routerVM.id
                             print("[Network] macOS VM \(name) will route through \(routerVM.name)")
                         }

@@ -286,15 +286,6 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
         }
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
-                   didReceive response: URLResponse,
-                   completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-        print("Connected to server, starting download...")
-        let host = response.url?.host ?? "Apple CDN"
-        progressHandler?(0, "Connected to \(host), receiving data...")
-        completionHandler(.allow)
-    }
-
     // SECURITY: Validate SSL certificates for Apple CDN connections
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
