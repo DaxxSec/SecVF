@@ -24,6 +24,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
 
     private var libraryWindowController: VMLibraryWindowController?
 
+    // Log viewer windows (retained to prevent deallocation)
+    private var securityLogViewer: LogViewerWindowController?
+    private var networkLogViewer: LogViewerWindowController?
+
     override init() {
         super.init()
 
@@ -467,8 +471,111 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
         // Hide the main VM window initially
         window.orderOut(nil)
 
+        // Setup Monitoring menu
+        setupMonitoringMenu()
+
         // Show the VM library window
         showLibraryWindow()
+    }
+
+    // MARK: - Monitoring Menu Setup
+
+    private func setupMonitoringMenu() {
+        guard let mainMenu = NSApp.mainMenu else { return }
+
+        // Create Monitoring menu
+        let monitoringMenu = NSMenu(title: "Monitoring")
+
+        // Security Logs menu item
+        let securityLogsItem = NSMenuItem(
+            title: "Security Logs",
+            action: #selector(showSecurityLogs),
+            keyEquivalent: "1"
+        )
+        securityLogsItem.keyEquivalentModifierMask = [.command, .shift]
+        securityLogsItem.target = self
+        monitoringMenu.addItem(securityLogsItem)
+
+        // Network Logs menu item
+        let networkLogsItem = NSMenuItem(
+            title: "Network Logs",
+            action: #selector(showNetworkLogs),
+            keyEquivalent: "2"
+        )
+        networkLogsItem.keyEquivalentModifierMask = [.command, .shift]
+        networkLogsItem.target = self
+        monitoringMenu.addItem(networkLogsItem)
+
+        monitoringMenu.addItem(NSMenuItem.separator())
+
+        // Virtual Switch Statistics
+        let switchStatsItem = NSMenuItem(
+            title: "Virtual Switch Statistics",
+            action: #selector(showSwitchStatistics),
+            keyEquivalent: "3"
+        )
+        switchStatsItem.keyEquivalentModifierMask = [.command, .shift]
+        switchStatsItem.target = self
+        monitoringMenu.addItem(switchStatsItem)
+
+        // Create top-level menu item
+        let monitoringMenuItem = NSMenuItem(title: "Monitoring", action: nil, keyEquivalent: "")
+        monitoringMenuItem.submenu = monitoringMenu
+
+        // Insert after the application menu (index 0) and before Window menu
+        // Typical order: App, File, Edit, View, Window, Help
+        // We'll insert at index 1 (after App menu)
+        mainMenu.insertItem(monitoringMenuItem, at: 1)
+    }
+
+    @objc private func showSecurityLogs() {
+        // Create new viewer if nil or window was closed
+        if securityLogViewer == nil || securityLogViewer?.window == nil {
+            securityLogViewer = LogViewerWindowController(logType: .security)
+        }
+        securityLogViewer?.showWindow(nil)
+        securityLogViewer?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func showNetworkLogs() {
+        // Create new viewer if nil or window was closed
+        if networkLogViewer == nil || networkLogViewer?.window == nil {
+            networkLogViewer = LogViewerWindowController(logType: .network)
+        }
+        networkLogViewer?.showWindow(nil)
+        networkLogViewer?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func showSwitchStatistics() {
+        // Print switch statistics to console and show in alert
+        VirtualNetworkSwitch.shared.printStatistics()
+
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+
+        var message = "Virtual Network Switch Status\n\n"
+        message += "Running: \(stats["running"] as? Bool ?? false ? "Yes" : "No")\n"
+        message += "Connected Ports: \(stats["connectedPorts"] ?? 0)\n"
+        message += "Learned MACs: \(stats["learnedMACs"] ?? 0)\n"
+        message += "Packets Forwarded: \(stats["packetsForwarded"] ?? 0)\n"
+        message += "Packets Broadcast: \(stats["packetsBroadcast"] ?? 0)\n"
+
+        if let portStats = stats["ports"] as? [[String: Any]], !portStats.isEmpty {
+            message += "\nConnected VMs:\n"
+            for port in portStats {
+                message += "  • \(port["vmName"] as? String ?? "unknown")\n"
+                message += "    MAC: \(port["macAddress"] as? String ?? "unknown")\n"
+                message += "    RX: \(port["packetsRx"] ?? 0) packets\n"
+                message += "    TX: \(port["packetsTx"] ?? 0) packets\n"
+            }
+        } else {
+            message += "\nNo VMs currently connected to virtual switch."
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Virtual Switch Statistics"
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.runModal()
     }
 
     private func showLibraryWindow() {
