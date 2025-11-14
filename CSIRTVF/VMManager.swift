@@ -21,6 +21,9 @@ class VMManager {
     // In-memory cache of VMs
     private(set) var virtualMachines: [VMConfiguration] = []
 
+    private var isInitialized = false
+    private let initQueue = DispatchQueue(label: "com.secvf.vmmanager.init", qos: .userInitiated)
+
     private init() {
         // New structure: ~/.avf/MacOS/ and ~/.avf/Linux/
         avfBasePath = NSHomeDirectory() + "/.avf/"
@@ -30,14 +33,48 @@ class VMManager {
         // Legacy path for migration
         legacyVMLibraryPath = NSHomeDirectory() + "/VirtualMachines/"
 
-        // Create library directories if they don't exist
-        createLibraryDirectoryIfNeeded()
+        // DO NOT perform blocking operations here!
+        // Initialization happens asynchronously via initializeAsync()
+    }
 
-        // Load VMs from disk
-        loadVirtualMachines()
+    /// Asynchronously initialize VMManager (create directories, load VMs, migrate)
+    /// - Parameter completion: Called on main thread when initialization is complete
+    func initializeAsync(completion: @escaping () -> Void) {
+        // Only initialize once
+        guard !isInitialized else {
+            DispatchQueue.main.async { completion() }
+            return
+        }
 
-        // Migrate old VMs if they exist
-        migrateOldVMIfNeeded()
+        initQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            // Create library directories if they don't exist (I/O on background thread is OK)
+            self.createLibraryDirectoryIfNeeded()
+
+            // Migrate old VMs if they exist (BEFORE loading so we pick up migrated VMs)
+            self.migrateOldVMIfNeeded()
+
+            // Load VMs from disk on background thread
+            var loadedVMs: [VMConfiguration] = []
+            self.loadVMsFromDirectory(self.macOSLibraryPath, into: &loadedVMs)
+            self.loadVMsFromDirectory(self.linuxLibraryPath, into: &loadedVMs)
+
+            // Sort by last used date
+            loadedVMs.sort { vm1, vm2 in
+                guard let date1 = vm1.lastUsedDate else { return false }
+                guard let date2 = vm2.lastUsedDate else { return true }
+                return date1 > date2
+            }
+
+            // Update virtualMachines array on MAIN THREAD to avoid race conditions
+            DispatchQueue.main.async {
+                self.virtualMachines = loadedVMs
+                self.isInitialized = true
+                print("Loaded \(self.virtualMachines.count) VMs from library")
+                completion()
+            }
+        }
     }
 
     // Get the appropriate library path for a given OS type
@@ -161,10 +198,8 @@ class VMManager {
             // Save metadata
             saveVMMetadata(vmConfig)
 
-            // Add to our list if not already present
-            if !virtualMachines.contains(where: { $0.id == vmConfig.id }) {
-                virtualMachines.append(vmConfig)
-            }
+            // Don't add to virtualMachines here - it will be loaded by loadVMsFromDirectory
+            // This avoids race conditions with the main thread
 
             print("Successfully migrated VM '\(name)' to: \(newBundlePath)")
         } catch {
@@ -173,25 +208,9 @@ class VMManager {
     }
 
     // MARK: - VM Loading
+    // Note: VM loading now happens via initializeAsync() to avoid blocking the main thread
 
-    func loadVirtualMachines() {
-        virtualMachines.removeAll()
-
-        // Load from both MacOS and Linux directories
-        loadVMsFromDirectory(macOSLibraryPath)
-        loadVMsFromDirectory(linuxLibraryPath)
-
-        // Sort by last used date (most recent first)
-        virtualMachines.sort { vm1, vm2 in
-            guard let date1 = vm1.lastUsedDate else { return false }
-            guard let date2 = vm2.lastUsedDate else { return true }
-            return date1 > date2
-        }
-
-        print("Loaded \(virtualMachines.count) VMs from library")
-    }
-
-    private func loadVMsFromDirectory(_ directoryPath: String) {
+    private func loadVMsFromDirectory(_ directoryPath: String, into vms: inout [VMConfiguration]) {
         guard let contents = try? FileManager.default.contentsOfDirectory(atPath: directoryPath) else {
             return
         }
@@ -200,7 +219,7 @@ class VMManager {
             if item.hasSuffix(".bundle") {
                 let bundlePath = directoryPath + item + "/"
                 if let vmConfig = loadVMMetadata(from: bundlePath) {
-                    virtualMachines.append(vmConfig)
+                    vms.append(vmConfig)
                 }
             }
         }

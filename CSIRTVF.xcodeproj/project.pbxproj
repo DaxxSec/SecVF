@@ -17,7 +17,25 @@
 		AA4444AA44444444AA444AA4 /* RosettaAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4444BB44444444BB444BB4 /* RosettaAvailability.swift */; };
 		AA5555AA55555555AA555AA5 /* VMLibraryWindow.xib in Resources */ = {isa = PBXBuildFile; fileRef = BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */; };
 		AA6666AA66666666AA666AA6 /* MacOSVMInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6666BB66666666BB666BB6 /* MacOSVMInstaller.swift */; };
+		AA7777AA77777777AA777AA7 /* VMSecurityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7777BB77777777BB777BB7 /* VMSecurityMonitor.swift */; };
+		AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */; };
+		AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */; };
+		AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */; };
+		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
+		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
+		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
+		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EE1111EE11111111EE111EE1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8FF8298127500C060037FA83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8FF8298827500C060037FA83;
+			remoteInfo = SecVF;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		352BF37B653363BBBB1015AC /* SampleCode.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
@@ -35,7 +53,16 @@
 		BB4444BB44444444BB444BB4 /* RosettaAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosettaAvailability.swift; sourceTree = "<group>"; };
 		BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = VMLibraryWindow.xib; path = Base.lproj/VMLibraryWindow.xib; sourceTree = "<group>"; };
 		BB6666BB66666666BB666BB6 /* MacOSVMInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSVMInstaller.swift; sourceTree = "<group>"; };
+		BB7777BB77777777BB777BB7 /* VMSecurityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMSecurityMonitor.swift; sourceTree = "<group>"; };
+		BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerWindowController.swift; sourceTree = "<group>"; };
+		BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreenWindow.swift; sourceTree = "<group>"; };
+		BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitch.swift; sourceTree = "<group>"; };
+		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
+		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
+		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
+		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
 		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +71,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				8F0313B227CB143B00360D7E /* Virtualization.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE3333EE33333333EE333EE3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -63,6 +97,7 @@
 			children = (
 				E489E24B87B74AAC6D64B249 /* README.md */,
 				8FF8298B27500C060037FA83 /* SecVF */,
+				EE4444EE44444444EE444EE4 /* SecVFTests */,
 				8FF8298A27500C060037FA83 /* Products */,
 				8FF82999275040C80037FA83 /* Frameworks */,
 				7C99BD11C87A466A17F398E6 /* Configuration */,
@@ -74,6 +109,7 @@
 			isa = PBXGroup;
 			children = (
 				8FF8298927500C060037FA83 /* SecVF.app */,
+				EE2222EE22222222EE222EE2 /* SecVFTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -88,6 +124,10 @@
 				BB3333BB33333333BB333BB3 /* VMLibraryWindowController.swift */,
 				BB6666BB66666666BB666BB6 /* MacOSVMInstaller.swift */,
 				BB4444BB44444444BB444BB4 /* RosettaAvailability.swift */,
+				BB7777BB77777777BB777BB7 /* VMSecurityMonitor.swift */,
+				BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */,
+				BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */,
+				BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */,
 				8FF8298E27500C070037FA83 /* Assets.xcassets */,
 				8FF8299027500C070037FA83 /* MainMenu.xib */,
 				BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */,
@@ -113,6 +153,17 @@
 			path = .;
 			sourceTree = "<group>";
 		};
+		EE4444EE44444444EE444EE4 /* SecVFTests */ = {
+			isa = PBXGroup;
+			children = (
+				DD4444DD44444444DD444DD4 /* TestHelpers.swift */,
+				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
+				DD2222DD22222222DD222DD2 /* VMManagerTests.swift */,
+				DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */,
+			);
+			path = SecVFTests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -133,6 +184,24 @@
 			productReference = 8FF8298927500C060037FA83 /* SecVF.app */;
 			productType = "com.apple.product-type.application";
 		};
+		EE5555EE55555555EE555EE5 /* SecVFTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EE6666EE66666666EE666EE6 /* Build configuration list for PBXNativeTarget "SecVFTests" */;
+			buildPhases = (
+				EE7777EE77777777EE777EE7 /* Sources */,
+				EE3333EE33333333EE333EE3 /* Frameworks */,
+				EE8888EE88888888EE888EE8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EE9999EE99999999EE999EE9 /* PBXTargetDependency */,
+			);
+			name = SecVFTests;
+			productName = SecVFTests;
+			productReference = EE2222EE22222222EE222EE2 /* SecVFTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -146,6 +215,10 @@
 				TargetAttributes = {
 					8FF8298827500C060037FA83 = {
 						CreatedOnToolsVersion = 13.3;
+					};
+					EE5555EE55555555EE555EE5 = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = 8FF8298827500C060037FA83;
 					};
 				};
 			};
@@ -163,6 +236,7 @@
 			projectRoot = "";
 			targets = (
 				8FF8298827500C060037FA83 /* SecVF */,
+				EE5555EE55555555EE555EE5 /* SecVFTests */,
 			);
 		};
 /* End PBXProject section */
@@ -175,6 +249,13 @@
 				8FF8298F27500C070037FA83 /* Assets.xcassets in Resources */,
 				8FF8299227500C070037FA83 /* MainMenu.xib in Resources */,
 				AA5555AA55555555AA555AA5 /* VMLibraryWindow.xib in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE8888EE88888888EE888EE8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -191,10 +272,33 @@
 				AA3333AA33333333AA333AA3 /* VMLibraryWindowController.swift in Sources */,
 				AA6666AA66666666AA666AA6 /* MacOSVMInstaller.swift in Sources */,
 				AA4444AA44444444AA444AA4 /* RosettaAvailability.swift in Sources */,
+				AA7777AA77777777AA777AA7 /* VMSecurityMonitor.swift in Sources */,
+				AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */,
+				AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */,
+				AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE7777EE77777777EE777EE7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
+				CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */,
+				CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */,
+				CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EE9999EE99999999EE999EE9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8FF8298827500C060037FA83 /* SecVF */;
+			targetProxy = EE1111EE11111111EE111EE1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		8FF8299027500C070037FA83 /* MainMenu.xib */ = {
@@ -363,7 +467,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.daxxsec.SecVF";
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxxsec.SecVF;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
@@ -400,12 +504,52 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.daxxsec.SecVF";
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxxsec.SecVF;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = macosx;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		EEAAAAEEAAAAAAAAAEEAAEEA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxxsec.SecVFTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SecVF.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SecVF";
+			};
+			name = Debug;
+		};
+		EEBBBBEEBBBBBBBBBEEBBEEB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daxxsec.SecVFTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SecVF.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SecVF";
 			};
 			name = Release;
 		};
@@ -426,6 +570,15 @@
 			buildConfigurations = (
 				8FF8299727500C070037FA83 /* Debug */,
 				8FF8299827500C070037FA83 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EE6666EE66666666EE666EE6 /* Build configuration list for PBXNativeTarget "SecVFTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EEAAAAEEAAAAAAAAAEEAAEEA /* Debug */,
+				EEBBBBEEBBBBBBBBBEEBBEEB /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

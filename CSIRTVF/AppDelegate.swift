@@ -184,14 +184,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
 
         case .virtual:
             // Virtual switch networking - VM-to-VM communication only
-            if let (readHandle, writeHandle) = VirtualNetworkSwitch.shared.connectVM(
+            if let fileHandle = VirtualNetworkSwitch.shared.connectVM(
                 vmId: vmConfig.id,
                 vmName: vmConfig.name
             ) {
-                networkDevice.attachment = VZFileHandleNetworkDeviceAttachment(
-                    fileHandleForReading: readHandle,
-                    fileHandleForWriting: writeHandle
-                )
+                networkDevice.attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: fileHandle)
                 print("[Network] Configuring virtual switch networking for \(vmConfig.name)")
 
                 // Log router configuration if applicable
@@ -593,14 +590,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
             libraryWindowController = VMLibraryWindowController()
         }
 
-        // Reload VM list to show current status
-        VMManager.shared.loadVirtualMachines()
-
         libraryWindowController?.showWindow(nil)
         libraryWindowController?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        // Refresh the table view
+        // Refresh the table view (will trigger async load if needed)
         DispatchQueue.main.async {
             self.libraryWindowController?.refreshTableFromOutside()
         }

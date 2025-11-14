@@ -135,13 +135,11 @@ class VMSecurityMonitor {
         let vmID = vm.id.uuidString
 
         // Monitor the VM bundle directory for unexpected changes
-        guard let fileDescriptor = open(bundlePath, O_EVTONLY) else {
-            logSecurityEvent(.warning, type: .filesystemAccess, vmName: vm.name,
-                           message: "Failed to open VM bundle for monitoring")
-            return
-        }
+        let fileDescriptor = open(bundlePath, O_EVTONLY)
 
         if fileDescriptor < 0 {
+            logSecurityEvent(.warning, type: .filesystemAccess, vmName: vm.name,
+                           message: "Failed to open VM bundle for monitoring")
             return
         }
 
