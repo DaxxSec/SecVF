@@ -170,7 +170,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
 
     private func createNetworkDeviceConfiguration() -> VZVirtioNetworkDeviceConfiguration {
         let networkDevice = VZVirtioNetworkDeviceConfiguration()
-        networkDevice.attachment = VZNATNetworkDeviceAttachment()
+
+        // Configure network attachment based on VM's network mode
+        switch vmConfig.networkConfig.mode {
+        case .nat:
+            // Standard NAT networking - VM has internet access
+            networkDevice.attachment = VZNATNetworkDeviceAttachment()
+            print("[Network] Configuring NAT networking for \(vmConfig.name)")
+
+        case .virtual:
+            // Virtual switch networking - VM-to-VM communication only
+            if let (readHandle, writeHandle) = VirtualNetworkSwitch.shared.connectVM(
+                vmId: vmConfig.id,
+                vmName: vmConfig.name
+            ) {
+                networkDevice.attachment = VZFileHandleNetworkDeviceAttachment(
+                    fileHandleForReading: readHandle,
+                    fileHandleForWriting: writeHandle
+                )
+                print("[Network] Configuring virtual switch networking for \(vmConfig.name)")
+
+                // Log router configuration if applicable
+                if vmConfig.networkConfig.isRouter {
+                    print("[Network] \(vmConfig.name) configured as virtual network router")
+                } else if let routerVMId = vmConfig.networkConfig.routerVMId {
+                    print("[Network] \(vmConfig.name) will route through VM: \(routerVMId)")
+                }
+            } else {
+                // Fallback to NAT if virtual switch connection fails
+                print("[Network] WARNING: Failed to connect to virtual switch, falling back to NAT")
+                networkDevice.attachment = VZNATNetworkDeviceAttachment()
+            }
+        }
 
         return networkDevice
     }
@@ -410,6 +441,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
                     VMManager.shared.updateVMStatus(self.vmConfig, status: .stopped)
                     // Stop security monitoring on failure
                     VMSecurityMonitor.shared.stopMonitoring(vmID: self.vmConfig.id)
+                    // Disconnect from virtual switch on failure
+                    if self.vmConfig.networkConfig.mode == .virtual {
+                        VirtualNetworkSwitch.shared.disconnectPort(vmId: self.vmConfig.id)
+                    }
                     fatalError("Virtual machine failed to start with error: \(error)")
 
                 default:
@@ -465,6 +500,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
     func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
         print("Virtual machine did stop with error: \(error.localizedDescription)")
 
+        // NETWORK: Disconnect from virtual switch if in virtual network mode
+        if vmConfig.networkConfig.mode == .virtual {
+            VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
+        }
+
         // Update status and reopen library
         VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
 
@@ -489,6 +529,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
 
         // SECURITY: Stop security monitoring
         VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+
+        // NETWORK: Disconnect from virtual switch if in virtual network mode
+        if vmConfig.networkConfig.mode == .virtual {
+            VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
+        }
 
         // Update status
         VMManager.shared.updateVMStatus(vmConfig, status: .stopped)

@@ -236,6 +236,20 @@ class VMManager {
         }
     }
 
+    /// Public method to save VM configuration (for updating network settings, etc.)
+    func saveVMConfiguration(_ vmConfig: VMConfiguration) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let data = try encoder.encode(vmConfig)
+        try data.write(to: URL(fileURLWithPath: vmConfig.metadataPath))
+        print("Saved VM configuration for: \(vmConfig.name)")
+
+        // Update in-memory copy
+        if let index = virtualMachines.firstIndex(where: { $0.id == vmConfig.id }) {
+            virtualMachines[index] = vmConfig
+        }
+    }
+
     // MARK: - VM Creation
 
     func createVM(name: String,
