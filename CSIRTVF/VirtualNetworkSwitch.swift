@@ -455,30 +455,4 @@ class VirtualNetworkSwitch {
 }
 
 // MARK: - Network Mode Configuration
-
-enum NetworkMode: String, Codable {
-    case nat            // Standard NAT (default)
-    case virtual        // Virtual switch networking (VM-to-VM)
-}
-
-/// Configuration for a VM's virtual network connection
-struct VirtualNetworkConfig: Codable {
-    var mode: NetworkMode = .nat
-    var routerVMId: UUID?           // For macOS VMs - which Linux VM to route through
-    var isRouter: Bool = false       // For Linux VMs - acts as router for other VMs
-
-    var description: String {
-        switch mode {
-        case .nat:
-            return "NAT (Internet access)"
-        case .virtual:
-            if isRouter {
-                return "Virtual Network Router"
-            } else if routerVMId != nil {
-                return "Routes via Linux VM"
-            } else {
-                return "Virtual Network Client"
-            }
-        }
-    }
-}
+// Note: NetworkMode and VirtualNetworkConfig are now defined in VMConfiguration.swift
