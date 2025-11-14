@@ -14,6 +14,11 @@ enum VMStatus {
     case stopping
 }
 
+/// Network mode configuration (defined in VirtualNetworkSwitch.swift)
+/// - nat: Standard NAT networking (default) - VM has internet access
+/// - virtual: Virtual switch networking - VM-to-VM communication only
+// Note: NetworkMode and VirtualNetworkConfig are defined in VirtualNetworkSwitch.swift
+
 /// Represents a virtual machine configuration and metadata
 struct VMConfiguration: Codable {
     var id: UUID
@@ -25,6 +30,9 @@ struct VMConfiguration: Codable {
     var createdDate: Date
     var lastUsedDate: Date?
     var osType: String // e.g., "Linux", "Ubuntu", etc.
+
+    // Network configuration
+    var networkConfig: VirtualNetworkConfig = VirtualNetworkConfig()
 
     // Runtime status (not saved to disk)
     var status: VMStatus = .stopped
@@ -102,6 +110,6 @@ struct VMConfiguration: Codable {
     // Custom coding keys to exclude status from persistence
     enum CodingKeys: String, CodingKey {
         case id, name, bundlePath, cpuCount, memorySize, diskSize
-        case createdDate, lastUsedDate, osType
+        case createdDate, lastUsedDate, osType, networkConfig
     }
 }

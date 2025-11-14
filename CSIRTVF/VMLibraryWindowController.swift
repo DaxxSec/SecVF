@@ -428,86 +428,183 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let createButton = alert.addButton(withTitle: "Select ISO")
         alert.addButton(withTitle: "Cancel")
 
-        // Create form (increased height for new controls)
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 210))
+        // Create form (increased height for network configuration controls)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 290))
 
         // Name field
         let nameLabel = NSTextField(labelWithString: "Name:")
-        nameLabel.frame = NSRect(x: 0, y: 180, width: 100, height: 20)
+        nameLabel.frame = NSRect(x: 0, y: 260, width: 100, height: 20)
         view.addSubview(nameLabel)
 
-        let nameField = NSTextField(frame: NSRect(x: 110, y: 178, width: 280, height: 24))
+        let nameField = NSTextField(frame: NSRect(x: 110, y: 258, width: 280, height: 24))
         nameField.stringValue = "New VM"
         view.addSubview(nameField)
 
         // OS Type dropdown
         let osLabel = NSTextField(labelWithString: "OS Type:")
-        osLabel.frame = NSRect(x: 0, y: 150, width: 100, height: 20)
+        osLabel.frame = NSRect(x: 0, y: 230, width: 100, height: 20)
         view.addSubview(osLabel)
 
-        let osPopup = NSPopUpButton(frame: NSRect(x: 110, y: 145, width: 150, height: 26), pullsDown: false)
+        let osPopup = NSPopUpButton(frame: NSRect(x: 110, y: 225, width: 150, height: 26), pullsDown: false)
         osPopup.addItem(withTitle: "Linux")
         osPopup.addItem(withTitle: "macOS")
         osPopup.selectItem(at: 0) // Default to Linux
         view.addSubview(osPopup)
 
-        // We'll update UI elements when OS type changes
-        class OSTypeDelegate: NSObject {
+        // Delegate to handle dynamic UI updates
+        class VMConfigDelegate: NSObject {
             weak var isoCheckbox: NSButton?
             weak var createButton: NSButton?
+            weak var routerCheckbox: NSButton?
+            weak var routerLabel: NSTextField?
+            weak var routerPopup: NSPopUpButton?
+            weak var networkPopup: NSPopUpButton?
+            weak var vmManager: VMManager?
 
             @objc func osTypeChanged(_ sender: NSPopUpButton) {
                 let isMacOS = sender.titleOfSelectedItem == "macOS"
                 isoCheckbox?.isHidden = isMacOS
                 createButton?.title = isMacOS ? "Create" : "Select ISO"
+
+                // Update network UI based on OS type
+                updateNetworkUI()
+            }
+
+            @objc func networkModeChanged(_ sender: NSPopUpButton) {
+                updateNetworkUI()
+            }
+
+            private func updateNetworkUI() {
+                guard let osPopup = networkPopup?.superview?.subviews.compactMap({ $0 as? NSPopUpButton }).first(where: { $0.itemTitles.contains("macOS") }) else { return }
+
+                let isMacOS = osPopup.titleOfSelectedItem == "macOS"
+                let isVirtual = networkPopup?.indexOfSelectedItem == 1
+
+                // Show/hide router options based on OS type and network mode
+                if isVirtual {
+                    if isMacOS {
+                        // macOS in virtual mode: show router selection dropdown
+                        routerCheckbox?.isHidden = true
+                        routerLabel?.isHidden = false
+                        routerPopup?.isHidden = false
+
+                        // Populate router dropdown with Linux VMs
+                        populateRouterList()
+                    } else {
+                        // Linux in virtual mode: show "act as router" checkbox
+                        routerCheckbox?.isHidden = false
+                        routerLabel?.isHidden = true
+                        routerPopup?.isHidden = true
+                    }
+                } else {
+                    // NAT mode: hide all router options
+                    routerCheckbox?.isHidden = true
+                    routerLabel?.isHidden = true
+                    routerPopup?.isHidden = true
+                }
+            }
+
+            private func populateRouterList() {
+                guard let vmManager = vmManager,
+                      let routerPopup = routerPopup else { return }
+
+                routerPopup.removeAllItems()
+
+                // Get all Linux VMs that could act as routers
+                let linuxVMs = vmManager.vms.filter { $0.osType.lowercased().contains("linux") }
+
+                if linuxVMs.isEmpty {
+                    routerPopup.addItem(withTitle: "No Linux VMs available")
+                    routerPopup.isEnabled = false
+                } else {
+                    routerPopup.isEnabled = true
+                    for vm in linuxVMs {
+                        routerPopup.addItem(withTitle: vm.name)
+                    }
+                }
             }
         }
-        let osDelegate = OSTypeDelegate()
-        osPopup.target = osDelegate
-        osPopup.action = #selector(OSTypeDelegate.osTypeChanged(_:))
+        let configDelegate = VMConfigDelegate()
+        configDelegate.vmManager = vmManager
+        osPopup.target = configDelegate
+        osPopup.action = #selector(VMConfigDelegate.osTypeChanged(_:))
+        networkPopup.target = configDelegate
+        networkPopup.action = #selector(VMConfigDelegate.networkModeChanged(_:))
 
         // CPU count
         let cpuLabel = NSTextField(labelWithString: "CPU Cores:")
-        cpuLabel.frame = NSRect(x: 0, y: 120, width: 100, height: 20)
+        cpuLabel.frame = NSRect(x: 0, y: 200, width: 100, height: 20)
         view.addSubview(cpuLabel)
 
-        let cpuField = NSTextField(frame: NSRect(x: 110, y: 118, width: 100, height: 24))
+        let cpuField = NSTextField(frame: NSRect(x: 110, y: 198, width: 100, height: 24))
         cpuField.stringValue = "2"
         view.addSubview(cpuField)
 
         // Memory size
         let memLabel = NSTextField(labelWithString: "Memory (GB):")
-        memLabel.frame = NSRect(x: 0, y: 90, width: 100, height: 20)
+        memLabel.frame = NSRect(x: 0, y: 170, width: 100, height: 20)
         view.addSubview(memLabel)
 
-        let memField = NSTextField(frame: NSRect(x: 110, y: 88, width: 100, height: 24))
+        let memField = NSTextField(frame: NSRect(x: 110, y: 168, width: 100, height: 24))
         memField.stringValue = "4"
         view.addSubview(memField)
 
         // Disk size
         let diskLabel = NSTextField(labelWithString: "Disk (GB):")
-        diskLabel.frame = NSRect(x: 0, y: 60, width: 100, height: 20)
+        diskLabel.frame = NSRect(x: 0, y: 140, width: 100, height: 20)
         view.addSubview(diskLabel)
 
-        let diskField = NSTextField(frame: NSRect(x: 110, y: 58, width: 100, height: 24))
+        let diskField = NSTextField(frame: NSRect(x: 110, y: 138, width: 100, height: 24))
         diskField.stringValue = "64"
         view.addSubview(diskField)
 
+        // Network Mode dropdown
+        let networkLabel = NSTextField(labelWithString: "Network:")
+        networkLabel.frame = NSRect(x: 0, y: 110, width: 100, height: 20)
+        view.addSubview(networkLabel)
+
+        let networkPopup = NSPopUpButton(frame: NSRect(x: 110, y: 105, width: 200, height: 26), pullsDown: false)
+        networkPopup.addItem(withTitle: "NAT (Internet Access)")
+        networkPopup.addItem(withTitle: "Virtual Network (VM-to-VM)")
+        networkPopup.selectItem(at: 0) // Default to NAT
+        view.addSubview(networkPopup)
+
+        // Linux Router checkbox (only for Linux VMs in Virtual Network mode)
+        let routerCheckbox = NSButton(checkboxWithTitle: "Act as Router for other VMs", target: nil, action: nil)
+        routerCheckbox.frame = NSRect(x: 110, y: 80, width: 250, height: 20)
+        routerCheckbox.state = .off
+        routerCheckbox.isHidden = true  // Hidden by default
+        view.addSubview(routerCheckbox)
+
+        // macOS Router selection (only for macOS VMs in Virtual Network mode)
+        let routerLabel = NSTextField(labelWithString: "Route via:")
+        routerLabel.frame = NSRect(x: 110, y: 80, width: 70, height: 20)
+        routerLabel.isHidden = true  // Hidden by default
+        view.addSubview(routerLabel)
+
+        let routerPopup = NSPopUpButton(frame: NSRect(x: 185, y: 75, width: 200, height: 26), pullsDown: false)
+        routerPopup.isHidden = true  // Hidden by default
+        view.addSubview(routerPopup)
+
         // Rosetta support checkbox
         let rosettaCheckbox = NSButton(checkboxWithTitle: "Enable Rosetta (x86_64 emulation)", target: nil, action: nil)
-        rosettaCheckbox.frame = NSRect(x: 110, y: 30, width: 250, height: 20)
+        rosettaCheckbox.frame = NSRect(x: 110, y: 50, width: 250, height: 20)
         rosettaCheckbox.state = .off
         view.addSubview(rosettaCheckbox)
 
         // Install from ISO checkbox (only for Linux)
         let isoCheckbox = NSButton(checkboxWithTitle: "Install from ISO", target: nil, action: nil)
-        isoCheckbox.frame = NSRect(x: 110, y: 5, width: 200, height: 20)
+        isoCheckbox.frame = NSRect(x: 110, y: 25, width: 200, height: 20)
         isoCheckbox.state = .on
         view.addSubview(isoCheckbox)
 
         // Connect the delegate references
-        osDelegate.isoCheckbox = isoCheckbox
-        osDelegate.createButton = createButton
+        configDelegate.isoCheckbox = isoCheckbox
+        configDelegate.createButton = createButton
+        configDelegate.routerCheckbox = routerCheckbox
+        configDelegate.routerLabel = routerLabel
+        configDelegate.routerPopup = routerPopup
+        configDelegate.networkPopup = networkPopup
 
         alert.accessoryView = view
 
@@ -519,6 +616,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let diskGB = UInt64(diskField.stringValue) ?? 64
             let enableRosetta = rosettaCheckbox.state == .on
             let needsISO = isoCheckbox.state == .on
+            let networkModeIndex = networkPopup.indexOfSelectedItem
+            let isLinuxRouter = routerCheckbox.state == .on
+            let selectedRouterName = routerPopup.titleOfSelectedItem
 
             print("DEBUG: Creating VM with Rosetta: \(enableRosetta)")
 
@@ -526,13 +626,39 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let diskSize = diskGB * 1024 * 1024 * 1024
 
             do {
-                let newVM = try vmManager.createVM(
+                var newVM = try vmManager.createVM(
                     name: name,
                     cpuCount: cpuCount,
                     memorySize: memorySize,
                     diskSize: diskSize,
                     osType: osType
                 )
+
+                // Configure network settings
+                if networkModeIndex == 1 {  // Virtual Network mode
+                    newVM.networkConfig.mode = .virtual
+
+                    if osType.lowercased().contains("mac") {
+                        // macOS VM - find router VM by name
+                        if let routerVM = vmManager.vms.first(where: { $0.name == selectedRouterName }) {
+                            newVM.networkConfig.routerVMId = routerVM.id
+                            print("[Network] macOS VM \(name) will route through \(routerVM.name)")
+                        }
+                    } else {
+                        // Linux VM - set as router if checkbox is checked
+                        newVM.networkConfig.isRouter = isLinuxRouter
+                        if isLinuxRouter {
+                            print("[Network] Linux VM \(name) configured as virtual network router")
+                        }
+                    }
+                } else {
+                    // NAT mode (default)
+                    newVM.networkConfig.mode = .nat
+                    print("[Network] VM \(name) configured for NAT networking")
+                }
+
+                // Save updated VM configuration
+                try vmManager.saveVMConfiguration(newVM)
 
                 refreshTable()
 

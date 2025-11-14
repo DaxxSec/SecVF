@@ -48,6 +48,11 @@ While QEMU is excellent for cross-platform compatibility and exotic architecture
   - Adjustable virtual disk size
   - OS type selection (Linux/macOS)
   - Rosetta support for running x86_64 binaries on ARM Linux
+- **Advanced Network Options**:
+  - NAT mode for direct internet access
+  - Virtual Network mode for isolated VM-to-VM communication
+  - Linux VMs can act as routers with traffic inspection
+  - macOS VMs can route through Linux VMs for malware traffic capture
 
 ### Linux VM Creation
 1. Click **New** in the VM Library
@@ -176,12 +181,49 @@ SecVF includes SPICE agent support for seamless clipboard integration between ma
    ```
 2. Copy/paste text and images between macOS and the Linux VM
 
-### Network Configuration
+### Virtual Network Switch (Unique Feature)
 
-All VMs use NAT networking by default, providing:
-- Automatic internet access through the host's network connection
-- Isolated network environment for security
-- No additional network configuration required
+SecVF includes a **software-based Ethernet switch** for VM-to-VM communication without exposing VMs to the physical network - a feature not found in other macOS virtualization solutions.
+
+**Why This Matters for Malware Analysis:**
+- Analyze network-aware malware in a completely isolated sandbox
+- Set up a Linux VM as a router with monitoring tools (Wireshark, tcpdump)
+- Route macOS VMs through the Linux router to capture all malware traffic
+- Zero risk of malware escaping to your local network
+- Works completely offline - no physical network required
+
+**How It Works:**
+1. Create a Linux VM and configure it as "Act as Router for other VMs"
+2. Install monitoring tools in the Linux router VM
+3. Create macOS VMs and select which Linux router to use
+4. All macOS VM traffic flows through the Linux router for inspection
+5. Linux router provides internet access via NAT if needed
+
+**Architecture:**
+```
+┌──────────────┐         ┌──────────────┐         ┌──────────────┐
+│  macOS VM    │◄────────┤   Virtual    │────────►│  Linux VM    │
+│  (Malware)   │ Socket  │   Ethernet   │ Socket  │  (Router)    │
+│              │  Pair   │   Switch     │  Pair   │              │
+└──────────────┘         └──────────────┘         └──────┬───────┘
+                               │                          │
+                         No Physical                  NAT to
+                          Network!                   Internet
+```
+
+**Security Benefits:**
+- Complete isolation from physical network
+- All traffic logged at `~/.avf/logs/network-YYYY-MM-DD.log`
+- MAC address learning and validation
+- Rate limiting (10,000 pps, 1,000 broadcasts/sec)
+- MAC spoofing detection
+- Packet size validation
+
+**Network Modes:**
+1. **NAT (Default)** - Direct internet access, isolated from other VMs
+2. **Virtual Network** - VM-to-VM communication only, no physical network exposure
+
+Configure network mode when creating a VM in the VM Library.
 
 ## Security & Malware Analysis
 
