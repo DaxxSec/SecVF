@@ -225,6 +225,55 @@ SecVF includes a **software-based Ethernet switch** for VM-to-VM communication w
 
 Configure network mode when creating a VM in the VM Library.
 
+### Real-Time Monitoring
+
+SecVF includes a **Monitoring** menu in the macOS menu bar with real-time log viewers:
+
+**Access via Menu Bar**: `Monitoring` → Choose log type
+
+**Keyboard Shortcuts**:
+- `⌘⇧1` - Security Logs
+- `⌘⇧2` - Network Logs
+- `⌘⇧3` - Virtual Switch Statistics
+
+**Log Viewer Features**:
+- **Auto-refresh** every 2 seconds - see new events as they happen
+- **Syntax highlighting** - Color-coded by severity (INFO, WARNING, ERROR, CRITICAL)
+- **Auto-scroll** - Optionally scroll to latest entries automatically
+- **Search & filter** - Standard text search (⌘F)
+- **Export** - Copy/paste logs for reporting
+
+**Log Types**:
+
+1. **Security Logs** (`~/.avf/logs/security-YYYY-MM-DD.log`)
+   - VM lifecycle events (start/stop)
+   - Filesystem access attempts
+   - Resource usage warnings
+   - Potential breakout detection
+   - Security recommendations
+
+2. **Network Logs** (`~/.avf/logs/network-YYYY-MM-DD.log`)
+   - Packet forwarding events
+   - MAC address learning
+   - Broadcast/multicast traffic
+   - Rate limiting violations
+   - MAC spoofing detection
+
+3. **Virtual Switch Statistics**
+   - Real-time port status
+   - Packet counts (RX/TX)
+   - Learned MAC addresses
+   - Connected VM overview
+
+**Example Usage**:
+```
+1. Start VMs configured for virtual networking
+2. Open Monitoring → Network Logs (⌘⇧2)
+3. Watch real-time packet flow between VMs
+4. Switch to Security Logs (⌘⇧1) to monitor VM behavior
+5. Check Virtual Switch Statistics (⌘⇧3) for traffic overview
+```
+
 ## Security & Malware Analysis
 
 SecVF is specifically designed for **security research and malware analysis** in isolated sandbox environments. The application includes comprehensive security monitoring and containment features to protect your host system while analyzing potentially malicious code.
