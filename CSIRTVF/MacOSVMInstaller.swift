@@ -316,26 +316,27 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
     // SECURITY: Validate SSL certificates for Apple CDN connections
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        print("SECURITY: Received authentication challenge")
+        print("SECURITY: Received authentication challenge for host: \(challenge.protectionSpace.host)")
+        print("SECURITY: Authentication method: \(challenge.protectionSpace.authenticationMethod)")
 
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              let serverTrust = challenge.protectionSpace.serverTrust,
-              let host = challenge.protectionSpace.host.lowercased() as String? else {
-            print("SECURITY: Challenge is not server trust or missing server trust")
+        // For server trust (SSL) challenges from approved hosts, use default system validation
+        if challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+            let host = challenge.protectionSpace.host.lowercased()
+
+            // Verify the host is in our approved list
+            guard Self.approvedCDNHosts.contains(host) else {
+                print("SECURITY: Rejected authentication for unauthorized host: \(host)")
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+
+            // Use default system certificate validation (works with VPNs and corporate proxies)
+            print("SECURITY: Using default certificate validation for approved host: \(host)")
+            completionHandler(.performDefaultHandling, nil)
+        } else {
+            // For non-SSL challenges, cancel
+            print("SECURITY: Non-SSL challenge, canceling")
             completionHandler(.cancelAuthenticationChallenge, nil)
-            return
         }
-
-        // Verify the host is in our approved list
-        guard Self.approvedCDNHosts.contains(host) else {
-            print("SECURITY: Rejected authentication for unauthorized host: \(host)")
-            completionHandler(.cancelAuthenticationChallenge, nil)
-            return
-        }
-
-        // Use default handling for Apple's certificates (they use standard CA validation)
-        print("SECURITY: Accepting server trust for approved host: \(host)")
-        let credential = URLCredential(trust: serverTrust)
-        completionHandler(.useCredential, credential)
     }
 }
