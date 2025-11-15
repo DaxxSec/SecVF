@@ -57,7 +57,7 @@ VMs from legacy locations are automatically migrated to `~/.avf/Linux/` or `~/.a
 
 ## VM Storage Structure
 
-VMs stored in `~/.avf/` directory organized by OS type. Each VM bundle contains: Disk.img, NVRAM, MachineIdentifier, metadata.json, and IPSW (macOS only).
+VMs stored in `~/.avf/` directory organized by OS type. Each VM bundle contains: Disk.img, NVRAM, MachineIdentifier, and metadata.json. macOS IPSWs are stored centrally in `~/.avf/MacOS/` and shared across all macOS VMs.
 
 ## Advanced Features
 
