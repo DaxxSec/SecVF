@@ -1,116 +1,42 @@
 # SecVF
 
-A native macOS application for managing and running multiple Linux and macOS virtual machines using Apple's Virtualization framework.
+**Computer Security Incident Response Team Virtualization Framework**
+
+A macOS application for managing Linux and macOS virtual machines, designed for security research and malware analysis in isolated sandbox environments.
 
 ## Overview
 
-SecVF (Computer Security Incident Response Team Virtual Framework) is a production-ready VM management application that provides a clean, intuitive GUI for creating, managing, and running multiple virtual machines on your Mac. The application leverages Apple's native Virtualization framework to deliver superior performance and integration compared to traditional solutions.
+SecVF provides a clean GUI for creating, managing, and monitoring virtual machines using Apple's native Virtualization framework. Built specifically for security teams, it offers VM-to-VM networking, real-time security monitoring, and complete isolation from your host system.
 
 ## Why Apple Virtualization Framework?
 
-SecVF uses Apple's native Virtualization framework instead of QEMU-based solutions, offering significant advantages:
-
-### Performance Benefits
-- **Hardware-accelerated virtualization** - Direct access to Apple's hypervisor for near-native performance
-- **Optimized for Apple Silicon** - Designed specifically for M-series chips with exceptional efficiency
-- **Lower resource overhead** - Minimal CPU and memory overhead compared to QEMU emulation layers
-- **Native graphics acceleration** - Seamless integration with macOS graphics stack
-
-### Integration & User Experience
-- **Automatic display scaling** - VMs resize instantly when you change the window size
-- **Native clipboard sharing** - Copy/paste between host and guest without configuration
-- **macOS guest support** - Run macOS VMs with full Apple support (not possible with QEMU)
-- **Rosetta translation** - Run x86_64 binaries in ARM Linux VMs using Apple's Rosetta
-- **SPICE agent support** - Enhanced Linux integration for clipboard, display, and more
-
-### Reliability & Maintenance
-- **Apple-supported** - Official framework maintained by Apple
-- **Regular updates** - Improvements with each macOS release
-- **Security hardened** - Built-in sandboxing and entitlement system
-- **Simplified architecture** - No complex QEMU/KVM setup or kernel extensions
-
-While QEMU is excellent for cross-platform compatibility and exotic architectures, the Virtualization framework is purpose-built for macOS and delivers the best experience when running Linux and macOS guests on Apple hardware.
+- **Native performance** - Hardware-accelerated virtualization with minimal overhead
+- **Apple Silicon optimized** - Exceptional efficiency on M-series chips
+- **Automatic display scaling** - VMs resize instantly with the window
+- **Native clipboard sharing** - Copy/paste between host and guest
+- **macOS guest support** - Run macOS VMs (not possible with QEMU)
+- **Rosetta translation** - Run x86_64 binaries in ARM Linux VMs
+- **Apple-maintained** - Official framework with regular updates and security hardening
 
 ## Features
 
-### VM Library Management
-- **Visual VM Library** - Browse all your VMs in a clean table view with key details
-- **Organization by OS Type** - VMs automatically organized into Linux and macOS directories
-- **Quick Actions** - Double-click to start, right-click for options
-- **Status Indicators** - See which VMs are running, stopped, or starting at a glance
-- **Auto-Migration** - Automatically migrates VMs from legacy locations on first launch
+### Core Functionality
+- **VM Library** - Browse, create, and manage Linux and macOS VMs
+- **Flexible Configuration** - Custom CPU, memory, and disk allocation per VM
+- **Network Modes** - NAT for internet access or isolated VM-to-VM networking
+- **VM Operations** - Start, stop, clone, rename, delete, and import VMs
+- **Smart IPSW Management** - Automatic macOS image caching and reuse
+- **Auto-Migration** - Migrates VMs from legacy locations on first launch
 
-### VM Creation & Configuration
-- **Multi-OS Support** - Create both Linux and macOS virtual machines
-- **Flexible Configuration**:
-  - Custom CPU core allocation
-  - Configurable memory (RAM) size
-  - Adjustable virtual disk size
-  - OS type selection (Linux/macOS)
-  - Rosetta support for running x86_64 binaries on ARM Linux
-- **Advanced Network Options**:
-  - NAT mode for direct internet access
-  - Virtual Network mode for isolated VM-to-VM communication
-  - Linux VMs can act as routers with traffic inspection
-  - macOS VMs can route through Linux VMs for malware traffic capture
+### Linux VM Support
+- Boot from ISO for any ARM64 or x86_64 distribution (Ubuntu, Debian, Fedora, etc.)
+- SPICE agent support for clipboard sharing
+- Optional Rosetta support for running x86_64 binaries on ARM Linux
 
-### Linux VM Creation
-1. Click **New** in the VM Library
-2. Configure VM resources (CPU, memory, disk)
-3. Select **Linux** as OS type
-4. Enable **Install from ISO** checkbox
-5. Click **Select ISO** and choose your Linux distribution ISO
-6. The VM boots into the installer - complete installation as normal
-
-**Supported Linux Distributions**: Any distribution compatible with ARM64/aarch64 (Apple Silicon) or x86_64 (Intel). Popular choices include:
-- [Ubuntu](https://ubuntu.com/download/desktop) (ARM64 for Apple Silicon, AMD64 for Intel)
-- [Debian](https://www.debian.org/distrib/)
-- [Fedora](https://getfedora.org/en/workstation/download/)
-
-> **Note**: The Virtualization framework requires matching the Linux ISO architecture to your Mac's CPU. Download ARM64/aarch64 images for Apple Silicon Macs, or x86_64/amd64 images for Intel Macs.
-
-### macOS VM Creation
-1. Click **New** in the VM Library
-2. Configure VM resources (CPU, memory, disk)
-3. Select **macOS** as OS type
-4. Click **Create**
-5. SecVF automatically:
-   - Checks for the latest macOS restore image (IPSW)
-   - Uses cached IPSW if version matches (no re-download)
-   - Downloads only if missing or outdated
-   - Prepares the VM and starts installation
-
-> **Smart IPSW Management**: When creating additional macOS VMs, SecVF checks if your cached IPSW matches Apple's latest version. If it matches, the cached version is reused instantly. If outdated, the old IPSW is removed and the latest version is downloaded automatically.
-
-### VM Management Operations
-
-#### Starting VMs
-- **Double-click** any VM in the library to start it
-- Or select a VM and click the **Start** button
-- VM window opens with full graphics, keyboard, and mouse support
-- Automatic display scaling when resizing the window
-
-#### Cloning VMs
-- Select a VM and click **Clone**
-- Enter a new name for the cloned VM
-- Creates a complete copy with a new machine identifier
-- Perfect for creating multiple test environments
-
-#### Importing VMs
-- Click **Import** to add existing VM bundles
-- Select a `.bundle` directory from anywhere on your system
-- Automatically detects VM configuration and adds to library
-- Useful for sharing VMs or restoring from backup
-
-#### Renaming VMs
-- Select a VM and click **Rename**
-- Enter a new name
-- Bundle directory and all references updated automatically
-
-#### Deleting VMs
-- Select a VM and click **Delete**
-- Confirmation prompt (deletion is permanent)
-- Removes VM bundle and all associated files
+### macOS VM Support
+- Automatic download of latest macOS restore images
+- Full macOS guest support with native integration
+- IPSW caching to avoid re-downloading
 
 ## Getting Started
 
@@ -119,211 +45,73 @@ While QEMU is excellent for cross-platform compatibility and exotic architecture
 - Xcode (for building from source)
 - Apple Developer account (for code signing)
 
-### Building & Running
-
-1. Clone the repository and open `SecVF.xcodeproj` in Xcode
-2. Navigate to **Signing & Capabilities** and select your team ID
-3. Build and run the application (⌘R)
+### Building
+```bash
+git clone <repository-url>
+open SecVF.xcodeproj
+# Configure signing in Xcode, then build (⌘R)
+```
 
 ### First Launch
-
-When you launch SecVF for the first time, you'll see the **Virtual Machine Library** window.
-
-**Migration**: If you have VMs from previous versions in `~/GUI Linux VM.bundle/` or `~/VirtualMachines/`, they will be automatically migrated to the new organized structure at `~/.avf/Linux/` or `~/.avf/MacOS/`.
+VMs from legacy locations are automatically migrated to `~/.avf/Linux/` or `~/.avf/MacOS/`.
 
 ## VM Storage Structure
 
-VMs are organized by OS type in a hidden `.avf` directory in your home folder:
-
-```
-~/.avf/
-  ├── Linux/
-  │   └── Ubuntu.bundle/
-  │       ├── Disk.img           # Virtual disk image
-  │       ├── NVRAM              # EFI variable store
-  │       ├── MachineIdentifier  # Unique VM identifier
-  │       └── metadata.json      # VM configuration
-  └── MacOS/
-      └── macOS Sonoma.bundle/
-          ├── Disk.img
-          ├── NVRAM
-          ├── MachineIdentifier
-          ├── metadata.json
-          └── UniversalMac_15.0_24A335_Restore.ipsw  # macOS installer
-```
-
-Each VM is self-contained in its own `.bundle` directory with all necessary files.
+VMs stored in `~/.avf/` directory organized by OS type. Each VM bundle contains: Disk.img, NVRAM, MachineIdentifier, metadata.json, and IPSW (macOS only).
 
 ## Advanced Features
 
-### Rosetta Support (Apple Silicon Only)
+### Rosetta Support (Apple Silicon)
+Enable Rosetta when creating Linux VMs to run x86_64 binaries transparently on ARM Linux. See [Apple's documentation](https://developer.apple.com/documentation/virtualization/running_intel_binaries_in_linux_vms_with_rosetta).
 
-SecVF supports Apple's Rosetta translation environment for running x86_64 (Intel) binaries inside ARM Linux VMs:
-
-1. When creating a Linux VM on Apple Silicon, check **Enable Rosetta**
-2. After installing Linux, install `rosetta` support in the guest
-3. Run x86_64 Linux binaries transparently on ARM Linux
-
-See Apple's documentation: [Running Intel Binaries in Linux VMs with Rosetta](https://developer.apple.com/documentation/virtualization/running_intel_binaries_in_linux_vms_with_rosetta)
-
-### Copy & Paste Support
-
-SecVF includes SPICE agent support for seamless clipboard integration between macOS host and Linux guests.
-
-**Setup for Linux VMs**:
-1. Install the SPICE agent in your Linux guest:
-   ```bash
-   # Ubuntu/Debian
-   sudo apt install spice-vdagent
-
-   # Fedora
-   sudo dnf install spice-vdagent
-   ```
-2. Copy/paste text and images between macOS and the Linux VM
-
-### Virtual Network Switch (Unique Feature)
-
-SecVF includes a **software-based Ethernet switch** for VM-to-VM communication without exposing VMs to the physical network - a feature not found in other macOS virtualization solutions.
-
-**Why This Matters for Malware Analysis:**
-- Analyze network-aware malware in a completely isolated sandbox
-- Set up a Linux VM as a router with monitoring tools (Wireshark, tcpdump)
-- Route macOS VMs through the Linux router to capture all malware traffic
-- Zero risk of malware escaping to your local network
-- Works completely offline - no physical network required
-
-**How It Works:**
-1. Create a Linux VM and configure it as "Act as Router for other VMs"
-2. Install monitoring tools in the Linux router VM
-3. Create macOS VMs and select which Linux router to use
-4. All macOS VM traffic flows through the Linux router for inspection
-5. Linux router provides internet access via NAT if needed
-
-**Architecture:**
-```
-┌──────────────┐         ┌──────────────┐         ┌──────────────┐
-│  macOS VM    │◄────────┤   Virtual    │────────►│  Linux VM    │
-│  (Malware)   │ Socket  │   Ethernet   │ Socket  │  (Router)    │
-│              │  Pair   │   Switch     │  Pair   │              │
-└──────────────┘         └──────────────┘         └──────┬───────┘
-                               │                          │
-                         No Physical                  NAT to
-                          Network!                   Internet
+### Clipboard Sharing
+Install SPICE agent in Linux VMs for seamless copy/paste:
+```bash
+# Ubuntu/Debian
+sudo apt install spice-vdagent
 ```
 
-**Security Benefits:**
+### Virtual Network Switch
+Software-based Ethernet switch for VM-to-VM communication without physical network exposure. Perfect for malware analysis:
+
+- Linux VMs act as routers with monitoring tools (Wireshark, tcpdump)
+- Route macOS VMs through Linux routers to capture malware traffic
 - Complete isolation from physical network
-- All traffic logged at `~/.avf/logs/network-YYYY-MM-DD.log`
-- MAC address learning and validation
-- Rate limiting (10,000 pps, 1,000 broadcasts/sec)
-- MAC spoofing detection
-- Packet size validation
+- All traffic logged to `~/.avf/logs/network-YYYY-MM-DD.log`
+- Security features: MAC validation, rate limiting, spoofing detection
 
 **Network Modes:**
-1. **NAT (Default)** - Direct internet access, isolated from other VMs
-2. **Virtual Network** - VM-to-VM communication only, no physical network exposure
-
-Configure network mode when creating a VM in the VM Library.
+- **NAT** - Direct internet access (default)
+- **Virtual Network** - VM-to-VM only, fully isolated
 
 ### Real-Time Monitoring
+Access via menu bar `Monitoring` or keyboard shortcuts:
+- `⌘⇧1` - **Security Logs** - VM lifecycle, resource warnings, breakout detection
+- `⌘⇧2` - **Network Logs** - Packet forwarding, MAC learning, rate limiting
+- `⌘⇧3` - **Virtual Switch Stats** - Port status, packet counts, learned MACs
 
-SecVF includes a **Monitoring** menu in the macOS menu bar with real-time log viewers:
-
-**Access via Menu Bar**: `Monitoring` → Choose log type
-
-**Keyboard Shortcuts**:
-- `⌘⇧1` - Security Logs
-- `⌘⇧2` - Network Logs
-- `⌘⇧3` - Virtual Switch Statistics
-
-**Log Viewer Features**:
-- **Auto-refresh** every 2 seconds - see new events as they happen
-- **Syntax highlighting** - Color-coded by severity (INFO, WARNING, ERROR, CRITICAL)
-- **Auto-scroll** - Optionally scroll to latest entries automatically
-- **Search & filter** - Standard text search (⌘F)
-- **Export** - Copy/paste logs for reporting
-
-**Log Types**:
-
-1. **Security Logs** (`~/.avf/logs/security-YYYY-MM-DD.log`)
-   - VM lifecycle events (start/stop)
-   - Filesystem access attempts
-   - Resource usage warnings
-   - Potential breakout detection
-   - Security recommendations
-
-2. **Network Logs** (`~/.avf/logs/network-YYYY-MM-DD.log`)
-   - Packet forwarding events
-   - MAC address learning
-   - Broadcast/multicast traffic
-   - Rate limiting violations
-   - MAC spoofing detection
-
-3. **Virtual Switch Statistics**
-   - Real-time port status
-   - Packet counts (RX/TX)
-   - Learned MAC addresses
-   - Connected VM overview
-
-**Example Usage**:
-```
-1. Start VMs configured for virtual networking
-2. Open Monitoring → Network Logs (⌘⇧2)
-3. Watch real-time packet flow between VMs
-4. Switch to Security Logs (⌘⇧1) to monitor VM behavior
-5. Check Virtual Switch Statistics (⌘⇧3) for traffic overview
-```
+Features: Auto-refresh, syntax highlighting, auto-scroll, search (⌘F)
+Logs stored in `~/.avf/logs/`
 
 ## Security & Malware Analysis
 
-SecVF is specifically designed for **security research and malware analysis** in isolated sandbox environments. The application includes comprehensive security monitoring and containment features to protect your host system while analyzing potentially malicious code.
+Designed for security research and malware analysis with hardware-enforced VM isolation, real-time monitoring, breakout detection, and security event logging.
 
-### Key Security Features
+**Best Practices:**
+- Use dedicated VMs for each analysis session
+- Monitor logs: `tail -f ~/.avf/logs/security-$(date +%Y-%m-%d).log`
+- VMs have internet access - malware can communicate externally
+- Delete infected VMs after analysis
 
-- **Real-time Security Monitoring** - Active monitoring of VM filesystem, resource usage, and state changes
-- **Containment Enforcement** - Hardware-enforced VM isolation via Apple's hypervisor
-- **Breakout Detection** - Automated detection of potential escape attempts
-- **Security Event Logging** - Detailed logs of all VM activity in `~/.avf/logs/`
-- **Download Validation** - Multi-layer security for macOS IPSW downloads
-- **Resource Monitoring** - Detection of CPU/memory exhaustion attacks
-
-### Security Recommendations
-
-When analyzing malware or untrusted software:
-- ✅ Use dedicated VMs for each analysis session
-- ✅ Monitor security logs: `tail -f ~/.avf/logs/security-$(date +%Y-%m-%d).log`
-- ✅ Review console output for security warnings on VM start
-- ⚠️ Be aware: VMs have internet access - malware can communicate externally
-- ⚠️ Delete infected VMs after analysis - do not clone or export
-
-### Complete Security Documentation
-
-**For detailed security information, threat model, best practices, and incident response procedures, see:**
-
-**[📋 SECURITY.md](SECURITY.md)** - Complete security guide covering:
-- Threat model and attack scenarios
-- VM isolation architecture
-- Monitoring and detection capabilities
-- Best practices for malware analysis
-- Incident response procedures
-- Known limitations and hardening recommendations
+**See [SECURITY.md](SECURITY.md) for complete threat model, incident response procedures, and hardening recommendations.**
 
 ## Troubleshooting
 
-### VM Won't Start
-- Verify the VM bundle directory exists in `~/.avf/Linux/` or `~/.avf/MacOS/`
-- Check that disk image, NVRAM, and MachineIdentifier files are present
-- Review console logs for specific error messages
+**VM Won't Start:** Verify VM bundle exists in `~/.avf/`, check required files (Disk.img, NVRAM, MachineIdentifier), review console logs.
 
-### Linux VM Installation Issues
-- Ensure the ISO matches your Mac's architecture (ARM64 for Apple Silicon, x86_64 for Intel)
-- Verify the ISO file is not corrupted (check SHA256 hash against official source)
-- Allocate sufficient memory (minimum 2GB, recommended 4GB+)
+**Linux Installation:** ISO must match Mac architecture (ARM64/x86_64), allocate 4GB+ memory, verify ISO hash.
 
-### macOS VM Download Fails
-- Check internet connection
-- Verify you have sufficient disk space (macOS IPSWs are 12-15GB)
-- Ensure firewall isn't blocking Apple's CDN servers
+**macOS Download Fails:** Check internet connection, ensure 15GB+ free space, verify firewall allows Apple CDN access.
 
 ## License
 

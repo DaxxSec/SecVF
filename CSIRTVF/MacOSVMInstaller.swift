@@ -93,12 +93,19 @@ class MacOSVMInstaller: NSObject {
 
         // Fetch the latest restore image info first
         progressHandler?(0, "Checking for latest macOS restore image...")
+        print("[IPSW] Starting fetch for latest macOS restore image...")
 
         VZMacOSRestoreImage.fetchLatestSupported { [weak self] result in
-            guard let self = self else { return }
+            guard let self = self else {
+                print("[IPSW] Self was nil in completion handler")
+                return
+            }
+
+            print("[IPSW] Fetch completed, processing result...")
 
             switch result {
             case .success(let restoreImage):
+                print("[IPSW] SUCCESS - Found restore image")
                 print("Latest macOS restore image: \(restoreImage.operatingSystemVersion)")
                 print("Remote URL: \(restoreImage.url)")
 
@@ -136,7 +143,9 @@ class MacOSVMInstaller: NSObject {
                 self.downloadRestoreImage(from: restoreImage.url)
 
             case .failure(let error):
-                print("Failed to fetch restore image: \(error)")
+                print("[IPSW] FAILURE - Error fetching restore image: \(error)")
+                print("[IPSW] Error details: \(error.localizedDescription)")
+                self.progressHandler?(0, "Failed to fetch macOS image")
                 self.completionHandler?(.failure(error))
             }
         }

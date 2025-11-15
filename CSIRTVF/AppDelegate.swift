@@ -8,7 +8,7 @@ The app delegate that sets up and starts the virtual machine.
 import Virtualization
 
 @main
-class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
 
     @IBOutlet var window: NSWindow!
 
@@ -27,6 +27,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
     // Log viewer windows (retained to prevent deallocation)
     private var securityLogViewer: LogViewerWindowController?
     private var networkLogViewer: LogViewerWindowController?
+
+    // Splash screen (retained while showing)
+    private var splashScreen: SplashScreenWindow?
 
     override init() {
         super.init()
@@ -68,6 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
     }
 
     private func showMainWindowAndStartVM() {
+        window.delegate = self  // Set delegate to receive window close events
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         configureAndStartVirtualMachine()
@@ -481,8 +485,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
     }
 
     private func showSplashScreen() {
-        let splash = SplashScreenWindow()
-        splash.makeKeyAndOrderFront(nil)
+        splashScreen = SplashScreenWindow()
+        splashScreen?.orderFront(nil) // Don't make it key since it can't become key
+
+        // Splash screen will close itself and deallocate naturally
     }
 
     // MARK: - Monitoring Menu Setup
@@ -604,6 +610,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate {
         // Don't automatically terminate when windows close - we need to manage window lifecycle
         // for switching between library and VM windows
         return false
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        // When the VM window closes, stop the VM if it's running
+        guard notification.object as? NSWindow == window else { return }
+
+        if let vm = virtualMachine, vm.state == .running || vm.state == .starting {
+            print("VM window closing - stopping VM...")
+            vm.stop { error in
+                if let error = error {
+                    print("Error stopping VM: \(error)")
+                } else {
+                    // Update status
+                    VMManager.shared.updateVMStatus(self.vmConfig, status: .stopped)
+
+                    // SECURITY: Stop security monitoring
+                    VMSecurityMonitor.shared.stopMonitoring(vmID: self.vmConfig.id)
+
+                    // NETWORK: Disconnect from virtual switch
+                    if self.vmConfig.networkConfig.mode == .virtual {
+                        VirtualNetworkSwitch.shared.disconnectPort(vmId: self.vmConfig.id)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: VZVirtualMachineDelegate methods.

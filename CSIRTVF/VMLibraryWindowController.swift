@@ -8,16 +8,19 @@ import Virtualization
 
 class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
 
-    @IBOutlet weak var tableView: NSTableView!
-    @IBOutlet weak var startButton: NSButton!
-    @IBOutlet weak var newButton: NSButton!
-    @IBOutlet weak var deleteButton: NSButton!
-    @IBOutlet weak var renameButton: NSButton!
-    @IBOutlet weak var cloneButton: NSButton!
-    @IBOutlet weak var importButton: NSButton!
+    @IBOutlet weak var tableView: NSTableView?
+    @IBOutlet weak var startButton: NSButton?
+    @IBOutlet weak var newButton: NSButton?
+    @IBOutlet weak var deleteButton: NSButton?
+    @IBOutlet weak var renameButton: NSButton?
+    @IBOutlet weak var cloneButton: NSButton?
+    @IBOutlet weak var importButton: NSButton?
 
     private var vmManager = VMManager.shared
     var selectedVM: VMConfiguration?
+    private var statusBar: NSView?
+    private var statusLabel: NSTextField?
+    private var runningVMsContainer: NSStackView?
 
     override var windowNibName: NSNib.Name? {
         return "VMLibraryWindow"
@@ -29,30 +32,40 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Set window delegate to handle close button
         window?.delegate = self
 
-        // Apply dark theme and add sidebar
+        // Ensure window stays in front
+        window?.level = .normal
+        window?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        // Apply dark theme, add sidebar, and add status bar
         applyDarkTheme()
         addSidebar()
+        addStatusBar()
 
         // Configure table view
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.target = self
-        tableView.doubleAction = #selector(startVM(_:))
+        tableView?.dataSource = self
+        tableView?.delegate = self
+        tableView?.target = self
+        tableView?.doubleAction = #selector(startVM(_:))
 
         // Load VMs asynchronously to avoid blocking main thread
         vmManager.initializeAsync { [weak self] in
             guard let self = self else { return }
             print("DEBUG: VM initialization complete - VM count: \(self.vmManager.virtualMachines.count)")
-            self.tableView.reloadData()
+            self.tableView?.reloadData()
+            self.refreshStatusBar()
         }
 
         // Force the table to use view-based mode
-        tableView.rowSizeStyle = .default
+        tableView?.rowSizeStyle = .default
 
         // Debug: Print all table columns and their identifiers
-        print("DEBUG: Table has \(tableView.tableColumns.count) columns:")
-        for column in tableView.tableColumns {
-            print("  - Column identifier: \(column.identifier.rawValue)")
+        if let tableView = tableView {
+            print("DEBUG: Table has \(tableView.tableColumns.count) columns:")
+            for column in tableView.tableColumns {
+                print("  - Column identifier: \(column.identifier.rawValue)")
+            }
+        } else {
+            print("WARNING: tableView is nil in windowDidLoad!")
         }
 
         // Register for VM status change notifications
@@ -67,7 +80,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         updateButtonStates()
 
         // Reload data
-        tableView.reloadData()
+        tableView?.reloadData()
     }
 
     // MARK: - Dark Theme & Sidebar
@@ -78,32 +91,32 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Set window appearance to dark
         window.appearance = NSAppearance(named: .darkAqua)
 
-        // Dark background for content view
+        // Cybersecurity dark background - deep black
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.15, alpha: 1.0).cgColor
+        contentView.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
 
-        // Style table view with dark theme
-        tableView.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.18, alpha: 1.0)
-        tableView.enclosingScrollView?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.18, alpha: 1.0)
-        tableView.gridColor = NSColor(white: 0.25, alpha: 1.0)
+        // Style table view with dark theme - darker grey
+        tableView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
+        tableView?.enclosingScrollView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
+        tableView?.gridColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan grid
     }
 
     private func addSidebar() {
         guard let window = window, let contentView = window.contentView else { return }
 
-        let sidebarWidth: CGFloat = 250
+        let sidebarWidth: CGFloat = 220
 
         // Create sidebar view
         let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: sidebarWidth, height: contentView.bounds.height))
         sidebar.autoresizingMask = [.height]
         sidebar.wantsLayer = true
 
-        // Gradient background for sidebar
+        // Cybersecurity gradient - dark grey to black with blue tint
         let gradientLayer = CAGradientLayer()
         gradientLayer.frame = sidebar.bounds
         gradientLayer.colors = [
-            NSColor(red: 0.08, green: 0.12, blue: 0.24, alpha: 1.0).cgColor,  // Dark navy
-            NSColor(red: 0.12, green: 0.16, blue: 0.32, alpha: 1.0).cgColor   // Lighter navy
+            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 1.0).cgColor,  // Deep black
+            NSColor(red: 0.06, green: 0.08, blue: 0.12, alpha: 1.0).cgColor   // Charcoal with blue tint
         ]
         gradientLayer.startPoint = CGPoint(x: 0, y: 1)
         gradientLayer.endPoint = CGPoint(x: 1, y: 0)
@@ -117,24 +130,48 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         logoView.autoresizingMask = [.minYMargin]
         sidebar.addSubview(logoView)
 
-        // Title
-        let titleLabel = NSTextField(labelWithString: "SecVF")
+        // Title - Two-tone: "CSIRT" in neon cyan, "VF" in olive green
+        let titleLabel = NSTextField()
         titleLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 220, width: sidebarWidth - 40, height: 35)
         titleLabel.alignment = .center
-        titleLabel.font = NSFont.systemFont(ofSize: 28, weight: .heavy)
-        titleLabel.textColor = NSColor(red: 0.4, green: 0.6, blue: 1.0, alpha: 1.0)  // Electric blue
         titleLabel.isBordered = false
         titleLabel.isEditable = false
         titleLabel.drawsBackground = false
         titleLabel.autoresizingMask = [.minYMargin]
+
+        // Create attributed string with two colors and center alignment
+        let attributedTitle = NSMutableAttributedString()
+        let font = NSFont.monospacedSystemFont(ofSize: 26, weight: .heavy)
+
+        // Create paragraph style for centering
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.alignment = .center
+
+        // "CSIRT" in neon cyan
+        let csirtPart = NSAttributedString(string: "CSIRT", attributes: [
+            .font: font,
+            .foregroundColor: NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0),
+            .paragraphStyle: paragraphStyle
+        ])
+        attributedTitle.append(csirtPart)
+
+        // "VF" in cool olive green
+        let vfPart = NSAttributedString(string: "VF", attributes: [
+            .font: font,
+            .foregroundColor: NSColor(red: 0.5, green: 0.85, blue: 0.3, alpha: 1.0),  // Cool olive green
+            .paragraphStyle: paragraphStyle
+        ])
+        attributedTitle.append(vfPart)
+
+        titleLabel.attributedStringValue = attributedTitle
         sidebar.addSubview(titleLabel)
 
-        // Subtitle
+        // Subtitle - Light cyan
         let subtitleLabel = NSTextField(labelWithString: "VM Sandbox Environment")
         subtitleLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 245, width: sidebarWidth - 40, height: 20)
         subtitleLabel.alignment = .center
-        subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-        subtitleLabel.textColor = NSColor(red: 0.6, green: 0.7, blue: 0.9, alpha: 1.0)
+        subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        subtitleLabel.textColor = NSColor(red: 0.5, green: 0.75, blue: 0.8, alpha: 1.0)
         subtitleLabel.isBordered = false
         subtitleLabel.isEditable = false
         subtitleLabel.drawsBackground = false
@@ -146,29 +183,29 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         separator1.autoresizingMask = [.minYMargin, .width]
         sidebar.addSubview(separator1)
 
-        // Info section
-        let infoY = contentView.bounds.height - 310
-        addInfoLabel(to: sidebar, text: "Developed by", y: infoY, bold: false)
-        addInfoLabel(to: sidebar, text: "ItzDaxxy", y: infoY - 25, bold: true)
-        addInfoLabel(to: sidebar, text: "", y: infoY - 55, bold: false, color: NSColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 1.0))
-        addInfoLabel(to: sidebar, text: "itzdaxxy@users.noreply.github.com", y: infoY - 80, bold: false, color: NSColor(red: 0.5, green: 0.7, blue: 1.0, alpha: 1.0))
-
-        // Separator line
-        let separator2 = createSeparator(y: 120, width: sidebarWidth)
-        separator2.autoresizingMask = [.maxYMargin, .width]
-        sidebar.addSubview(separator2)
-
-        // Stats/Info at bottom
-        let statsLabel = NSTextField(labelWithString: "🛡️ Malware Analysis\n🔒 Isolated Sandbox\n🌐 Virtual Networking")
-        statsLabel.frame = NSRect(x: 20, y: 20, width: sidebarWidth - 40, height: 80)
-        statsLabel.alignment = .left
-        statsLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        statsLabel.textColor = NSColor(white: 0.7, alpha: 1.0)
+        // Stats/Info below title - Neon green accents - centered
+        let statsLabel = NSTextField(labelWithString: "▸ Malware Analysis\n▸ Isolated Sandbox\n▸ Virtual Networking")
+        statsLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 360, width: sidebarWidth - 40, height: 80)
+        statsLabel.alignment = .center
+        statsLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        statsLabel.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 0.9)  // Neon green
         statsLabel.isBordered = false
         statsLabel.isEditable = false
         statsLabel.drawsBackground = false
-        statsLabel.autoresizingMask = [.maxYMargin]
+        statsLabel.autoresizingMask = [.minYMargin]
         sidebar.addSubview(statsLabel)
+
+        // Separator line
+        let separator2 = createSeparator(y: 160, width: sidebarWidth)
+        separator2.autoresizingMask = [.maxYMargin, .width]
+        sidebar.addSubview(separator2)
+
+        // Developer info section at bottom - centered
+        let infoY: CGFloat = 120
+        addInfoLabel(to: sidebar, text: "Developed by", y: infoY, bold: false)
+        addInfoLabel(to: sidebar, text: "ItzDaxxy", y: infoY - 25, bold: true)
+        addInfoLabel(to: sidebar, text: "", y: infoY - 55, bold: false, color: NSColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0))
+        addInfoLabel(to: sidebar, text: "itzdaxxy@users.noreply.github.com", y: infoY - 80, bold: false, color: NSColor(red: 0.0, green: 0.85, blue: 1.0, alpha: 1.0))
 
         // Add sidebar to window
         contentView.addSubview(sidebar, positioned: .above, relativeTo: nil)
@@ -178,75 +215,96 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     private func createStylizedLogo() -> NSImage {
+        // Cybersecurity/hacker themed logo matching splash screen
         let size = CGSize(width: 170, height: 120)
         let image = NSImage(size: size)
 
         image.lockFocus()
 
-        // Shield outline with glow
-        let shieldPath = NSBezierPath()
-        shieldPath.move(to: CGPoint(x: size.width * 0.5, y: size.height * 0.95))
-        shieldPath.curve(
-            to: CGPoint(x: size.width * 0.15, y: size.height * 0.65),
-            controlPoint1: CGPoint(x: size.width * 0.25, y: size.height * 0.88),
-            controlPoint2: CGPoint(x: size.width * 0.15, y: size.height * 0.75)
-        )
-        shieldPath.line(to: CGPoint(x: size.width * 0.15, y: size.height * 0.35))
-        shieldPath.curve(
-            to: CGPoint(x: size.width * 0.5, y: size.height * 0.05),
-            controlPoint1: CGPoint(x: size.width * 0.15, y: size.height * 0.2),
-            controlPoint2: CGPoint(x: size.width * 0.3, y: size.height * 0.05)
-        )
-        shieldPath.curve(
-            to: CGPoint(x: size.width * 0.85, y: size.height * 0.35),
-            controlPoint1: CGPoint(x: size.width * 0.7, y: size.height * 0.05),
-            controlPoint2: CGPoint(x: size.width * 0.85, y: size.height * 0.2)
-        )
-        shieldPath.line(to: CGPoint(x: size.width * 0.85, y: size.height * 0.65))
-        shieldPath.curve(
-            to: CGPoint(x: size.width * 0.5, y: size.height * 0.95),
-            controlPoint1: CGPoint(x: size.width * 0.85, y: size.height * 0.75),
-            controlPoint2: CGPoint(x: size.width * 0.75, y: size.height * 0.88)
-        )
-        shieldPath.close()
+        let centerX = size.width / 2
+        let centerY = size.height / 2
 
-        // Gradient fill
-        let gradient = NSGradient(colors: [
-            NSColor(red: 0.25, green: 0.45, blue: 0.95, alpha: 1.0),
-            NSColor(red: 0.35, green: 0.55, blue: 1.0, alpha: 1.0),
-            NSColor(red: 0.25, green: 0.45, blue: 0.95, alpha: 1.0)
-        ])
-        gradient?.draw(in: shieldPath, angle: -45)
+        // Hexagonal border (cybersecurity theme)
+        let hexPath = NSBezierPath()
+        let hexRadius: CGFloat = 42
+        for i in 0..<6 {
+            let angle = CGFloat(i) * .pi / 3.0
+            let x = centerX + hexRadius * cos(angle)
+            let y = centerY + hexRadius * sin(angle)
+            if i == 0 {
+                hexPath.move(to: CGPoint(x: x, y: y))
+            } else {
+                hexPath.line(to: CGPoint(x: x, y: y))
+            }
+        }
+        hexPath.close()
+        hexPath.lineWidth = 2.5
 
-        // Eye symbol (security/monitoring)
-        let eyeOuter = NSBezierPath(ovalIn: NSRect(
-            x: size.width * 0.32,
-            y: size.height * 0.38,
-            width: size.width * 0.36,
-            height: size.height * 0.24
-        ))
-        NSColor.black.withAlphaComponent(0.4).setFill()
-        eyeOuter.fill()
+        // Neon cyan stroke
+        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0).setStroke()
+        hexPath.stroke()
 
-        // Pupil
-        let pupil = NSBezierPath(ovalIn: NSRect(
-            x: size.width * 0.43,
-            y: size.height * 0.43,
-            width: size.width * 0.14,
-            height: size.height * 0.14
-        ))
-        NSColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1.0).setFill()
-        pupil.fill()
+        // Digital lock icon in center
+        let lockWidth: CGFloat = 20
+        let lockHeight: CGFloat = 24
+        let lockX = centerX - lockWidth / 2
+        let lockY = centerY - lockHeight / 2
 
-        // Highlight
-        let highlight = NSBezierPath(ovalIn: NSRect(
-            x: size.width * 0.47,
-            y: size.height * 0.49,
-            width: size.width * 0.06,
-            height: size.height * 0.06
-        ))
-        NSColor.white.setFill()
-        highlight.fill()
+        // Lock body
+        let lockBody = NSBezierPath(roundedRect: NSRect(x: lockX, y: lockY, width: lockWidth, height: lockHeight * 0.6), xRadius: 2, yRadius: 2)
+        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.8).setFill()
+        lockBody.fill()
+
+        // Lock shackle (top arc)
+        let shacklePath = NSBezierPath()
+        shacklePath.appendArc(
+            withCenter: CGPoint(x: centerX, y: lockY + lockHeight * 0.6),
+            radius: lockWidth * 0.35,
+            startAngle: 0,
+            endAngle: 180,
+            clockwise: false
+        )
+        shacklePath.lineWidth = 3.0
+        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0).setStroke()
+        shacklePath.stroke()
+
+        // Keyhole
+        let keyholePath = NSBezierPath(ovalIn: NSRect(x: centerX - 2, y: lockY + 5, width: 4, height: 4))
+        let keyholeSlot = NSBezierPath(rect: NSRect(x: centerX - 1, y: lockY + 2, width: 2, height: 5))
+        NSColor.black.setFill()
+        keyholePath.fill()
+        keyholeSlot.fill()
+
+        // Circuit board pattern in corners (hacker aesthetic)
+        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.4).setStroke()
+
+        // Top-left circuit
+        let circuit1 = NSBezierPath()
+        circuit1.move(to: CGPoint(x: 25, y: 85))
+        circuit1.line(to: CGPoint(x: 45, y: 85))
+        circuit1.line(to: CGPoint(x: 45, y: 75))
+        circuit1.lineWidth = 1.2
+        circuit1.stroke()
+
+        // Draw nodes
+        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.8).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 23, y: 83, width: 4, height: 4)).fill()
+        NSBezierPath(ovalIn: NSRect(x: 43, y: 83, width: 4, height: 4)).fill()
+        NSBezierPath(ovalIn: NSRect(x: 43, y: 73, width: 4, height: 4)).fill()
+
+        // Bottom-right circuit
+        let circuit2 = NSBezierPath()
+        circuit2.move(to: CGPoint(x: 145, y: 35))
+        circuit2.line(to: CGPoint(x: 125, y: 35))
+        circuit2.line(to: CGPoint(x: 125, y: 45))
+        circuit2.lineWidth = 1.2
+        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.4).setStroke()
+        circuit2.stroke()
+
+        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.8).setFill()
+        NSBezierPath(ovalIn: NSRect(x: 143, y: 33, width: 4, height: 4)).fill()
+        NSBezierPath(ovalIn: NSRect(x: 123, y: 33, width: 4, height: 4)).fill()
+        NSBezierPath(ovalIn: NSRect(x: 123, y: 43, width: 4, height: 4)).fill()
 
         image.unlockFocus()
         return image
@@ -255,7 +313,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func createSeparator(y: CGFloat, width: CGFloat) -> NSBox {
         let separator = NSBox(frame: NSRect(x: 20, y: y, width: width - 40, height: 1))
         separator.boxType = .separator
-        separator.fillColor = NSColor(white: 0.3, alpha: 0.5)
+        separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan glow
         return separator
     }
 
@@ -275,25 +333,252 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func adjustContentForSidebar(sidebarWidth: CGFloat) {
         guard let window = window, let contentView = window.contentView else { return }
 
+        // Find the scroll view containing the table
+        let scrollView = tableView?.enclosingScrollView
+
         // Adjust all existing content to move right by sidebar width
         for subview in contentView.subviews {
-            if subview.frame.minX < sidebarWidth {
-                // Skip the sidebar itself
+            // Skip the sidebar itself (it's the last subview we added)
+            if subview.frame.minX == 0 && subview.frame.width == sidebarWidth {
                 continue
             }
+
+            // Move subview to the right of the sidebar
             var frame = subview.frame
             frame.origin.x += sidebarWidth
-            if let scrollView = subview as? NSScrollView {
-                frame.size.width -= sidebarWidth
+
+            // If it's a scroll view (table container), reduce its width
+            if subview == scrollView {
+                frame.size.width = max(contentView.bounds.width - sidebarWidth, 400)
+            }
+
+            subview.frame = frame
+
+            // Set autoresizing mask for dynamic layout
+            if subview == scrollView {
+                subview.autoresizingMask = [.width, .height]
+            } else {
+                subview.autoresizingMask = [.maxXMargin, .minYMargin]
+            }
+        }
+
+        // Increase window minimum size to show all buttons
+        window.minSize = NSSize(width: sidebarWidth + 800, height: 500)
+
+        // Set default window size to ensure all controls are visible
+        var windowFrame = window.frame
+        if windowFrame.size.width < sidebarWidth + 1000 || windowFrame.size.height < 600 {
+            windowFrame.size.width = sidebarWidth + 1000
+            windowFrame.size.height = 600
+            windowFrame.origin.x -= (sidebarWidth + 1000 - window.frame.width) / 2  // Keep window centered
+            windowFrame.origin.y -= (600 - window.frame.height) / 2
+            window.setFrame(windowFrame, display: true, animate: false)
+        }
+    }
+
+    private func addStatusBar() {
+        guard let window = window, let contentView = window.contentView else { return }
+
+        let statusBarHeight: CGFloat = 60
+        let sidebarWidth: CGFloat = 220
+
+        // First, move ALL existing subviews up by statusBarHeight (except sidebar)
+        for subview in contentView.subviews {
+            // Skip the sidebar (it's at x=0, width=220)
+            if subview.frame.minX == 0 && subview.frame.width == sidebarWidth {
+                continue
+            }
+
+            // Move everything else up
+            var frame = subview.frame
+            if frame.origin.y < contentView.bounds.height / 2 {
+                // Only move things in the bottom half up
+                frame.origin.y += statusBarHeight
             }
             subview.frame = frame
         }
 
-        // Increase window width to accommodate sidebar
-        var windowFrame = window.frame
-        windowFrame.size.width += sidebarWidth
-        windowFrame.origin.x -= sidebarWidth / 2  // Keep window centered
-        window.setFrame(windowFrame, display: true, animate: false)
+        // Adjust table view specifically
+        if let scrollView = tableView?.enclosingScrollView {
+            var frame = scrollView.frame
+            frame.size.height -= statusBarHeight
+            scrollView.frame = frame
+        }
+
+        // Create status bar view
+        let statusBarView = NSView(frame: NSRect(x: 0, y: 0, width: contentView.bounds.width, height: statusBarHeight))
+        statusBarView.wantsLayer = true
+        statusBarView.autoresizingMask = [.width, .maxYMargin]
+
+        // Cybersecurity dark background with subtle gradient
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.frame = statusBarView.bounds
+        gradientLayer.colors = [
+            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 0.95).cgColor,
+            NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 0.95).cgColor
+        ]
+        gradientLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+        statusBarView.layer?.addSublayer(gradientLayer)
+
+        // Add top border with neon cyan
+        let borderView = NSBox(frame: NSRect(x: 0, y: statusBarHeight - 1, width: contentView.bounds.width, height: 1))
+        borderView.boxType = .separator
+        borderView.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.5)
+        borderView.autoresizingMask = [.width, .maxYMargin]
+        statusBarView.addSubview(borderView)
+
+        // Status label - shows running VMs count
+        let label = NSTextField(labelWithString: "● RUNNING VMs: 0")
+        label.frame = NSRect(x: sidebarWidth + 15, y: 25, width: 200, height: 20)
+        label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        label.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)  // Neon green
+        label.autoresizingMask = [.maxXMargin]
+        statusBarView.addSubview(label)
+        statusLabel = label
+
+        // Container for running VMs (horizontally scrollable) - increased height
+        let scrollView = NSScrollView(frame: NSRect(x: sidebarWidth + 15, y: 2, width: contentView.bounds.width - sidebarWidth - 30, height: 28))
+        scrollView.autoresizingMask = [.width]
+        scrollView.hasHorizontalScroller = true
+        scrollView.hasVerticalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.horizontalScrollElasticity = .allowed
+
+        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: 0, height: 28))
+        stackView.orientation = .horizontal
+        stackView.spacing = 15
+        stackView.alignment = .centerY
+        stackView.distribution = .gravityAreas
+        stackView.edgeInsets = NSEdgeInsets(top: 2, left: 0, bottom: 2, right: 0)
+
+        scrollView.documentView = stackView
+        statusBarView.addSubview(scrollView)
+        runningVMsContainer = stackView
+
+        // Add status bar to window - add it LAST so it's on top
+        contentView.addSubview(statusBarView)
+        statusBar = statusBarView
+    }
+
+    func updateStatusBar(runningVMs: [(vm: VMConfiguration, state: String)]) {
+        guard let container = runningVMsContainer, let label = statusLabel else {
+            print("DEBUG: Status bar container or label is nil!")
+            return
+        }
+
+        print("DEBUG: Updating status bar with \(runningVMs.count) running VMs")
+
+        // Update count
+        label.stringValue = "● RUNNING VMs: \(runningVMs.count)"
+
+        // Clear existing VM status items
+        container.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        // Add status item for each running VM
+        for (vm, state) in runningVMs {
+            print("DEBUG: Adding status item for VM: \(vm.name), state: \(state)")
+            let itemView = createVMStatusItem(vm: vm, state: state)
+            container.addArrangedSubview(itemView)
+        }
+
+        // Force layout update
+        container.needsLayout = true
+        container.layoutSubtreeIfNeeded()
+        print("DEBUG: Status bar updated, container has \(container.arrangedSubviews.count) views")
+    }
+
+    private func createVMStatusItem(vm: VMConfiguration, state: String) -> NSView {
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        containerView.wantsLayer = true
+        containerView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 0.8).cgColor
+        containerView.layer?.cornerRadius = 4
+        containerView.layer?.borderWidth = 1
+        containerView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Set explicit size constraints
+        containerView.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        containerView.heightAnchor.constraint(equalToConstant: 24).isActive = true
+
+        // VM name and state
+        let stateColor: NSColor
+        let stateIcon: String
+        switch state.lowercased() {
+        case "running":
+            stateColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)  // Neon green
+            stateIcon = "▶"
+        case "paused":
+            stateColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)  // Yellow
+            stateIcon = "⏸"
+        case "stopped":
+            stateColor = NSColor(red: 0.8, green: 0.3, blue: 0.3, alpha: 1.0)  // Red
+            stateIcon = "⏹"
+        default:
+            stateColor = NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0)  // Grey
+            stateIcon = "●"
+        }
+
+        let nameLabel = NSTextField(labelWithString: "\(stateIcon) \(vm.name)")
+        nameLabel.frame = NSRect(x: 8, y: 2, width: 150, height: 20)
+        nameLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        nameLabel.textColor = stateColor
+        nameLabel.lineBreakMode = .byTruncatingTail
+        containerView.addSubview(nameLabel)
+
+        // Action buttons
+        let buttonY: CGFloat = 3
+        let buttonHeight: CGFloat = 18
+        let buttonWidth: CGFloat = 38
+
+        // Stop button
+        let stopButton = NSButton(frame: NSRect(x: 165, y: buttonY, width: buttonWidth, height: buttonHeight))
+        stopButton.title = "Stop"
+        stopButton.bezelStyle = .roundRect
+        stopButton.font = NSFont.monospacedSystemFont(ofSize: 8, weight: .semibold)
+        stopButton.controlSize = .mini
+        stopButton.target = self
+        stopButton.action = #selector(stopVMFromStatusBar(_:))
+        stopButton.tag = vm.id.hashValue
+        containerView.addSubview(stopButton)
+
+        // Restart button
+        let restartButton = NSButton(frame: NSRect(x: 207, y: buttonY, width: buttonWidth, height: buttonHeight))
+        restartButton.title = "⟳"
+        restartButton.bezelStyle = .roundRect
+        restartButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        restartButton.controlSize = .mini
+        restartButton.target = self
+        restartButton.action = #selector(restartVMFromStatusBar(_:))
+        restartButton.tag = vm.id.hashValue
+        containerView.addSubview(restartButton)
+
+        // Pause button
+        let pauseButton = NSButton(frame: NSRect(x: 249, y: buttonY, width: 25, height: buttonHeight))
+        pauseButton.title = "⏸"
+        pauseButton.bezelStyle = .roundRect
+        pauseButton.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        pauseButton.controlSize = .mini
+        pauseButton.target = self
+        pauseButton.action = #selector(pauseVMFromStatusBar(_:))
+        pauseButton.tag = vm.id.hashValue
+        containerView.addSubview(pauseButton)
+
+        return containerView
+    }
+
+    @objc private func stopVMFromStatusBar(_ sender: NSButton) {
+        // TODO: Implement stop VM functionality
+        print("Stop VM with hash: \(sender.tag)")
+    }
+
+    @objc private func restartVMFromStatusBar(_ sender: NSButton) {
+        // TODO: Implement restart VM functionality
+        print("Restart VM with hash: \(sender.tag)")
+    }
+
+    @objc private func pauseVMFromStatusBar(_ sender: NSButton) {
+        // TODO: Implement pause VM functionality
+        print("Pause VM with hash: \(sender.tag)")
     }
 
     // MARK: - NSWindowDelegate
@@ -308,8 +593,32 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Refresh the table to show updated status
         DispatchQueue.main.async {
             print("DEBUG: VM status changed, refreshing table")
-            self.tableView.reloadData()
+            self.tableView?.reloadData()
+
+            // Update status bar with current running VMs
+            self.refreshStatusBar()
         }
+    }
+
+    private func refreshStatusBar() {
+        let runningVMs = vmManager.getRunningVMs()
+        print("DEBUG: Refreshing status bar - \(runningVMs.count) running VMs")
+        let vmStates: [(vm: VMConfiguration, state: String)] = runningVMs.map { vm in
+            let stateString: String
+            switch vm.status {
+            case .running:
+                stateString = "running"
+            case .starting:
+                stateString = "starting"
+            case .stopping:
+                stateString = "stopping"
+            default:
+                stateString = "stopped"
+            }
+            print("  - VM: \(vm.name), Status: \(stateString)")
+            return (vm: vm, state: stateString)
+        }
+        updateStatusBar(runningVMs: vmStates)
     }
 
     // MARK: - NSTableViewDataSource
@@ -400,9 +709,19 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     // MARK: - Actions
 
     @IBAction func startVM(_ sender: Any) {
+        guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to start")
+            return
+        }
+
+        // Check concurrent VM limit (max 2 VMs for Linux router support)
+        let runningCount = vmManager.getRunningVMsCount()
+        if runningCount >= 2 {
+            let runningVMs = vmManager.getRunningVMs()
+            let vmNames = runningVMs.map { $0.name }.joined(separator: ", ")
+            showAlert(message: "Maximum of 2 VMs can run concurrently (for Linux router + client support).\n\nCurrently running: \(vmNames)\n\nPlease stop a VM before starting another.")
             return
         }
 
@@ -411,8 +730,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Update last used date
         vmManager.updateLastUsedDate(selectedVM!)
 
-        // Hide this window (don't close it) and start the VM
-        window?.orderOut(nil)
+        // Keep the library window visible - don't hide it
+        // The VM guest window will open alongside the library window
 
         // Notify app delegate to start VM
         NotificationCenter.default.post(name: .startVM, object: selectedVM)
@@ -423,6 +742,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @IBAction func deleteVM(_ sender: Any) {
+        guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to delete")
@@ -449,6 +769,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @IBAction func renameVM(_ sender: Any) {
+        guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to rename")
@@ -480,6 +801,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @IBAction func cloneVM(_ sender: Any) {
+        guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to clone")
@@ -588,7 +910,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Start download - pass the VM bundle path
         let installer = MacOSVMInstaller(vmBundlePath: vmConfig.bundlePath)
 
-        installer.progressHandler = { [weak self] progress, message in
+        installer.progressHandler = { progress, message in
             DispatchQueue.main.async {
                 progressAlert.informativeText = message
                 let percentage = progress * 100.0
@@ -608,7 +930,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                     // Start VM with IPSW
                     self?.selectedVM = vmConfig
                     self?.vmManager.updateLastUsedDate(vmConfig)
-                    self?.window?.orderOut(nil)
+                    // Keep library window visible
                     NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": vmConfig, "iso": ipswURL])
 
                 case .failure(let error):
@@ -635,17 +957,17 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             for (index, vm) in self.vmManager.virtualMachines.enumerated() {
                 print("  - [\(index)] \(vm.name)")
             }
-            self.tableView.reloadData()
+            self.tableView?.reloadData()
             self.updateButtonStates()
         }
     }
 
     private func updateButtonStates() {
-        let hasSelection = tableView.selectedRow >= 0
-        startButton.isEnabled = hasSelection
-        deleteButton.isEnabled = hasSelection
-        renameButton.isEnabled = hasSelection
-        cloneButton.isEnabled = hasSelection
+        let hasSelection = tableView?.selectedRow ?? -1 >= 0
+        startButton?.isEnabled = hasSelection
+        deleteButton?.isEnabled = hasSelection
+        renameButton?.isEnabled = hasSelection
+        cloneButton?.isEnabled = hasSelection
     }
 
     private func showAlert(message: String) {
@@ -902,6 +1224,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
                 refreshTable()
 
+                // Check concurrent VM limit before starting
+                let runningCount = vmManager.getRunningVMsCount()
+                if runningCount >= 2 {
+                    let runningVMs = vmManager.getRunningVMs()
+                    let vmNames = runningVMs.map { $0.name }.joined(separator: ", ")
+                    showAlert(message: "Maximum of 2 VMs can run concurrently.\n\nCurrently running: \(vmNames)\n\nVM created but not started. Please stop a running VM first.")
+                    return
+                }
+
                 if osType == "macOS" {
                     // For macOS, automatically handle IPSW download/reuse
                     downloadAndPrepareMacOSVM(newVM)
@@ -917,7 +1248,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                         // Start VM with ISO
                         selectedVM = newVM
                         vmManager.updateLastUsedDate(newVM)
-                        window?.orderOut(nil)
+                        // Keep library window visible
                         NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": newVM, "iso": openPanel.url!])
                     }
                 }

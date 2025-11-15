@@ -60,6 +60,27 @@ struct VMConfiguration: Codable {
     // Runtime status (not saved to disk)
     var status: VMStatus = .stopped
 
+    // Custom decoder to handle missing networkConfig in old metadata files
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        bundlePath = try container.decode(String.self, forKey: .bundlePath)
+        cpuCount = try container.decode(Int.self, forKey: .cpuCount)
+        memorySize = try container.decode(UInt64.self, forKey: .memorySize)
+        diskSize = try container.decode(UInt64.self, forKey: .diskSize)
+        createdDate = try container.decode(Date.self, forKey: .createdDate)
+        lastUsedDate = try container.decodeIfPresent(Date.self, forKey: .lastUsedDate)
+        osType = try container.decode(String.self, forKey: .osType)
+
+        // Provide default if networkConfig is missing (for backward compatibility)
+        networkConfig = (try? container.decode(VirtualNetworkConfig.self, forKey: .networkConfig)) ?? VirtualNetworkConfig()
+
+        // status is not encoded/decoded (runtime only)
+        status = .stopped
+    }
+
     // Computed properties for file paths
     var diskImagePath: String {
         bundlePath + "Disk.img"
