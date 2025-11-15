@@ -120,50 +120,54 @@ class MacOSVMInstaller: NSObject {
 
             print("[IPSW] Fetch completed, processing result...")
 
-            // Ensure all UI updates happen on the main thread
-            DispatchQueue.main.async {
-                switch result {
-                case .success(let restoreImage):
-                    print("[IPSW] SUCCESS - Found restore image")
-                    print("Latest macOS restore image: \(restoreImage.operatingSystemVersion)")
-                    print("Remote URL: \(restoreImage.url)")
+            // Process result directly (don't wrap in DispatchQueue.main.async to avoid deadlock with modal dialog)
+            switch result {
+            case .success(let restoreImage):
+                print("[IPSW] SUCCESS - Found restore image")
+                print("Latest macOS restore image: \(restoreImage.operatingSystemVersion)")
+                print("Remote URL: \(restoreImage.url)")
 
-                    // SECURITY: Validate the URL before proceeding
-                    guard self.validateDownloadURL(restoreImage.url) else {
-                        let error = NSError(
-                            domain: "com.daxxsec.SecVF.security",
-                            code: 1001,
-                            userInfo: [NSLocalizedDescriptionKey: "Security validation failed: URL from unauthorized source"]
-                        )
+                // SECURITY: Validate the URL before proceeding
+                guard self.validateDownloadURL(restoreImage.url) else {
+                    let error = NSError(
+                        domain: "com.daxxsec.SecVF.security",
+                        code: 1001,
+                        userInfo: [NSLocalizedDescriptionKey: "Security validation failed: URL from unauthorized source"]
+                    )
+                    DispatchQueue.main.async {
                         self.completionHandler?(.failure(error))
-                        return
                     }
+                    return
+                }
 
-                    let remoteFileName = restoreImage.url.lastPathComponent
+                let remoteFileName = restoreImage.url.lastPathComponent
 
-                    // Check if we have a cached IPSW that matches the remote filename
-                    if let cachedIPSW = self.findCachedIPSW(in: ipswDir) {
-                        let cachedFileName = cachedIPSW.lastPathComponent
+                // Check if we have a cached IPSW that matches the remote filename
+                if let cachedIPSW = self.findCachedIPSW(in: ipswDir) {
+                    let cachedFileName = cachedIPSW.lastPathComponent
 
-                        if cachedFileName == remoteFileName {
-                            print("Found matching cached IPSW: \(cachedIPSW.path)")
+                    if cachedFileName == remoteFileName {
+                        print("Found matching cached IPSW: \(cachedIPSW.path)")
+                        DispatchQueue.main.async {
                             self.progressHandler?(1.0, "Using cached macOS restore image")
                             self.completionHandler?(.success(cachedIPSW))
-                            return
-                        } else {
-                            print("Cached IPSW (\(cachedFileName)) doesn't match latest (\(remoteFileName))")
-                            print("Removing outdated IPSW and downloading new version...")
-                            try? FileManager.default.removeItem(at: cachedIPSW)
                         }
+                        return
+                    } else {
+                        print("Cached IPSW (\(cachedFileName)) doesn't match latest (\(remoteFileName))")
+                        print("Removing outdated IPSW and downloading new version...")
+                        try? FileManager.default.removeItem(at: cachedIPSW)
                     }
+                }
 
-                    // No matching cached IPSW found, download the latest
-                    print("Downloading macOS restore image: \(restoreImage.operatingSystemVersion)")
-                    self.downloadRestoreImage(from: restoreImage.url)
+                // No matching cached IPSW found, download the latest
+                print("Downloading macOS restore image: \(restoreImage.operatingSystemVersion)")
+                self.downloadRestoreImage(from: restoreImage.url)
 
-                case .failure(let error):
-                    print("[IPSW] FAILURE - Error fetching restore image: \(error)")
-                    print("[IPSW] Error details: \(error.localizedDescription)")
+            case .failure(let error):
+                print("[IPSW] FAILURE - Error fetching restore image: \(error)")
+                print("[IPSW] Error details: \(error.localizedDescription)")
+                DispatchQueue.main.async {
                     self.progressHandler?(0, "Failed to fetch macOS image")
                     self.completionHandler?(.failure(error))
                 }
