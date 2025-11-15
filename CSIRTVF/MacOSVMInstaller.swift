@@ -40,8 +40,9 @@ class MacOSVMInstaller: NSObject {
 
     private var restoreImageURL: URL?
     private var downloadTask: URLSessionDownloadTask?
-    private var downloadObservation: NSKeyValueObservation?
     private var vmBundlePath: String
+    private var lastProgressUpdate: Date?
+    private var lastBytesWritten: Int64 = 0
 
     var progressHandler: ((Double, String) -> Void)?
     var completionHandler: ((Result<URL, Error>) -> Void)?
@@ -220,25 +221,8 @@ class MacOSVMInstaller: NSObject {
         let session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
         downloadTask = session.downloadTask(with: url)
 
-        // Observe progress on main thread
-        downloadObservation = downloadTask?.progress.observe(\.fractionCompleted, options: [.new, .initial]) { [weak self] progress, _ in
-            DispatchQueue.main.async {
-                let percentComplete = progress.fractionCompleted * 100
-                let bytesDownloaded = Double(progress.completedUnitCount) / (1024 * 1024 * 1024)
-                let totalBytes = Double(progress.totalUnitCount) / (1024 * 1024 * 1024)
-
-                print("Download progress: \(percentComplete)% - \(bytesDownloaded) GB / \(totalBytes) GB")
-
-                let message: String
-                if totalBytes > 0 {
-                    message = String(format: "Downloading from %@: %.2f GB / %.2f GB",
-                                   host, bytesDownloaded, totalBytes)
-                } else {
-                    message = "Downloading from \(host)..."
-                }
-                self?.progressHandler?(progress.fractionCompleted, message)
-            }
-        }
+        // Progress will be reported via delegate method didWriteData
+        // (More reliable than KVO for large downloads)
 
         downloadTask?.resume()
         print("Download task started")
@@ -249,7 +233,6 @@ class MacOSVMInstaller: NSObject {
 
     func cancelDownload() {
         downloadTask?.cancel()
-        downloadObservation?.invalidate()
     }
 }
 
@@ -304,7 +287,19 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
         // Extract host from current request
         let host = downloadTask.currentRequest?.url?.host ?? "Apple CDN"
 
-        print("Download progress via delegate: \(progress * 100)% - \(gbWritten) GB / \(gbTotal) GB")
+        // Detect stalls (no progress for 30+ seconds)
+        let now = Date()
+        if let lastUpdate = lastProgressUpdate, totalBytesWritten == lastBytesWritten {
+            let timeSinceLastProgress = now.timeIntervalSince(lastUpdate)
+            if timeSinceLastProgress > 30 {
+                print("[IPSW] WARNING: Download stalled for \(Int(timeSinceLastProgress))s at \(String(format: "%.1f%%", progress * 100))")
+            }
+        } else {
+            lastProgressUpdate = now
+            lastBytesWritten = totalBytesWritten
+        }
+
+        print("[IPSW] Download progress: \(String(format: "%.2f%%", progress * 100)) - \(String(format: "%.2f", gbWritten)) GB / \(String(format: "%.2f", gbTotal)) GB")
 
         // Update UI with detailed progress
         DispatchQueue.main.async { [weak self] in
