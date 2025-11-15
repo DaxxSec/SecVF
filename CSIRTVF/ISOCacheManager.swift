@@ -20,7 +20,7 @@ import CryptoKit
 
 enum VMImageType {
     case macOS(version: String)
-    case linux(distro: LinuxDistro, version: String)
+    case linux(distro: LinuxDistro, version: String, isSecurityRouter: Bool = false)
 }
 
 enum LinuxDistro: String {
@@ -28,10 +28,12 @@ enum LinuxDistro: String {
     case debian = "Debian"
     case fedora = "Fedora"
     case kali = "Kali"
+    case parrot = "ParrotOS"
+    case arch = "Arch"
+    case manjaro = "Manjaro"
 
     // SECURITY: Hardcoded official CDN URLs only
     // Only distros with dedicated official CDNs are supported
-    // Removed: EndeavourOS (uses GitHub - security risk), Mint (unreliable mirrors)
     var downloadURL: String {
         switch self {
         case .ubuntu:
@@ -42,6 +44,12 @@ enum LinuxDistro: String {
             return "https://download.fedoraproject.org/pub/fedora/linux/releases/39/Server/aarch64/iso/Fedora-Server-dvd-aarch64-39-1.5.iso"
         case .kali:
             return "https://cdimage.kali.org/kali-2024.1/kali-linux-2024.1-installer-arm64.iso"
+        case .parrot:
+            return "https://download.parrot.sh/parrot/iso/6.0/Parrot-security-6.0_arm64.iso"
+        case .arch:
+            return "https://geo.mirror.pkgbuild.com/iso/latest/archlinux-arm64.iso"
+        case .manjaro:
+            return "https://download.manjaro.org/gnome/23.1.3/manjaro-gnome-23.1.3-minimal-stable-aarch64.iso"
         }
     }
 
@@ -57,17 +65,25 @@ enum LinuxDistro: String {
             return "PLACEHOLDER_UPDATE_FROM_FEDORA_CHECKSUMS"
         case .kali:
             return "PLACEHOLDER_UPDATE_FROM_KALI_CHECKSUMS"
+        case .parrot:
+            return "PLACEHOLDER_UPDATE_FROM_PARROT_CHECKSUMS"
+        case .arch:
+            return "PLACEHOLDER_UPDATE_FROM_ARCH_CHECKSUMS"
+        case .manjaro:
+            return "PLACEHOLDER_UPDATE_FROM_MANJARO_CHECKSUMS"
         }
     }
 
     // SECURITY: Whitelist of approved download domains (official CDNs only)
-    // No github.com, no generic mirror sites, no third-party hosts
     static var approvedDomains: Set<String> {
         return [
             "cdimage.ubuntu.com",
             "cdimage.debian.org",
             "download.fedoraproject.org",
-            "cdimage.kali.org"
+            "cdimage.kali.org",
+            "download.parrot.sh",
+            "geo.mirror.pkgbuild.com",  // Official Arch mirror redirector
+            "download.manjaro.org"
         ]
     }
 }
@@ -77,9 +93,78 @@ class ISOCacheManager {
 
     private let cacheRoot: String
     private let maxCacheSizeGB: Int = 100  // Warn user if cache exceeds 100GB
+    private let auditLogPath: String
+    private var lastDownloadTime: Date?
+    private let minDownloadIntervalSeconds: TimeInterval = 5  // Rate limiting
+    private var macOSInstaller: MacOSVMInstaller?  // Keep strong reference during download
 
     private init() {
         cacheRoot = NSHomeDirectory() + "/.avf/VMImages/"
+        auditLogPath = NSHomeDirectory() + "/.avf/logs/iso-cache-audit.log"
+
+        // Create logs directory
+        let logsDir = NSHomeDirectory() + "/.avf/logs/"
+        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+    }
+
+    // SECURITY: Audit logging for all download requests
+    private func auditLog(_ message: String) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let processID = ProcessInfo.processInfo.processIdentifier
+        let logEntry = "[\(timestamp)] [PID:\(processID)] \(message)\n"
+
+        // Append to audit log
+        if let data = logEntry.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: auditLogPath) {
+                if let fileHandle = FileHandle(forWritingAtPath: auditLogPath) {
+                    fileHandle.seekToEndOfFile()
+                    fileHandle.write(data)
+                    fileHandle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: auditLogPath))
+            }
+        }
+
+        // Also print to console
+        print("[AUDIT] \(message)")
+    }
+
+    // SECURITY: Verify caller is legitimate (main app UI, not external process)
+    private func verifyCallerIsMainApp() -> Bool {
+        // Check we're running in the main app bundle
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            auditLog("SECURITY ALERT: No bundle identifier - rejecting request")
+            return false
+        }
+
+        // Verify it's our app
+        guard bundleID.contains("SecVF") else {
+            auditLog("SECURITY ALERT: Unknown bundle ID '\(bundleID)' - rejecting request")
+            return false
+        }
+
+        // Check we're on the main thread (UI-initiated)
+        guard Thread.isMainThread else {
+            auditLog("SECURITY ALERT: Download request from background thread - rejecting")
+            return false
+        }
+
+        return true
+    }
+
+    // SECURITY: Rate limiting to prevent abuse
+    private func checkRateLimit() -> Bool {
+        if let lastTime = lastDownloadTime {
+            let timeSinceLast = Date().timeIntervalSince(lastTime)
+            if timeSinceLast < minDownloadIntervalSeconds {
+                auditLog("SECURITY: Rate limit exceeded (requests too frequent)")
+                return false
+            }
+        }
+
+        lastDownloadTime = Date()
+        return true
     }
 
     // MARK: - Public API
@@ -103,20 +188,42 @@ class ISOCacheManager {
         progressHandler: @escaping (Double, String) -> Void,
         completionHandler: @escaping (Result<URL, Error>) -> Void
     ) {
+        NSLog("[ISOCacheManager] downloadImage() called")
+
+        // SECURITY: Enforce Kali Linux for security router VMs
+        if case .linux(let distro, _, let isSecurityRouter) = imageType, isSecurityRouter {
+            guard distro == .kali else {
+                let error = NSError(
+                    domain: "ISOCacheManager",
+                    code: 200,
+                    userInfo: [NSLocalizedDescriptionKey: "SECURITY: Security router VMs must use Kali Linux (attempted to use \(distro.rawValue))"]
+                )
+                auditLog("SECURITY ALERT: Rejected non-Kali router VM request (distro: \(distro.rawValue))")
+                completionHandler(.failure(error))
+                return
+            }
+            auditLog("Creating security router VM with Kali Linux")
+        }
+
         // Check if already cached
         if let cachedURL = getCachedImage(for: imageType) {
-            print("[Cache] Using cached image, skipping download")
+            NSLog("[ISOCacheManager] Using cached image, skipping download")
             completionHandler(.success(cachedURL))
             return
         }
 
         // Download based on type
+        NSLog("[ISOCacheManager] Switching on imageType...")
         switch imageType {
         case .macOS(let version):
+            NSLog("[ISOCacheManager] Case is macOS, calling downloadMacOSImage...")
             downloadMacOSImage(version: version, progressHandler: progressHandler, completionHandler: completionHandler)
-        case .linux(let distro, let version):
+        case .linux(let distro, let version, let isSecurityRouter):
+            NSLog("[ISOCacheManager] Case is Linux")
+            auditLog("Download requested: \(distro.rawValue) \(version) (router: \(isSecurityRouter))")
             downloadLinuxISO(distro: distro, version: version, progressHandler: progressHandler, completionHandler: completionHandler)
         }
+        NSLog("[ISOCacheManager] downloadImage() switch completed")
     }
 
     /// Get total cache size in GB
@@ -183,8 +290,9 @@ class ISOCacheManager {
             let today = dateFormatter.string(from: Date())
             return "\(cacheRoot)MacOS/UniversalMac_\(version)_\(today)/"
 
-        case .linux(let distro, let version):
+        case .linux(let distro, let version, _):
             // Format: ~/.avf/VMImages/Linux/Ubuntu-24.04/
+            // Note: isSecurityRouter flag doesn't affect cache path - same ISO used for all VMs
             return "\(cacheRoot)Linux/\(distro.rawValue)-\(version)/"
         }
     }
@@ -194,13 +302,28 @@ class ISOCacheManager {
         progressHandler: @escaping (Double, String) -> Void,
         completionHandler: @escaping (Result<URL, Error>) -> Void
     ) {
+        NSLog("[ISOCacheManager] downloadMacOSImage() called for version: %@", version)
+
         // Use existing MacOSVMInstaller but with central cache path
         let imagePath = getImagePath(for: .macOS(version: version))
+        NSLog("[ISOCacheManager] Image path: %@", imagePath)
 
-        let installer = MacOSVMInstaller(vmBundlePath: imagePath)
-        installer.progressHandler = progressHandler
-        installer.completionHandler = completionHandler
-        installer.downloadLatestMacOSImage()
+        // Keep strong reference to prevent deallocation during download
+        macOSInstaller = MacOSVMInstaller(vmBundlePath: imagePath)
+        NSLog("[ISOCacheManager] Created MacOSVMInstaller, setting handlers...")
+
+        macOSInstaller?.progressHandler = progressHandler
+        macOSInstaller?.completionHandler = { [weak self] result in
+            NSLog("[ISOCacheManager] Completion handler called with result")
+            // Call original completion handler
+            completionHandler(result)
+            // Release installer reference after completion
+            self?.macOSInstaller = nil
+        }
+
+        NSLog("[ISOCacheManager] Calling downloadLatestMacOSImage()...")
+        macOSInstaller?.downloadLatestMacOSImage()
+        NSLog("[ISOCacheManager] downloadLatestMacOSImage() call completed (async)")
     }
 
     private func downloadLinuxISO(
@@ -367,8 +490,9 @@ extension VMImageType: CustomStringConvertible {
         switch self {
         case .macOS(let version):
             return "macOS \(version)"
-        case .linux(let distro, let version):
-            return "\(distro.rawValue) \(version)"
+        case .linux(let distro, let version, let isSecurityRouter):
+            let routerTag = isSecurityRouter ? " (Security Router)" : ""
+            return "\(distro.rawValue) \(version)\(routerTag)"
         }
     }
 }

@@ -12,11 +12,13 @@ import Cocoa
 enum LogType: String {
     case security = "security"
     case network = "network"
+    case isoCache = "iso-cache-audit"
 
     var displayName: String {
         switch self {
         case .security: return "Security Logs"
         case .network: return "Network Logs"
+        case .isoCache: return "ISO Cache Audit"
         }
     }
 }
@@ -197,6 +199,20 @@ class LogViewerWindowController: NSWindowController {
             } else if line.contains("SECURITY") {
                 attributed.addAttribute(.foregroundColor, value: NSColor.systemPurple, range: lineRange)
                 attributed.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold), range: lineRange)
+            }
+
+            // ISO Cache specific highlighting
+            if logType == .isoCache {
+                if line.contains("SECURITY ALERT") {
+                    attributed.addAttribute(.foregroundColor, value: NSColor.systemRed, range: lineRange)
+                    attributed.addAttribute(.font, value: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold), range: lineRange)
+                } else if line.contains("Download requested") || line.contains("Download") {
+                    attributed.addAttribute(.foregroundColor, value: NSColor.systemCyan, range: lineRange)
+                } else if line.contains("Creating security router") {
+                    attributed.addAttribute(.foregroundColor, value: NSColor.systemGreen, range: lineRange)
+                } else if line.contains("Kali") || line.contains("Ubuntu") || line.contains("Debian") {
+                    attributed.addAttribute(.foregroundColor, value: NSColor.systemTeal, range: lineRange)
+                }
             }
 
             // Highlight timestamps

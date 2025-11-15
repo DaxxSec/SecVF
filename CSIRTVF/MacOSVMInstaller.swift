@@ -86,91 +86,94 @@ class MacOSVMInstaller: NSObject {
     }
 
     func downloadLatestMacOSImage() {
-        print("[IPSW] downloadLatestMacOSImage() called")
-        print("[IPSW] VM bundle path: \(vmBundlePath)")
+        NSLog("[IPSW] downloadLatestMacOSImage() called")
+        NSLog("[IPSW] VM bundle path: %@", vmBundlePath)
 
-        // Store IPSW in the VM bundle directory
-        let ipswDir = vmBundlePath
+        // Store IPSW centrally in ~/.avf/MacOS/ (shared across all macOS VMs)
+        // This avoids storing a 12-15GB IPSW copy in each VM bundle
+        let macOSRootDir = NSHomeDirectory() + "/.avf/MacOS/"
+        let ipswDir = macOSRootDir
 
-        // Create VM bundle directory if needed
+        NSLog("[IPSW] Central IPSW storage directory: %@", ipswDir)
+
+        // Create central IPSW directory if needed
         do {
             try FileManager.default.createDirectory(atPath: ipswDir, withIntermediateDirectories: true)
-            print("[IPSW] Created/verified VM bundle directory: \(ipswDir)")
+            NSLog("[IPSW] Created/verified central IPSW directory: %@", ipswDir)
         } catch {
-            print("[IPSW] ERROR: Failed to create VM bundle directory: \(error)")
-            DispatchQueue.main.async {
-                self.completionHandler?(.failure(error))
-            }
+            NSLog("[IPSW] ERROR: Failed to create central IPSW directory: %@", error.localizedDescription)
+            completionHandler?(.failure(error))
             return
         }
 
         // Fetch the latest restore image info first
-        DispatchQueue.main.async {
-            self.progressHandler?(0, "Checking for latest macOS restore image...")
-        }
-        print("[IPSW] Starting fetch for latest macOS restore image...")
-        print("[IPSW] Calling VZMacOSRestoreImage.fetchLatestSupported...")
+        progressHandler?(0, "Checking for latest macOS restore image...")
+        NSLog("[IPSW] Starting fetch for latest macOS restore image...")
+        NSLog("[IPSW] Calling VZMacOSRestoreImage.fetchLatestSupported...")
 
         VZMacOSRestoreImage.fetchLatestSupported { [weak self] result in
-            print("[IPSW] VZMacOSRestoreImage.fetchLatestSupported completion handler called!")
+            NSLog("[IPSW] VZMacOSRestoreImage.fetchLatestSupported completion handler called!")
             guard let self = self else {
-                print("[IPSW] Self was nil in completion handler")
+                NSLog("[IPSW] Self was nil in completion handler")
                 return
             }
 
-            print("[IPSW] Fetch completed, processing result...")
+            NSLog("[IPSW] Fetch completed, processing result...")
 
             // Process result directly (don't wrap in DispatchQueue.main.async to avoid deadlock with modal dialog)
             switch result {
             case .success(let restoreImage):
-                print("[IPSW] SUCCESS - Found restore image")
-                print("Latest macOS restore image: \(restoreImage.operatingSystemVersion)")
-                print("Remote URL: \(restoreImage.url)")
+                NSLog("[IPSW] SUCCESS - Found restore image")
+                let version = restoreImage.operatingSystemVersion
+                NSLog("[IPSW] Latest macOS restore image: %d.%d.%d", version.majorVersion, version.minorVersion, version.patchVersion)
+                NSLog("[IPSW] Remote URL: %@", restoreImage.url.absoluteString)
 
                 // SECURITY: Validate the URL before proceeding
+                NSLog("[IPSW] Validating download URL...")
                 guard self.validateDownloadURL(restoreImage.url) else {
+                    NSLog("[IPSW] URL validation FAILED!")
                     let error = NSError(
                         domain: "com.daxxsec.SecVF.security",
                         code: 1001,
                         userInfo: [NSLocalizedDescriptionKey: "Security validation failed: URL from unauthorized source"]
                     )
-                    DispatchQueue.main.async {
-                        self.completionHandler?(.failure(error))
-                    }
+                    self.completionHandler?(.failure(error))
                     return
                 }
+                NSLog("[IPSW] URL validation passed")
 
                 let remoteFileName = restoreImage.url.lastPathComponent
+                NSLog("[IPSW] Remote filename: %@", remoteFileName)
 
                 // Check if we have a cached IPSW that matches the remote filename
+                NSLog("[IPSW] Checking for cached IPSW in: %@", ipswDir)
                 if let cachedIPSW = self.findCachedIPSW(in: ipswDir) {
                     let cachedFileName = cachedIPSW.lastPathComponent
+                    NSLog("[IPSW] Found cached IPSW: %@", cachedFileName)
 
                     if cachedFileName == remoteFileName {
-                        print("Found matching cached IPSW: \(cachedIPSW.path)")
-                        DispatchQueue.main.async {
-                            self.progressHandler?(1.0, "Using cached macOS restore image")
-                            self.completionHandler?(.success(cachedIPSW))
-                        }
+                        NSLog("[IPSW] Cached IPSW matches remote filename - using cached version")
+                        self.progressHandler?(1.0, "Using cached macOS restore image")
+                        self.completionHandler?(.success(cachedIPSW))
                         return
                     } else {
-                        print("Cached IPSW (\(cachedFileName)) doesn't match latest (\(remoteFileName))")
-                        print("Removing outdated IPSW and downloading new version...")
+                        NSLog("[IPSW] Cached IPSW (%@) doesn't match latest (%@)", cachedFileName, remoteFileName)
+                        NSLog("[IPSW] Removing outdated IPSW...")
                         try? FileManager.default.removeItem(at: cachedIPSW)
                     }
+                } else {
+                    NSLog("[IPSW] No cached IPSW found")
                 }
 
                 // No matching cached IPSW found, download the latest
-                print("Downloading macOS restore image: \(restoreImage.operatingSystemVersion)")
+                NSLog("[IPSW] Starting download of macOS restore image...")
                 self.downloadRestoreImage(from: restoreImage.url)
 
             case .failure(let error):
                 print("[IPSW] FAILURE - Error fetching restore image: \(error)")
                 print("[IPSW] Error details: \(error.localizedDescription)")
-                DispatchQueue.main.async {
-                    self.progressHandler?(0, "Failed to fetch macOS image")
-                    self.completionHandler?(.failure(error))
-                }
+                self.progressHandler?(0, "Failed to fetch macOS image")
+                self.completionHandler?(.failure(error))
             }
         }
     }
@@ -194,8 +197,12 @@ class MacOSVMInstaller: NSObject {
     }
 
     private func downloadRestoreImage(from url: URL) {
+        NSLog("[IPSW] downloadRestoreImage() called")
+
         // SECURITY: Double-check URL validation before downloading
+        NSLog("[IPSW] Re-validating URL before download...")
         guard validateDownloadURL(url) else {
+            NSLog("[IPSW] URL RE-validation FAILED!")
             let error = NSError(
                 domain: "com.daxxsec.SecVF.security",
                 code: 1002,
@@ -204,32 +211,39 @@ class MacOSVMInstaller: NSObject {
             completionHandler?(.failure(error))
             return
         }
+        NSLog("[IPSW] URL re-validation passed")
 
-        // Set destination path to VM bundle directory
+        // Set destination path to central macOS directory (shared across all VMs)
         let fileName = url.lastPathComponent
-        let destinationURL = URL(fileURLWithPath: vmBundlePath + fileName)
+        let macOSRootDir = NSHomeDirectory() + "/.avf/MacOS/"
+        let destinationURL = URL(fileURLWithPath: macOSRootDir + fileName)
 
-        print("Starting download from: \(url)")
-        print("Destination: \(destinationURL.path)")
+        NSLog("[IPSW] Starting download from: %@", url.absoluteString)
+        NSLog("[IPSW] Destination: %@", destinationURL.path)
 
         // Extract host for display
         let host = url.host ?? "Apple CDN"
+        NSLog("[IPSW] Calling progressHandler with 'Connecting to %@...'", host)
         progressHandler?(0, "Connecting to \(host)...")
 
         // SECURITY: Create session with secure configuration
+        NSLog("[IPSW] Creating URLSession with TLS 1.2+ requirement...")
         let config = URLSessionConfiguration.default
         config.tlsMinimumSupportedProtocolVersion = .TLSv12 // Require TLS 1.2 or higher
         config.timeoutIntervalForRequest = 60.0
         config.timeoutIntervalForResource = 3600.0 // 1 hour for large downloads
 
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+        // Use background queue for delegate to avoid blocking main thread (which is blocked by modal dialog)
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        NSLog("[IPSW] Creating download task...")
         downloadTask = session.downloadTask(with: url)
 
         // Progress will be reported via delegate method didWriteData
         // (More reliable than KVO for large downloads)
 
+        NSLog("[IPSW] Calling downloadTask.resume()...")
         downloadTask?.resume()
-        print("Download task started")
+        NSLog("[IPSW] Download task started!")
 
         // Store destination for later
         restoreImageURL = destinationURL
@@ -246,27 +260,27 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                    didFinishDownloadingTo location: URL) {
-        print("Download finished to temporary location: \(location.path)")
+        NSLog("[IPSW] didFinishDownloadingTo called - temp location: %@", location.path)
         guard let destinationURL = restoreImageURL else {
-            print("ERROR: No destination URL set!")
+            NSLog("[IPSW] ERROR: No destination URL set!")
             return
         }
 
         do {
             // Move downloaded file to permanent location
             if FileManager.default.fileExists(atPath: destinationURL.path) {
-                print("Removing existing file at destination")
+                NSLog("[IPSW] Removing existing file at destination")
                 try FileManager.default.removeItem(at: destinationURL)
             }
-            print("Moving file from \(location.path) to \(destinationURL.path)")
+            NSLog("[IPSW] Moving file from %@ to %@", location.path, destinationURL.path)
             try FileManager.default.moveItem(at: location, to: destinationURL)
 
-            print("Successfully downloaded IPSW to: \(destinationURL.path)")
+            NSLog("[IPSW] Successfully downloaded IPSW to: %@", destinationURL.path)
             progressHandler?(1.0, "Download complete!")
             completionHandler?(.success(destinationURL))
 
         } catch {
-            print("Failed to move downloaded file: \(error)")
+            NSLog("[IPSW] Failed to move downloaded file: %@", error.localizedDescription)
             completionHandler?(.failure(error))
         }
     }
@@ -274,10 +288,10 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                    didCompleteWithError error: Error?) {
         if let error = error {
-            print("Download failed with error: \(error.localizedDescription)")
+            NSLog("[IPSW] Download failed with error: %@", error.localizedDescription)
             completionHandler?(.failure(error))
         } else {
-            print("Download task completed successfully")
+            NSLog("[IPSW] Download task completed successfully")
         }
     }
 
@@ -296,21 +310,23 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
         if let lastUpdate = lastProgressUpdate, totalBytesWritten == lastBytesWritten {
             let timeSinceLastProgress = now.timeIntervalSince(lastUpdate)
             if timeSinceLastProgress > 30 {
-                print("[IPSW] WARNING: Download stalled for \(Int(timeSinceLastProgress))s at \(String(format: "%.1f%%", progress * 100))")
+                NSLog("[IPSW] WARNING: Download stalled for %ds at %.1f%%", Int(timeSinceLastProgress), progress * 100)
             }
         } else {
             lastProgressUpdate = now
             lastBytesWritten = totalBytesWritten
         }
 
-        print("[IPSW] Download progress: \(String(format: "%.2f%%", progress * 100)) - \(String(format: "%.2f", gbWritten)) GB / \(String(format: "%.2f", gbTotal)) GB")
+        // Log progress every 5% to avoid flooding logs
+        let progressPercent = progress * 100
+        if Int(progressPercent) % 5 == 0 || progressPercent < 1.0 {
+            NSLog("[IPSW] Download progress: %.1f%% - %.2f GB / %.2f GB", progressPercent, gbWritten, gbTotal)
+        }
 
         // Update UI with detailed progress
-        DispatchQueue.main.async { [weak self] in
-            let message = String(format: "Downloading from %@: %.2f GB / %.2f GB",
-                               host, gbWritten, gbTotal)
-            self?.progressHandler?(progress, message)
-        }
+        let message = String(format: "Downloading from %@: %.2f GB / %.2f GB",
+                           host, gbWritten, gbTotal)
+        progressHandler?(progress, message)
     }
 
     // SECURITY: Validate SSL certificates for Apple CDN connections

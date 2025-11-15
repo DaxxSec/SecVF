@@ -22,10 +22,12 @@
 		AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */; };
 		AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */; };
 		AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */; };
+		AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */; };
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
+		CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,10 +61,12 @@
 		BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerWindowController.swift; sourceTree = "<group>"; };
 		BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreenWindow.swift; sourceTree = "<group>"; };
 		BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitch.swift; sourceTree = "<group>"; };
+		BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManager.swift; sourceTree = "<group>"; };
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
+		DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManagerTests.swift; sourceTree = "<group>"; };
 		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -130,6 +134,7 @@
 				BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */,
 				BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */,
 				BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */,
+				BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */,
 				8FF8298E27500C070037FA83 /* Assets.xcassets */,
 				8FF8299027500C070037FA83 /* MainMenu.xib */,
 				BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */,
@@ -163,6 +168,7 @@
 				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
 				DD2222DD22222222DD222DD2 /* VMManagerTests.swift */,
 				DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */,
+				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
 			);
 			path = SecVFTests;
 			sourceTree = "<group>";
@@ -280,6 +286,7 @@
 				AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */,
 				AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */,
 				AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */,
+				AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -291,6 +298,7 @@
 				CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */,
 				CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */,
 				CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */,
+				CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
