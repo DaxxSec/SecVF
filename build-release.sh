@@ -5,7 +5,9 @@
 
 set -e
 
-PROJECT_DIR="/Users/stephstewart/Code/Sandboxes/SecVF"
+# Detect project directory dynamically (script's parent directory)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_DIR="$SCRIPT_DIR"
 PROJECT_FILE="$PROJECT_DIR/SecVF.xcodeproj"
 SCHEME="SecVF"
 BUILD_DIR="$PROJECT_DIR/build"

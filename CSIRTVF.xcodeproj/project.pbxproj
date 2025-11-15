@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		8CF202812EC84FE400AABC0F /* build-release.sh in Resources */ = {isa = PBXBuildFile; fileRef = 8CF202802EC84FE400AABC0F /* build-release.sh */; };
 		8F0313B227CB143B00360D7E /* Virtualization.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F0313B127CB143B00360D7E /* Virtualization.framework */; };
 		8FF8298D27500C060037FA83 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF8298C27500C060037FA83 /* AppDelegate.swift */; };
 		8FF8298F27500C070037FA83 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FF8298E27500C070037FA83 /* Assets.xcassets */; };
@@ -25,7 +26,6 @@
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
-		CC5555CC55555555CC555CC5 /* VMLibraryUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5555DD55555555DD555DD5 /* VMLibraryUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -41,6 +41,7 @@
 /* Begin PBXFileReference section */
 		352BF37B653363BBBB1015AC /* SampleCode.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = SampleCode.xcconfig; path = Configuration/SampleCode.xcconfig; sourceTree = "<group>"; };
 		62A7A2B81952CC2F11BFE9A2 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
+		8CF202802EC84FE400AABC0F /* build-release.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "build-release.sh"; sourceTree = "<group>"; };
 		8F0313B127CB143B00360D7E /* Virtualization.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Virtualization.framework; path = System/Library/Frameworks/Virtualization.framework; sourceTree = SDKROOT; };
 		8FDC7765280E2517002AA4ED /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8FF8298927500C060037FA83 /* SecVF.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SecVF.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -62,7 +63,6 @@
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
-		DD5555DD55555555DD555DD5 /* VMLibraryUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMLibraryUITests.swift; sourceTree = "<group>"; };
 		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -150,6 +150,7 @@
 			isa = PBXGroup;
 			children = (
 				62A7A2B81952CC2F11BFE9A2 /* LICENSE.txt */,
+				8CF202802EC84FE400AABC0F /* build-release.sh */,
 			);
 			name = LICENSE;
 			path = .;
@@ -251,6 +252,7 @@
 				8FF8298F27500C070037FA83 /* Assets.xcassets in Resources */,
 				8FF8299227500C070037FA83 /* MainMenu.xib in Resources */,
 				AA5555AA55555555AA555AA5 /* VMLibraryWindow.xib in Resources */,
+				8CF202812EC84FE400AABC0F /* build-release.sh in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

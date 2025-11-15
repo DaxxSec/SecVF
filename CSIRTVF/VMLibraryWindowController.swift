@@ -21,6 +21,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var statusBar: NSView?
     private var statusLabel: NSTextField?
     private var runningVMsContainer: NSStackView?
+    private var macOSInstaller: MacOSVMInstaller?  // Keep strong reference during download
 
     override var windowNibName: NSNib.Name? {
         return "VMLibraryWindow"
@@ -899,18 +900,21 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         progressAlert.accessoryView = containerView
 
         // Show alert in background
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
             let response = progressAlert.runModal()
             if response == .alertFirstButtonReturn {
                 // User clicked Cancel
                 print("Download cancelled by user")
+                self?.macOSInstaller?.cancelDownload()
+                self?.macOSInstaller = nil
             }
         }
 
         // Start download - pass the VM bundle path
-        let installer = MacOSVMInstaller(vmBundlePath: vmConfig.bundlePath)
+        // Keep strong reference to prevent deallocation during download
+        macOSInstaller = MacOSVMInstaller(vmBundlePath: vmConfig.bundlePath)
 
-        installer.progressHandler = { progress, message in
+        macOSInstaller?.progressHandler = { progress, message in
             DispatchQueue.main.async {
                 progressAlert.informativeText = message
                 let percentage = progress * 100.0
@@ -919,7 +923,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             }
         }
 
-        installer.completionHandler = { [weak self] result in
+        macOSInstaller?.completionHandler = { [weak self] result in
             DispatchQueue.main.async {
                 // Close progress window
                 NSApp.abortModal()
@@ -936,10 +940,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 case .failure(let error):
                     self?.showAlert(message: "Failed to download macOS: \(error.localizedDescription)")
                 }
+
+                // Release installer reference after completion
+                self?.macOSInstaller = nil
             }
         }
 
-        installer.downloadLatestMacOSImage()
+        macOSInstaller?.downloadLatestMacOSImage()
     }
 
     // MARK: - Helper Methods
