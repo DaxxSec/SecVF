@@ -143,7 +143,6 @@ class VMManager {
             for item in contents {
                 if item.hasSuffix(".bundle") {
                     let oldBundlePath = legacyVMLibraryPath + item
-                    let metadataPath = oldBundlePath + "/metadata.json"
 
                     // Try to load metadata to determine OS type
                     var osType = "Linux"
@@ -509,6 +508,14 @@ class VMManager {
             virtualMachines[index].lastUsedDate = Date()
             saveVMMetadata(virtualMachines[index])
         }
+    }
+
+    func getRunningVMsCount() -> Int {
+        return virtualMachines.filter { $0.status == .running || $0.status == .starting }.count
+    }
+
+    func getRunningVMs() -> [VMConfiguration] {
+        return virtualMachines.filter { $0.status == .running || $0.status == .starting }
     }
 
     func updateVMStatus(_ vmConfig: VMConfiguration, status: VMStatus) {
