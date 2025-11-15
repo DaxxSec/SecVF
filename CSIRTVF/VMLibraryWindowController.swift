@@ -459,6 +459,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Add status bar to window - add it LAST so it's on top
         contentView.addSubview(statusBarView)
         statusBar = statusBarView
+
+        print("DEBUG: Status bar created with frame: \(statusBarView.frame)")
+        print("DEBUG: Content view bounds: \(contentView.bounds)")
+        print("DEBUG: Status bar subviews count: \(statusBarView.subviews.count)")
+        print("DEBUG: Status bar is hidden: \(statusBarView.isHidden)")
     }
 
     func updateStatusBar(runningVMs: [(vm: VMConfiguration, state: String)]) {
