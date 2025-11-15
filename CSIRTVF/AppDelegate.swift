@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     // Log viewer windows (retained to prevent deallocation)
     private var securityLogViewer: LogViewerWindowController?
     private var networkLogViewer: LogViewerWindowController?
+    private var isoCacheLogViewer: LogViewerWindowController?
 
     // Splash screen (retained while showing)
     private var splashScreen: SplashScreenWindow?
@@ -531,6 +532,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         switchStatsItem.target = self
         monitoringMenu.addItem(switchStatsItem)
 
+        monitoringMenu.addItem(NSMenuItem.separator())
+
+        // ISO Cache Audit Logs
+        let isoCacheLogsItem = NSMenuItem(
+            title: "ISO Cache Audit",
+            action: #selector(showISOCacheLogs),
+            keyEquivalent: "4"
+        )
+        isoCacheLogsItem.keyEquivalentModifierMask = [.command, .shift]
+        isoCacheLogsItem.target = self
+        monitoringMenu.addItem(isoCacheLogsItem)
+
         // Create top-level menu item
         let monitoringMenuItem = NSMenuItem(title: "Monitoring", action: nil, keyEquivalent: "")
         monitoringMenuItem.submenu = monitoringMenu
@@ -557,6 +570,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
         networkLogViewer?.showWindow(nil)
         networkLogViewer?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func showISOCacheLogs() {
+        // Create new viewer if nil or window was closed
+        if isoCacheLogViewer == nil || isoCacheLogViewer?.window == nil {
+            isoCacheLogViewer = LogViewerWindowController(logType: .isoCache)
+        }
+        isoCacheLogViewer?.showWindow(nil)
+        isoCacheLogViewer?.window?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func showSwitchStatistics() {

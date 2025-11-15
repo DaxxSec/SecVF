@@ -4,6 +4,14 @@
 
 A macOS application for managing Linux and macOS virtual machines, designed for security research and malware analysis in isolated sandbox environments.
 
+## Recent Updates
+
+**November 2025**
+- ✅ **Real-time macOS IPSW download progress** - Fixed modal dialog threading issue, downloads now show live GB/percentage updates
+- ✅ **Enhanced security logging** - Comprehensive NSLog debugging for download flow validation
+- ✅ **ISO Cache Manager** - Centralized, secure ISO/IPSW download management with security audit logging
+- ✅ **Network config migration** - Moved network types to dedicated file for better organization
+
 ## Overview
 
 SecVF provides a clean GUI for creating, managing, and monitoring virtual machines using Apple's native Virtualization framework. Built specifically for security teams, it offers VM-to-VM networking, real-time security monitoring, and complete isolation from your host system.
@@ -34,9 +42,14 @@ SecVF provides a clean GUI for creating, managing, and monitoring virtual machin
 - Optional Rosetta support for running x86_64 binaries on ARM Linux
 
 ### macOS VM Support
-- Automatic download of latest macOS restore images
+- Automatic download of latest macOS restore images (15.6 GB)
+- **Real-time download progress** with live GB/percentage tracking
 - Full macOS guest support with native integration
-- IPSW caching to avoid re-downloading
+- **Smart IPSW caching** - Central storage in `~/.avf/MacOS/` shared across all macOS VMs
+- URL validation and CDN security checks (only downloads from official Apple servers)
+- TLS 1.2+ requirement with certificate validation
+
+**See [ISOCACHE.md](ISOCACHE.md) for complete ISO Cache Manager documentation including security architecture, threat model, and audit logging.**
 
 ## Getting Started
 
@@ -112,6 +125,40 @@ Designed for security research and malware analysis with hardware-enforced VM is
 **Linux Installation:** ISO must match Mac architecture (ARM64/x86_64), allocate 4GB+ memory, verify ISO hash.
 
 **macOS Download Fails:** Check internet connection, ensure 15GB+ free space, verify firewall allows Apple CDN access.
+
+## Development Roadmap
+
+### Validation & Testing
+- [ ] Validate re-use of cached IPSW
+- [ ] Validate Linux downloading mechanisms for each distro (Kali, Ubuntu, Debian)
+- [ ] Write tests for the log functionality
+- [ ] Fix the UI VM state panel
+
+### Networking & Routing
+- [ ] Thoroughly test and understand software routing for VM-to-VM communications
+- [ ] Validate network isolation (ensure malware VMs can't reach host/external network)
+
+### Security & Setup
+- [ ] Implement enforcement of Kali VM requirements
+- [ ] Create setup scripts for Linux hosts
+- [ ] Create setup scripts for macOS hosts
+
+### Critical Features (CSIRT Requirements)
+- [ ] Implement VM snapshot/checkpoint functionality (critical for malware analysis)
+- [ ] Implement secure file transfer mechanism (samples in, artifacts/logs out)
+- [ ] Implement VM lifecycle/cleanup automation (prevent disk space exhaustion)
+- [ ] Add resource limits/quotas per VM (CPU/memory caps)
+
+### Integration & Tools
+- [ ] Improve error handling and user feedback throughout app
+- [ ] Add full PCAP network packet capture support (beyond logging)
+- [ ] Create VM templates/presets for common analysis scenarios
+- [ ] Add integration points for security tools (Wireshark, Volatility, YARA)
+
+### Documentation & Security
+- [ ] Write architecture documentation (network topology, security boundaries)
+- [ ] Write user guide/runbook for common analyst workflows
+- [ ] Perform security validation/penetration testing of isolation mechanisms
 
 ## License
 

@@ -21,7 +21,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var statusBar: NSView?
     private var statusLabel: NSTextField?
     private var runningVMsContainer: NSStackView?
-    private var macOSInstaller: MacOSVMInstaller?  // Keep strong reference during download
 
     override var windowNibName: NSNib.Name? {
         return "VMLibraryWindow"
@@ -874,13 +873,21 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
     }
 
+    @IBAction func refreshVMList(_ sender: Any) {
+        refreshTable()
+    }
+
     // MARK: - macOS VM Download
 
     private func downloadAndPrepareMacOSVM(_ vmConfig: VMConfiguration) {
+        NSLog("[VMLibrary] === downloadAndPrepareMacOSVM() ENTERED ===")
+        NSLog("[VMLibrary] VM config: %@", vmConfig.name)
+
         // Create progress alert
         let progressAlert = NSAlert()
         progressAlert.messageText = "Downloading macOS"
         progressAlert.informativeText = "Initializing..."
+        NSLog("[VMLibrary] Created progress alert")
         progressAlert.alertStyle = .informational
         progressAlert.addButton(withTitle: "Cancel")
 
@@ -910,48 +917,56 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             if response == .alertFirstButtonReturn {
                 // User clicked Cancel
                 print("Download cancelled by user")
-                self?.macOSInstaller?.cancelDownload()
-                self?.macOSInstaller = nil
+                // TODO: Add cancel support to ISOCacheManager
             }
         }
 
-        // Start download - pass the VM bundle path
-        // Keep strong reference to prevent deallocation during download
-        macOSInstaller = MacOSVMInstaller(vmBundlePath: vmConfig.bundlePath)
+        // Use centralized ISOCacheManager for IPSW download
+        NSLog("[VMLibrary] Starting macOS download flow...")
+        let cacheManager = ISOCacheManager.shared
+        NSLog("[VMLibrary] Got ISOCacheManager.shared")
 
-        macOSInstaller?.progressHandler = { progress, message in
-            DispatchQueue.main.async {
-                progressAlert.informativeText = message
-                let percentage = progress * 100.0
-                progressIndicator.doubleValue = percentage
-                percentageLabel.stringValue = String(format: "%.1f%%", percentage)
+        // Get current macOS version for cache path (will be updated after download to actual version)
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        let versionString = "\(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)"
+        NSLog("[VMLibrary] macOS version: %@", versionString)
+
+        let imageType = VMImageType.macOS(version: versionString)
+        NSLog("[VMLibrary] Created VMImageType, about to call downloadImage...")
+
+        cacheManager.downloadImage(
+            for: imageType,
+            progressHandler: { progress, message in
+                // Use performSelector for modal dialog compatibility (DispatchQueue.main.async doesn't work with modal run loops)
+                RunLoop.main.perform(inModes: [.common], block: {
+                    progressAlert.informativeText = message
+                    let percentage = progress * 100.0
+                    progressIndicator.doubleValue = percentage
+                    percentageLabel.stringValue = String(format: "%.1f%%", percentage)
+                })
+            },
+            completionHandler: { [weak self] result in
+                RunLoop.main.perform(inModes: [.common], block: {
+                    NSLog("[VMLibrary] downloadImage completion handler called")
+                    // Close progress window
+                    NSApp.abortModal()
+
+                    switch result {
+                    case .success(let ipswURL):
+                        NSLog("[VMLibrary] IPSW downloaded to: %@", ipswURL.path)
+                        // Start VM with IPSW
+                        self?.selectedVM = vmConfig
+                        self?.vmManager.updateLastUsedDate(vmConfig)
+                        // Keep library window visible
+                        NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": vmConfig, "iso": ipswURL])
+
+                    case .failure(let error):
+                        NSLog("[VMLibrary] Download failed: %@", error.localizedDescription)
+                        self?.showAlert(message: "Failed to download macOS: \(error.localizedDescription)")
+                    }
+                })
             }
-        }
-
-        macOSInstaller?.completionHandler = { [weak self] result in
-            DispatchQueue.main.async {
-                // Close progress window
-                NSApp.abortModal()
-
-                switch result {
-                case .success(let ipswURL):
-                    print("IPSW downloaded to: \(ipswURL.path)")
-                    // Start VM with IPSW
-                    self?.selectedVM = vmConfig
-                    self?.vmManager.updateLastUsedDate(vmConfig)
-                    // Keep library window visible
-                    NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": vmConfig, "iso": ipswURL])
-
-                case .failure(let error):
-                    self?.showAlert(message: "Failed to download macOS: \(error.localizedDescription)")
-                }
-
-                // Release installer reference after completion
-                self?.macOSInstaller = nil
-            }
-        }
-
-        macOSInstaller?.downloadLatestMacOSImage()
+        )
     }
 
     // MARK: - Helper Methods
@@ -1236,18 +1251,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
                 refreshTable()
 
+                NSLog("[VMLibrary] VM created successfully, checking if we should auto-start...")
+
                 // Check concurrent VM limit before starting
                 let runningCount = vmManager.getRunningVMsCount()
+                NSLog("[VMLibrary] Running VM count: %d", runningCount)
                 if runningCount >= 2 {
                     let runningVMs = vmManager.getRunningVMs()
                     let vmNames = runningVMs.map { $0.name }.joined(separator: ", ")
+                    NSLog("[VMLibrary] Too many VMs running, not starting")
                     showAlert(message: "Maximum of 2 VMs can run concurrently.\n\nCurrently running: \(vmNames)\n\nVM created but not started. Please stop a running VM first.")
                     return
                 }
 
+                NSLog("[VMLibrary] Checking OS type: '%@'", osType)
                 if osType == "macOS" {
                     // For macOS, automatically handle IPSW download/reuse
+                    NSLog("[VMLibrary] OS type is macOS, calling downloadAndPrepareMacOSVM...")
                     downloadAndPrepareMacOSVM(newVM)
+                    NSLog("[VMLibrary] downloadAndPrepareMacOSVM() call completed")
                 } else if needsISO {
                     // For Linux, ask for ISO file
                     let openPanel = NSOpenPanel()
