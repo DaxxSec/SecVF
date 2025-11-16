@@ -27,6 +27,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     // Log viewer windows (retained to prevent deallocation)
     private var securityLogViewer: LogViewerWindowController?
     private var networkLogViewer: LogViewerWindowController?
+
+    // Installation status overlay
+    private var installationStatusView: NSTextField?
     private var isoCacheLogViewer: LogViewerWindowController?
 
     // Splash screen (retained while showing)
@@ -56,9 +59,65 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     @objc private func handleStartVM(_ notification: Notification) {
         guard let vm = notification.object as? VMConfiguration else { return }
         vmConfig = vm
-        needsInstall = false
-        installerISOPath = nil
+
+        // For macOS VMs, check if installation is needed by checking the macOSInstalled flag
+        if vm.osType == "macOS" {
+            // If macOSInstalled is nil or false, VM needs installation
+            if vm.macOSInstalled != true {
+                // macOS VM needs installation - find and attach cached IPSW
+                NSLog("[macOS VM] macOS not yet installed (macOSInstalled=%@), VM needs installation",
+                      vm.macOSInstalled == nil ? "nil" : "false")
+                needsInstall = true
+
+                // Find cached IPSW in ~/.avf/MacOS/
+                let macOSCacheDir = NSHomeDirectory() + "/.avf/MacOS/"
+                if let cachedIPSW = findCachedIPSW(in: macOSCacheDir) {
+                    NSLog("[macOS VM] Found cached IPSW: %@", cachedIPSW.path)
+                    installerISOPath = cachedIPSW
+                } else {
+                    NSLog("[macOS VM] ERROR: No cached IPSW found in %@", macOSCacheDir)
+                    // Show error to user
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "macOS Install Image Not Found"
+                        alert.informativeText = "This macOS VM needs to be installed, but no IPSW file was found in ~/.avf/MacOS/\n\nPlease download the macOS restore image first."
+                        alert.alertStyle = .critical
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                    }
+                    return
+                }
+            } else {
+                // macOS is already installed
+                NSLog("[macOS VM] macOS already installed")
+                needsInstall = false
+                installerISOPath = nil
+            }
+        } else {
+            // Linux VM
+            needsInstall = false
+            installerISOPath = nil
+        }
+
         showMainWindowAndStartVM()
+    }
+
+    private func findCachedIPSW(in directory: String) -> URL? {
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: directory) else {
+            return nil
+        }
+
+        // Look for any .ipsw file
+        for file in contents {
+            if file.hasSuffix(".ipsw") {
+                let ipswPath = directory + file
+                if FileManager.default.fileExists(atPath: ipswPath) {
+                    return URL(fileURLWithPath: ipswPath)
+                }
+            }
+        }
+
+        return nil
     }
 
     @objc private func handleStartVMWithISO(_ notification: Notification) {
@@ -212,13 +271,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         return networkDevice
     }
 
-    private func createGraphicsDeviceConfiguration() -> VZVirtioGraphicsDeviceConfiguration {
-        let graphicsDevice = VZVirtioGraphicsDeviceConfiguration()
-        graphicsDevice.scanouts = [
-            VZVirtioGraphicsScanoutConfiguration(widthInPixels: 1280, heightInPixels: 720)
-        ]
-
-        return graphicsDevice
+    private func createGraphicsDeviceConfiguration(isMacOS: Bool) -> VZGraphicsDeviceConfiguration {
+        if isMacOS {
+            // macOS VMs require VZMacGraphicsDeviceConfiguration
+            let graphicsDevice = VZMacGraphicsDeviceConfiguration()
+            graphicsDevice.displays = [
+                VZMacGraphicsDisplayConfiguration(widthInPixels: 1920, heightInPixels: 1080, pixelsPerInch: 144)
+            ]
+            return graphicsDevice
+        } else {
+            // Linux VMs use VZVirtioGraphicsDeviceConfiguration
+            let graphicsDevice = VZVirtioGraphicsDeviceConfiguration()
+            graphicsDevice.scanouts = [
+                VZVirtioGraphicsScanoutConfiguration(widthInPixels: 1280, heightInPixels: 720)
+            ]
+            return graphicsDevice
+        }
     }
 
     private func createInputAudioDeviceConfiguration() -> VZVirtioSoundDeviceConfiguration {
@@ -272,7 +340,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
     private func createMacAuxiliaryStorage(hardwareModel: VZMacHardwareModel) -> VZMacAuxiliaryStorage {
         let auxiliaryStoragePath = vmConfig.bundlePath + "AuxiliaryStorage"
-        guard let auxiliaryStorage = try? VZMacAuxiliaryStorage(creatingStorageAt: URL(fileURLWithPath: auxiliaryStoragePath), hardwareModel: hardwareModel) else {
+        let auxiliaryStorageURL = URL(fileURLWithPath: auxiliaryStoragePath)
+
+        // Remove existing AuxiliaryStorage if it exists (from incomplete VM creation)
+        if FileManager.default.fileExists(atPath: auxiliaryStoragePath) {
+            NSLog("[macOS VM] Removing existing AuxiliaryStorage to recreate with proper hardware model")
+            try? FileManager.default.removeItem(at: auxiliaryStorageURL)
+        }
+
+        guard let auxiliaryStorage = try? VZMacAuxiliaryStorage(creatingStorageAt: auxiliaryStorageURL, hardwareModel: hardwareModel) else {
             fatalError("Failed to create Mac auxiliary storage.")
         }
         return auxiliaryStorage
@@ -327,7 +403,66 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         return hardwareModel
     }
 
+    private func installMacOS() {
+        NSLog("[macOS Install] Starting macOS installation from IPSW")
 
+        guard let ipswURL = installerISOPath else {
+            NSLog("[macOS Install] ERROR: No IPSW URL available")
+            return
+        }
+
+        // Load the restore image
+        VZMacOSRestoreImage.load(from: ipswURL) { result in
+            switch result {
+            case .success(let restoreImage):
+                NSLog("[macOS Install] Loaded restore image for macOS \(restoreImage.operatingSystemVersion)")
+
+                // IMPORTANT: VZMacOSInstaller must be created on the main thread
+                DispatchQueue.main.async {
+                    NSLog("[macOS Install] Creating VZMacOSInstaller...")
+                    NSLog("[macOS Install] VM state: \(self.virtualMachine.state.rawValue)")
+                    NSLog("[macOS Install] IPSW URL: \(ipswURL.path)")
+
+                    // Create installer
+                    let installer = VZMacOSInstaller(virtualMachine: self.virtualMachine, restoringFromImageAt: ipswURL)
+                    NSLog("[macOS Install] VZMacOSInstaller created successfully")
+
+                NSLog("[macOS Install] Starting installation...")
+                // Observe installation progress
+                installer.install { result in
+                    NSLog("[macOS Install] Install callback received")
+                    switch result {
+                    case .success:
+                        NSLog("[macOS Install] Installation completed successfully!")
+                        // Mark as installed and save metadata
+                        self.vmConfig.macOSInstalled = true
+                        self.needsInstall = false
+
+                        // Save metadata
+                        do {
+                            let encoder = JSONEncoder()
+                            encoder.outputFormatting = .prettyPrinted
+                            let data = try encoder.encode(self.vmConfig)
+                            try data.write(to: URL(fileURLWithPath: self.vmConfig.metadataPath))
+                            NSLog("[macOS Install] Metadata saved - macOS marked as installed")
+                        } catch {
+                            NSLog("[macOS Install] ERROR: Failed to save metadata: \(error)")
+                        }
+
+                        // VM will automatically boot into installed macOS (no restart needed)
+                        NSLog("[macOS Install] Installation complete - VM will boot into macOS automatically")
+
+                    case .failure(let error):
+                        NSLog("[macOS Install] ERROR: Installation failed: \(error.localizedDescription)")
+                    }
+                }
+                }  // End DispatchQueue.main.async
+
+            case .failure(let error):
+                NSLog("[macOS Install] ERROR: Failed to load restore image: \(error.localizedDescription)")
+            }
+        }
+    }
 
     // MARK: Create the virtual machine configuration and instantiate the virtual machine.
 
@@ -336,6 +471,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         virtualMachineConfiguration.cpuCount = computeCPUCount()
         virtualMachineConfiguration.memorySize = computeMemorySize()
+
+        NSLog("[VM Config] Creating VM with \(virtualMachineConfiguration.cpuCount) CPUs, \(virtualMachineConfiguration.memorySize / 1024 / 1024 / 1024) GB RAM")
 
         let isMacOS = vmConfig.osType == "macOS"
         let disksArray = NSMutableArray()
@@ -352,7 +489,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 platform.machineIdentifier = createAndSaveMacMachineIdentifier()
                 platform.auxiliaryStorage = createMacAuxiliaryStorage(hardwareModel: hardwareModel)
                 platform.hardwareModel = hardwareModel
-                disksArray.add(createUSBMassStorageDeviceConfiguration())
+                // Note: macOS IPSW is NOT attached as USB storage - installation handled by VZMacOSInstaller after VM creation
             } else {
                 // Boot existing macOS install
                 platform.machineIdentifier = retrieveMacMachineIdentifier()
@@ -389,7 +526,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         virtualMachineConfiguration.storageDevices = disks
 
         virtualMachineConfiguration.networkDevices = [createNetworkDeviceConfiguration()]
-        virtualMachineConfiguration.graphicsDevices = [createGraphicsDeviceConfiguration()]
+        virtualMachineConfiguration.graphicsDevices = [createGraphicsDeviceConfiguration(isMacOS: isMacOS)]
         virtualMachineConfiguration.audioDevices = [createInputAudioDeviceConfiguration(), createOutputAudioDeviceConfiguration()]
 
         virtualMachineConfiguration.keyboards = [VZUSBKeyboardConfiguration()]
@@ -440,6 +577,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
             // SECURITY: Start security monitoring for this VM
             VMSecurityMonitor.shared.startMonitoring(vm: self.vmConfig, virtualMachine: self.virtualMachine)
+
+            // For macOS installation, use the installer instead of manually starting the VM
+            if self.needsInstall && self.vmConfig.osType == "macOS" {
+                self.installMacOS()
+                return
+            }
 
             self.virtualMachine.start(completionHandler: { (result) in
                 switch result {
