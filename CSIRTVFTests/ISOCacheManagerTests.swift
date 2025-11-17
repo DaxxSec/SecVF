@@ -89,7 +89,7 @@ final class ISOCacheManagerTests: XCTestCase {
 
     func testNonRouterVMsAllowAnyDistro() {
         // Non-router VMs should accept any supported distro
-        let distros: [LinuxDistro] = [.ubuntu, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
 
         for distro in distros {
             let vmType = VMImageType.linux(distro: distro, version: "test", isSecurityRouter: false)
@@ -124,7 +124,7 @@ final class ISOCacheManagerTests: XCTestCase {
     }
 
     func testDistroURLsAreHTTPS() {
-        let distros: [LinuxDistro] = [.ubuntu, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
 
         for distro in distros {
             let urlString = distro.downloadURL
@@ -134,7 +134,7 @@ final class ISOCacheManagerTests: XCTestCase {
     }
 
     func testDistroURLsAreISO() {
-        let distros: [LinuxDistro] = [.ubuntu, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
 
         for distro in distros {
             let urlString = distro.downloadURL
@@ -144,7 +144,7 @@ final class ISOCacheManagerTests: XCTestCase {
     }
 
     func testDistroURLsMatchApprovedDomains() {
-        let distros: [LinuxDistro] = [.ubuntu, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
         let approvedDomains = LinuxDistro.approvedDomains
 
         for distro in distros {
@@ -168,7 +168,7 @@ final class ISOCacheManagerTests: XCTestCase {
 
     func testVMImageTypeDescriptionLinux() {
         let ubuntu = VMImageType.linux(distro: .ubuntu, version: "24.04", isSecurityRouter: false)
-        XCTAssertEqual(ubuntu.description, "Ubuntu 24.04")
+        XCTAssertEqual(ubuntu.description, "Ubuntu Desktop 24.04")
     }
 
     func testVMImageTypeDescriptionRouter() {
@@ -216,7 +216,7 @@ final class ISOCacheManagerTests: XCTestCase {
     // MARK: - SHA256 Validation Tests
 
     func testSHA256ChecksumsExist() {
-        let distros: [LinuxDistro] = [.ubuntu, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
 
         for distro in distros {
             let checksum = distro.sha256Checksum
@@ -263,9 +263,9 @@ final class ISOCacheManagerTests: XCTestCase {
 
     func testMultipleDistroSupport() {
         // Verify all supported distros are properly defined
-        let distros: [LinuxDistro] = [.ubuntu, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
 
-        XCTAssertEqual(distros.count, 7, "Should support exactly 7 Linux distributions")
+        XCTAssertEqual(distros.count, 8, "Should support exactly 8 Linux distributions")
 
         for distro in distros {
             XCTAssertFalse(distro.rawValue.isEmpty, "Distro name should not be empty")
@@ -280,6 +280,101 @@ final class ISOCacheManagerTests: XCTestCase {
 
         // Verify non-router description
         XCTAssertFalse(ubuntu.description.contains("Security Router"))
+    }
+
+    // MARK: - Release Date and Version Tests
+
+    func testDistroReleaseDatesExist() {
+        // Verify all distributions have release dates
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+
+        for distro in distros {
+            let releaseDate = distro.releaseDate
+            XCTAssertNotNil(releaseDate, "\(distro.rawValue) should have a release date")
+
+            // Verify date is reasonable (not in the future, not too old)
+            let now = Date()
+            XCTAssertTrue(releaseDate <= now, "\(distro.rawValue) release date should not be in the future")
+
+            // Verify date is within last 3 years (except for rolling releases)
+            if distro != .arch {
+                let threeYearsAgo = Calendar.current.date(byAdding: .year, value: -3, to: now)!
+                XCTAssertTrue(releaseDate >= threeYearsAgo,
+                             "\(distro.rawValue) release date seems too old: \(releaseDate)")
+            }
+        }
+    }
+
+    func testDistroVersionsExist() {
+        // Verify all distributions have version strings
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+
+        for distro in distros {
+            let version = distro.version
+            XCTAssertFalse(version.isEmpty, "\(distro.rawValue) should have a version string")
+
+            // Verify version format is reasonable
+            XCTAssertTrue(version.count > 0, "\(distro.rawValue) version should not be empty")
+        }
+    }
+
+    func testUbuntuVsUbuntuServerDistinction() {
+        // Verify Ubuntu Desktop and Ubuntu Server are distinct
+        XCTAssertNotEqual(LinuxDistro.ubuntu, LinuxDistro.ubuntuServer,
+                         "Ubuntu Desktop and Ubuntu Server should be different distributions")
+
+        // Both should have same version (LTS)
+        XCTAssertEqual(LinuxDistro.ubuntu.version, LinuxDistro.ubuntuServer.version,
+                      "Ubuntu Desktop and Server should have matching versions")
+
+        // Both should have same release date
+        XCTAssertEqual(LinuxDistro.ubuntu.releaseDate, LinuxDistro.ubuntuServer.releaseDate,
+                      "Ubuntu Desktop and Server should have matching release dates")
+
+        // Different download URLs
+        XCTAssertNotEqual(LinuxDistro.ubuntu.downloadURL, LinuxDistro.ubuntuServer.downloadURL,
+                         "Ubuntu Desktop and Server should have different download URLs")
+
+        // Verify naming
+        XCTAssertTrue(LinuxDistro.ubuntu.rawValue.contains("Desktop"),
+                     "Ubuntu should be labeled as Desktop")
+        XCTAssertTrue(LinuxDistro.ubuntuServer.rawValue.contains("Server"),
+                     "Ubuntu Server should be labeled as Server")
+    }
+
+    func testGetDistributionInfo() {
+        // Test the getDistributionInfo method
+        let distros: [LinuxDistro] = [.ubuntu, .ubuntuServer, .debian, .fedora, .kali, .parrot, .arch, .manjaro]
+
+        for distro in distros {
+            let info = cacheManager.getDistributionInfo(for: distro)
+
+            // Verify release date matches
+            XCTAssertEqual(info.releaseDate, distro.releaseDate,
+                          "\(distro.rawValue) release date should match")
+
+            // isCached should be a boolean
+            XCTAssertNotNil(info.isCached, "\(distro.rawValue) should have isCached status")
+
+            // lastDownloaded can be nil (if not cached)
+            if info.isCached {
+                XCTAssertNotNil(info.lastDownloaded,
+                               "\(distro.rawValue) is cached but has no download date")
+            }
+        }
+    }
+
+    func testDistributionInfoForUncachedISO() {
+        // For uncached distro, lastDownloaded should be nil and isCached should be false
+        // (assuming Parrot is not cached in test environment)
+        let info = cacheManager.getDistributionInfo(for: .parrot)
+
+        XCTAssertNotNil(info.releaseDate, "Release date should always exist")
+
+        // If not cached, verify proper nil handling
+        if !info.isCached {
+            XCTAssertNil(info.lastDownloaded, "Uncached distro should have nil lastDownloaded")
+        }
     }
 
     // MARK: - Error Handling Tests

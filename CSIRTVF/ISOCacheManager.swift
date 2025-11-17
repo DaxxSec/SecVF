@@ -23,8 +23,9 @@ enum VMImageType {
     case linux(distro: LinuxDistro, version: String, isSecurityRouter: Bool = false)
 }
 
-enum LinuxDistro: String {
-    case ubuntu = "Ubuntu"
+enum LinuxDistro: String, Codable {
+    case ubuntu = "Ubuntu Desktop"
+    case ubuntuServer = "Ubuntu Server"
     case debian = "Debian"
     case fedora = "Fedora"
     case kali = "Kali"
@@ -32,11 +33,60 @@ enum LinuxDistro: String {
     case arch = "Arch"
     case manjaro = "Manjaro"
 
+    // Release date of the current version
+    var releaseDate: Date {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        switch self {
+        case .ubuntu:
+            return formatter.date(from: "2024-04-25")!  // Ubuntu 24.04 LTS Desktop
+        case .ubuntuServer:
+            return formatter.date(from: "2024-04-25")!  // Ubuntu 24.04 LTS Server
+        case .debian:
+            return formatter.date(from: "2023-06-10")!  // Debian 12
+        case .fedora:
+            return formatter.date(from: "2023-11-07")!  // Fedora 39
+        case .kali:
+            return formatter.date(from: "2024-03-11")!  // Kali 2024.1
+        case .parrot:
+            return formatter.date(from: "2024-01-15")!  // Parrot 6.0
+        case .arch:
+            return formatter.date(from: "2024-11-01")!  // Rolling release - approximate
+        case .manjaro:
+            return formatter.date(from: "2024-01-28")!  // Manjaro 23.1.3
+        }
+    }
+
+    // Version string
+    var version: String {
+        switch self {
+        case .ubuntu:
+            return "24.04"
+        case .ubuntuServer:
+            return "24.04"
+        case .debian:
+            return "12.0"
+        case .fedora:
+            return "39"
+        case .kali:
+            return "2024.1"
+        case .parrot:
+            return "6.0"
+        case .arch:
+            return "Latest"
+        case .manjaro:
+            return "23.1.3"
+        }
+    }
+
     // SECURITY: Hardcoded official CDN URLs only
     // Only distros with dedicated official CDNs are supported
     var downloadURL: String {
         switch self {
         case .ubuntu:
+            return "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-desktop-arm64.iso"
+        case .ubuntuServer:
             return "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-live-server-arm64.iso"
         case .debian:
             return "https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/debian-12.0.0-arm64-netinst.iso"
@@ -58,7 +108,9 @@ enum LinuxDistro: String {
     var sha256Checksum: String {
         switch self {
         case .ubuntu:
-            return "PLACEHOLDER_UPDATE_FROM_UBUNTU_CHECKSUMS"
+            return "PLACEHOLDER_UPDATE_FROM_UBUNTU_DESKTOP_CHECKSUMS"
+        case .ubuntuServer:
+            return "PLACEHOLDER_UPDATE_FROM_UBUNTU_SERVER_CHECKSUMS"
         case .debian:
             return "PLACEHOLDER_UPDATE_FROM_DEBIAN_CHECKSUMS"
         case .fedora:
@@ -173,12 +225,38 @@ class ISOCacheManager {
     func getCachedImage(for imageType: VMImageType) -> URL? {
         let imagePath = getImagePath(for: imageType)
 
-        if FileManager.default.fileExists(atPath: imagePath) {
-            print("[Cache] Found cached image: \(imagePath)")
-            return URL(fileURLWithPath: imagePath)
+        // Check if directory exists
+        guard FileManager.default.fileExists(atPath: imagePath) else {
+            print("[Cache] No cache directory found for: \(imageType)")
+            return nil
         }
 
-        print("[Cache] No cached image found for: \(imageType)")
+        // Look for actual ISO/IPSW file in the directory
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: imagePath) else {
+            print("[Cache] Cannot read cache directory: \(imagePath)")
+            return nil
+        }
+
+        // Find ISO or IPSW file
+        let validExtensions = [".iso", ".ipsw"]
+        for file in contents {
+            for ext in validExtensions where file.hasSuffix(ext) {
+                let filePath = imagePath + file
+                let fileURL = URL(fileURLWithPath: filePath)
+
+                // Verify file is not a placeholder (> 1MB)
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: filePath),
+                   let fileSize = attrs[.size] as? Int64,
+                   fileSize > 1_000_000 {  // > 1MB
+                    print("[Cache] Found cached image: \(filePath)")
+                    return fileURL
+                } else {
+                    print("[Cache] Skipping placeholder/invalid file: \(file)")
+                }
+            }
+        }
+
+        print("[Cache] No valid cached image found for: \(imageType)")
         return nil
     }
 
@@ -279,6 +357,31 @@ class ISOCacheManager {
         print("[Cache] Deleted cached image: \(path)")
     }
 
+    /// Get download information for a Linux distribution
+    func getDistributionInfo(for distro: LinuxDistro) -> (releaseDate: Date, lastDownloaded: Date?, isCached: Bool) {
+        let imagePath = getImagePath(for: .linux(distro: distro, version: distro.version))
+        var lastDownloaded: Date? = nil
+        var isCached = false
+
+        // Check if ISO is cached and get its modification date
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: imagePath) {
+            for file in contents where file.hasSuffix(".iso") {
+                let isoPath = imagePath + file
+                if FileManager.default.fileExists(atPath: isoPath) {
+                    isCached = true
+                    // Get file modification date as "last downloaded" date
+                    if let attrs = try? FileManager.default.attributesOfItem(atPath: isoPath),
+                       let modDate = attrs[.modificationDate] as? Date {
+                        lastDownloaded = modDate
+                    }
+                    break
+                }
+            }
+        }
+
+        return (distro.releaseDate, lastDownloaded, isCached)
+    }
+
     // MARK: - Private Helpers
 
     private func getImagePath(for imageType: VMImageType) -> String {
@@ -363,6 +466,10 @@ class ISOCacheManager {
         config.timeoutIntervalForResource = 7200.0  // 2 hours for large ISOs
 
         let session = URLSession(configuration: config, delegate: nil, delegateQueue: .main)
+
+        // Start with initial progress message
+        progressHandler(0.0, "Starting download from \(url.host ?? "server")...")
+
         let downloadTask = session.downloadTask(with: url) { [weak self] tempLocation, response, error in
             if let error = error {
                 print("[Cache] Download failed: \(error)")
@@ -376,10 +483,13 @@ class ISOCacheManager {
                 return
             }
 
+            progressHandler(0.9, "Download complete, validating...")
+
             // SECURITY: Validate file size (reject >20GB to prevent DoS)
             if let fileSize = try? FileManager.default.attributesOfItem(atPath: tempLocation.path)[.size] as? Int64 {
                 let sizeGB = Double(fileSize) / (1024 * 1024 * 1024)
                 print("[Cache] Downloaded file size: \(String(format: "%.2f", sizeGB)) GB")
+                progressHandler(0.92, "Downloaded \(String(format: "%.2f", sizeGB)) GB")
 
                 if sizeGB > 20 {
                     let error = NSError(domain: "ISOCacheManager", code: 101, userInfo: [NSLocalizedDescriptionKey: "SECURITY: File too large (\(String(format: "%.2f", sizeGB)) GB) - max 20GB allowed"])
@@ -390,6 +500,8 @@ class ISOCacheManager {
             }
 
             do {
+                progressHandler(0.94, "Moving to cache...")
+
                 // Move to cache
                 if FileManager.default.fileExists(atPath: destinationURL.path) {
                     try FileManager.default.removeItem(at: destinationURL)
@@ -398,6 +510,7 @@ class ISOCacheManager {
 
                 // SECURITY: Verify SHA256 checksum (when not placeholder)
                 if !distro.sha256Checksum.hasPrefix("PLACEHOLDER") {
+                    progressHandler(0.96, "Verifying checksum...")
                     print("[Cache] Verifying SHA256 checksum...")
                     guard let self = self, self.verifySHA256(file: destinationURL, expectedHash: distro.sha256Checksum) else {
                         let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [NSLocalizedDescriptionKey: "SECURITY: SHA256 checksum verification failed - file may be corrupted or tampered"])
@@ -408,6 +521,7 @@ class ISOCacheManager {
                     print("[Cache] ✓ SHA256 verification passed")
                 }
 
+                progressHandler(1.0, "Download complete!")
                 print("[Cache] Successfully cached \(distro.rawValue) ISO")
                 completionHandler(.success(destinationURL))
             } catch {
@@ -417,8 +531,6 @@ class ISOCacheManager {
         }
 
         downloadTask.resume()
-
-        // TODO: Add progress tracking similar to MacOSVMInstaller
     }
 
     // SECURITY: Validate download URL
