@@ -52,8 +52,11 @@ struct VMConfiguration: Codable {
     var diskSize: UInt64 // in bytes
     var createdDate: Date
     var lastUsedDate: Date?
-    var osType: String // e.g., "Linux", "Ubuntu", etc.
+    var osType: String // e.g., "Linux", "macOS"
     var macOSInstalled: Bool? // For macOS VMs - tracks if OS has been installed (nil for Linux VMs)
+    var osInstalled: Bool? // For Linux VMs - tracks if OS has been installed (nil for macOS VMs)
+    var linuxDistribution: String? // For Linux VMs - e.g., "Kali", "Ubuntu", "Debian"
+    var linuxVersion: String? // For Linux VMs - e.g., "2024.1", "24.04"
 
     // Network configuration
     var networkConfig: VirtualNetworkConfig = VirtualNetworkConfig()
@@ -75,6 +78,9 @@ struct VMConfiguration: Codable {
         lastUsedDate = try container.decodeIfPresent(Date.self, forKey: .lastUsedDate)
         osType = try container.decode(String.self, forKey: .osType)
         macOSInstalled = try container.decodeIfPresent(Bool.self, forKey: .macOSInstalled)
+        osInstalled = try container.decodeIfPresent(Bool.self, forKey: .osInstalled)
+        linuxDistribution = try container.decodeIfPresent(String.self, forKey: .linuxDistribution)
+        linuxVersion = try container.decodeIfPresent(String.self, forKey: .linuxVersion)
 
         // Provide default if networkConfig is missing (for backward compatibility)
         networkConfig = (try? container.decode(VirtualNetworkConfig.self, forKey: .networkConfig)) ?? VirtualNetworkConfig()
@@ -156,6 +162,7 @@ struct VMConfiguration: Codable {
     // Custom coding keys to exclude status from persistence
     enum CodingKeys: String, CodingKey {
         case id, name, bundlePath, cpuCount, memorySize, diskSize
-        case createdDate, lastUsedDate, osType, macOSInstalled, networkConfig
+        case createdDate, lastUsedDate, osType, macOSInstalled, osInstalled
+        case linuxDistribution, linuxVersion, networkConfig
     }
 }

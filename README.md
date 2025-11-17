@@ -7,6 +7,9 @@ A macOS application for managing Linux and macOS virtual machines, designed for 
 ## Recent Updates
 
 **November 2025**
+- ✅ **Critical Linux VM boot fix** - Fixed boolean logic bug causing Linux VMs to crash on startup
+- ✅ **Linux installation support** - Added automatic ISO detection and OS installation tracking for Linux VMs
+- ✅ **Legacy VM compatibility** - Intelligent distribution inference for existing VMs without metadata
 - ✅ **Real-time macOS IPSW download progress** - Fixed modal dialog threading issue, downloads now show live GB/percentage updates
 - ✅ **Enhanced security logging** - Comprehensive NSLog debugging for download flow validation
 - ✅ **ISO Cache Manager** - Centralized, secure ISO/IPSW download management with security audit logging
@@ -37,9 +40,21 @@ SecVF provides a clean GUI for creating, managing, and monitoring virtual machin
 - **Auto-Migration** - Migrates VMs from legacy locations on first launch
 
 ### Linux VM Support
-- Boot from ISO for any ARM64 or x86_64 distribution (Ubuntu, Debian, Fedora, etc.)
+- **Automatic OS installation tracking** - Detects when Linux VMs need installation
+- **ISO cache management** - Centralized storage in `~/.avf/VMImages/Linux/`
+- **Smart distribution detection** - Automatically infers distro from VM names for legacy VMs
+- **Supported distributions** (8 total):
+  - Ubuntu Desktop & Server (24.04 LTS)
+  - Debian (12.0)
+  - Fedora (39)
+  - Kali Linux (2024.1) - Security/pentesting focused
+  - Parrot Security (6.0) - Alternative security distro
+  - Arch Linux (Latest) - Rolling release
+  - Manjaro (23.1.3)
+- Boot from ISO for any ARM64 or x86_64 distribution
 - SPICE agent support for clipboard sharing
 - Optional Rosetta support for running x86_64 binaries on ARM Linux
+- **Progress tracking** for ISO downloads with live updates
 
 ### macOS VM Support
 - Automatic download of latest macOS restore images (15.6 GB)
@@ -50,6 +65,8 @@ SecVF provides a clean GUI for creating, managing, and monitoring virtual machin
 - TLS 1.2+ requirement with certificate validation
 
 **See [ISOCACHE.md](ISOCACHE.md) for complete ISO Cache Manager documentation including security architecture, threat model, and audit logging.**
+
+**See [docs/LINUX-BOOT-FIX.md](docs/LINUX-BOOT-FIX.md) for detailed documentation of the critical Linux VM boot fix.**
 
 ## Getting Started
 
@@ -70,7 +87,30 @@ VMs from legacy locations are automatically migrated to `~/.avf/Linux/` or `~/.a
 
 ## VM Storage Structure
 
-VMs stored in `~/.avf/` directory organized by OS type. Each VM bundle contains: Disk.img, NVRAM, MachineIdentifier, and metadata.json. macOS IPSWs are stored centrally in `~/.avf/MacOS/` and shared across all macOS VMs.
+VMs are stored in the `~/.avf/` directory, organized by OS type:
+
+```
+~/.avf/
+├── Linux/          # Linux VMs
+│   └── [VM Name].bundle/
+│       ├── Disk.img
+│       ├── NVRAM
+│       ├── MachineIdentifier
+│       └── metadata.json
+├── MacOS/          # macOS VMs and shared IPSWs
+│   ├── [VM Name].bundle/
+│   └── *.ipsw      # Shared restore images
+└── VMImages/       # Cached ISO files
+    └── Linux/
+        └── [Distro]-[Version]/
+            └── *.iso
+```
+
+Each VM bundle contains:
+- **Disk.img**: Virtual disk image
+- **NVRAM**: Boot configuration (critical for Linux VMs)
+- **MachineIdentifier**: Unique VM identifier
+- **metadata.json**: Configuration including OS installation status
 
 ## Advanced Features
 
@@ -120,11 +160,38 @@ Designed for security research and malware analysis with hardware-enforced VM is
 
 ## Troubleshooting
 
-**VM Won't Start:** Verify VM bundle exists in `~/.avf/`, check required files (Disk.img, NVRAM, MachineIdentifier), review console logs.
+### Linux VM Issues
 
-**Linux Installation:** ISO must match Mac architecture (ARM64/x86_64), allocate 4GB+ memory, verify ISO hash.
+**VM Crashes on Boot:**
+- Check if VM has proper NVRAM file (critical for boot)
+- Verify `osInstalled` status in metadata.json
+- For legacy VMs, ensure VM name contains distro (e.g., "Kali Router")
+- Review logs: `Console.app` and filter for "Linux VM"
 
-**macOS Download Fails:** Check internet connection, ensure 15GB+ free space, verify firewall allows Apple CDN access.
+**Installation Not Starting:**
+- Ensure ISO is cached in `~/.avf/VMImages/Linux/[Distro]-[Version]/`
+- ISO file must be > 1MB (not a placeholder)
+- Check supported distributions list above
+
+**VM Won't Start:**
+- Verify VM bundle exists in `~/.avf/`
+- Check required files (Disk.img, NVRAM, MachineIdentifier)
+- Review console logs for specific errors
+
+### macOS VM Issues
+
+**Download Fails:**
+- Check internet connection
+- Ensure 15GB+ free space
+- Verify firewall allows Apple CDN access
+- Check `~/.avf/logs/` for download errors
+
+### General Issues
+
+**Linux Installation:**
+- ISO must match Mac architecture (ARM64/x86_64)
+- Allocate 4GB+ memory for installation
+- Verify ISO checksum if available
 
 ## Development Roadmap
 

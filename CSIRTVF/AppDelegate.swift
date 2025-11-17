@@ -94,9 +94,75 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 installerISOPath = nil
             }
         } else {
-            // Linux VM
-            needsInstall = false
-            installerISOPath = nil
+            // Linux VM - check if OS is installed
+            if vm.osInstalled == false {
+                // Linux VM needs installation - find cached ISO
+                NSLog("[Linux VM] OS not yet installed (osInstalled=%@), VM needs installation",
+                      vm.osInstalled == nil ? "nil" : "false")
+                needsInstall = true
+
+                // Find cached ISO based on distro in metadata
+                // For legacy VMs without distro info, try to infer from VM name
+                var linuxDistro = vm.linuxDistribution
+                var linuxVersion = vm.linuxVersion
+
+                if linuxDistro == nil || linuxVersion == nil {
+                    NSLog("[Linux VM] Missing distro/version in metadata, inferring from VM name: %@", vm.name)
+                    // Try to infer from VM name (e.g., "Kali Router" -> Kali 2024.1)
+                    let vmNameLower = vm.name.lowercased()
+                    if vmNameLower.contains("kali") {
+                        linuxDistro = "Kali"
+                        linuxVersion = "2024.1"
+                        NSLog("[Linux VM] Inferred: Kali 2024.1")
+                    } else if vmNameLower.contains("ubuntu") {
+                        linuxDistro = "Ubuntu Desktop"
+                        linuxVersion = "24.04"
+                        NSLog("[Linux VM] Inferred: Ubuntu Desktop 24.04")
+                    } else if vmNameLower.contains("debian") {
+                        linuxDistro = "Debian"
+                        linuxVersion = "12.0"
+                        NSLog("[Linux VM] Inferred: Debian 12.0")
+                    } else {
+                        NSLog("[Linux VM] ERROR: Cannot infer distro from VM name")
+                        DispatchQueue.main.async {
+                            let alert = NSAlert()
+                            alert.messageText = "Linux VM Configuration Error"
+                            alert.informativeText = "This Linux VM is missing distribution information.\n\nVM Name: \(vm.name)\n\nPlease recreate the VM or add distro info to metadata manually."
+                            alert.alertStyle = .critical
+                            alert.addButton(withTitle: "OK")
+                            alert.runModal()
+                        }
+                        return
+                    }
+                }
+
+                guard let distro = linuxDistro, let version = linuxVersion else {
+                    return  // Should not reach here
+                }
+
+                let cacheDir = NSHomeDirectory() + "/.avf/VMImages/Linux/\(distro)-\(version)/"
+                if let cachedISO = findCachedISO(in: cacheDir) {
+                    NSLog("[Linux VM] Found cached ISO: %@", cachedISO.path)
+                    installerISOPath = cachedISO
+                } else {
+                    NSLog("[Linux VM] ERROR: No cached ISO found in %@", cacheDir)
+                    // Show error to user
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Linux Install Image Not Found"
+                        alert.informativeText = "This Linux VM needs to be installed, but no ISO file was found in \(cacheDir)\n\nPlease download the \(distro) \(version) ISO first."
+                        alert.alertStyle = .critical
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                    }
+                    return
+                }
+            } else {
+                // Linux OS is already installed
+                NSLog("[Linux VM] OS already installed")
+                needsInstall = false
+                installerISOPath = nil
+            }
         }
 
         showMainWindowAndStartVM()
@@ -113,6 +179,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 let ipswPath = directory + file
                 if FileManager.default.fileExists(atPath: ipswPath) {
                     return URL(fileURLWithPath: ipswPath)
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func findCachedISO(in directory: String) -> URL? {
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: directory) else {
+            return nil
+        }
+
+        // Look for any .iso file
+        for file in contents {
+            if file.hasSuffix(".iso") {
+                let isoPath = directory + file
+                if FileManager.default.fileExists(atPath: isoPath) {
+                    return URL(fileURLWithPath: isoPath)
                 }
             }
         }
