@@ -70,7 +70,7 @@ enum LinuxDistro: String, Codable {
         case .fedora:
             return "39"
         case .kali:
-            return "2024.1"
+            return "2025.3"
         case .parrot:
             return "6.0"
         case .arch:
@@ -93,7 +93,7 @@ enum LinuxDistro: String, Codable {
         case .fedora:
             return "https://download.fedoraproject.org/pub/fedora/linux/releases/39/Server/aarch64/iso/Fedora-Server-dvd-aarch64-39-1.5.iso"
         case .kali:
-            return "https://cdimage.kali.org/kali-2024.1/kali-linux-2024.1-installer-arm64.iso"
+            return "https://cdimage.kali.org/kali-2025.3/kali-linux-2025.3-installer-arm64.iso"
         case .parrot:
             return "https://download.parrot.sh/parrot/iso/6.0/Parrot-security-6.0_arm64.iso"
         case .arch:
@@ -116,7 +116,7 @@ enum LinuxDistro: String, Codable {
         case .fedora:
             return "PLACEHOLDER_UPDATE_FROM_FEDORA_CHECKSUMS"
         case .kali:
-            return "PLACEHOLDER_UPDATE_FROM_KALI_CHECKSUMS"
+            return "7a5ce065113af70d9c2924ff3019a986f4df784c5bc0929b10cc2d05892e9445"
         case .parrot:
             return "PLACEHOLDER_UPDATE_FROM_PARROT_CHECKSUMS"
         case .arch:
@@ -149,6 +149,7 @@ class ISOCacheManager {
     private var lastDownloadTime: Date?
     private let minDownloadIntervalSeconds: TimeInterval = 5  // Rate limiting
     private var macOSInstaller: MacOSVMInstaller?  // Keep strong reference during download
+    fileprivate var activeISODelegate: ISODownloadDelegate?  // Keep strong reference during ISO download
 
     private init() {
         cacheRoot = NSHomeDirectory() + "/.avf/VMImages/"
@@ -465,72 +466,59 @@ class ISOCacheManager {
         config.timeoutIntervalForRequest = 60.0
         config.timeoutIntervalForResource = 7200.0  // 2 hours for large ISOs
 
-        let session = URLSession(configuration: config, delegate: nil, delegateQueue: .main)
+        // Create delegate to handle progress
+        let delegate = ISODownloadDelegate()
+        delegate.progressHandler = progressHandler
+        delegate.completionHandler = completionHandler
+        delegate.destinationURL = destinationURL
+        delegate.distro = distro
+        delegate.isoManager = self
+
+        // Store delegate to keep it alive during download
+        self.activeISODelegate = delegate
+
+        let session = URLSession(configuration: config, delegate: delegate, delegateQueue: .main)
 
         // Start with initial progress message
         progressHandler(0.0, "Starting download from \(url.host ?? "server")...")
 
-        let downloadTask = session.downloadTask(with: url) { [weak self] tempLocation, response, error in
-            if let error = error {
-                print("[Cache] Download failed: \(error)")
-                completionHandler(.failure(error))
+        let downloadTask = session.downloadTask(with: url)
+        delegate.downloadTask = downloadTask
+
+        // Create timer to monitor progress
+        // Note: Must add to common run loop modes to fire during modal dialogs
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak delegate] _ in
+            guard let task = delegate?.downloadTask else {
+                NSLog("[ISO Download] Timer fired but no download task")
                 return
             }
 
-            guard let tempLocation = tempLocation else {
-                let error = NSError(domain: "ISOCacheManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "No download location"])
-                completionHandler(.failure(error))
-                return
-            }
+            let bytesReceived = task.countOfBytesReceived
+            let totalBytes = task.countOfBytesExpectedToReceive
 
-            progressHandler(0.9, "Download complete, validating...")
+            NSLog("[ISO Download] Timer check: %lld / %lld bytes (state: %ld)", bytesReceived, totalBytes, task.state.rawValue)
 
-            // SECURITY: Validate file size (reject >20GB to prevent DoS)
-            if let fileSize = try? FileManager.default.attributesOfItem(atPath: tempLocation.path)[.size] as? Int64 {
-                let sizeGB = Double(fileSize) / (1024 * 1024 * 1024)
-                print("[Cache] Downloaded file size: \(String(format: "%.2f", sizeGB)) GB")
-                progressHandler(0.92, "Downloaded \(String(format: "%.2f", sizeGB)) GB")
+            if totalBytes > 0 {
+                let progress = Double(bytesReceived) / Double(totalBytes)
+                let mbReceived = Double(bytesReceived) / (1024 * 1024)
+                let mbTotal = Double(totalBytes) / (1024 * 1024)
 
-                if sizeGB > 20 {
-                    let error = NSError(domain: "ISOCacheManager", code: 101, userInfo: [NSLocalizedDescriptionKey: "SECURITY: File too large (\(String(format: "%.2f", sizeGB)) GB) - max 20GB allowed"])
-                    try? FileManager.default.removeItem(at: tempLocation)
-                    completionHandler(.failure(error))
-                    return
-                }
-            }
-
-            do {
-                progressHandler(0.94, "Moving to cache...")
-
-                // Move to cache
-                if FileManager.default.fileExists(atPath: destinationURL.path) {
-                    try FileManager.default.removeItem(at: destinationURL)
-                }
-                try FileManager.default.moveItem(at: tempLocation, to: destinationURL)
-
-                // SECURITY: Verify SHA256 checksum (when not placeholder)
-                if !distro.sha256Checksum.hasPrefix("PLACEHOLDER") {
-                    progressHandler(0.96, "Verifying checksum...")
-                    print("[Cache] Verifying SHA256 checksum...")
-                    guard let self = self, self.verifySHA256(file: destinationURL, expectedHash: distro.sha256Checksum) else {
-                        let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [NSLocalizedDescriptionKey: "SECURITY: SHA256 checksum verification failed - file may be corrupted or tampered"])
-                        try? FileManager.default.removeItem(at: destinationURL)
-                        completionHandler(.failure(error))
-                        return
-                    }
-                    print("[Cache] ✓ SHA256 verification passed")
-                }
-
-                progressHandler(1.0, "Download complete!")
-                print("[Cache] Successfully cached \(distro.rawValue) ISO")
-                completionHandler(.success(destinationURL))
-            } catch {
-                print("[Cache] Failed to move ISO: \(error)")
-                completionHandler(.failure(error))
+                let status = String(format: "Downloading: %.1f / %.1f MB", mbReceived, mbTotal)
+                NSLog("[ISO Download] Calling progressHandler with progress: %.2f, status: %@", progress * 0.85, status)
+                delegate?.progressHandler?(progress * 0.85, status) // Reserve 0.85-1.0 for validation
+            } else if bytesReceived > 0 {
+                // Show progress even without total size
+                let mbReceived = Double(bytesReceived) / (1024 * 1024)
+                let status = String(format: "Downloading: %.1f MB...", mbReceived)
+                delegate?.progressHandler?(0.1, status)
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        delegate.progressTimer = timer
 
+        NSLog("[ISO Download] Starting download task for: %@", url.absoluteString)
         downloadTask.resume()
+        NSLog("[ISO Download] Download task state after resume: %ld", downloadTask.state.rawValue)
     }
 
     // SECURITY: Validate download URL
@@ -558,7 +546,7 @@ class ISOCacheManager {
     }
 
     // SECURITY: Verify SHA256 checksum
-    private func verifySHA256(file: URL, expectedHash: String) -> Bool {
+    func verifySHA256(file: URL, expectedHash: String) -> Bool {
         guard let fileData = try? Data(contentsOf: file) else {
             print("SECURITY: Failed to read file for SHA256 verification")
             return false
@@ -605,6 +593,135 @@ extension VMImageType: CustomStringConvertible {
         case .linux(let distro, let version, let isSecurityRouter):
             let routerTag = isSecurityRouter ? " (Security Router)" : ""
             return "\(distro.rawValue) \(version)\(routerTag)"
+        }
+    }
+}
+
+// MARK: - Download Progress Delegate
+
+private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    var progressHandler: ((Double, String) -> Void)?
+    var completionHandler: ((Result<URL, Error>) -> Void)?
+    var destinationURL: URL?
+    var distro: LinuxDistro?
+    var isoManager: ISOCacheManager?
+    var progressTimer: Timer?
+    var downloadTask: URLSessionDownloadTask?
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        // Stop progress timer
+        progressTimer?.invalidate()
+        progressTimer = nil
+
+        guard let destinationURL = destinationURL,
+              let distro = distro,
+              let isoManager = isoManager else {
+            let error = NSError(domain: "ISOCacheManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing required properties"])
+            completionHandler?(.failure(error))
+            return
+        }
+
+        progressHandler?(0.9, "Download complete, validating...")
+
+        // SECURITY: Validate file size (reject >20GB to prevent DoS)
+        if let fileSize = try? FileManager.default.attributesOfItem(atPath: location.path)[.size] as? Int64 {
+            let sizeGB = Double(fileSize) / (1024 * 1024 * 1024)
+            print("[Cache] Downloaded file size: \(String(format: "%.2f", sizeGB)) GB")
+            progressHandler?(0.92, "Downloaded \(String(format: "%.2f", sizeGB)) GB")
+
+            if sizeGB > 20 {
+                let error = NSError(domain: "ISOCacheManager", code: 101, userInfo: [NSLocalizedDescriptionKey: "SECURITY: File too large (\(String(format: "%.2f", sizeGB)) GB) - max 20GB allowed"])
+                try? FileManager.default.removeItem(at: location)
+                completionHandler?(.failure(error))
+                return
+            }
+        }
+
+        do {
+            progressHandler?(0.94, "Moving to cache...")
+
+            // Move to cache
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
+            try FileManager.default.moveItem(at: location, to: destinationURL)
+
+            // SECURITY: Verify SHA256 checksum (when not placeholder)
+            if !distro.sha256Checksum.hasPrefix("PLACEHOLDER") {
+                progressHandler?(0.86, "Download complete - Verifying checksum...")
+                print("[Cache] Verifying SHA256 checksum...")
+
+                // Show periodic progress updates during verification
+                var verificationProgress = 0.86
+                let updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+                    verificationProgress += 0.01
+                    if verificationProgress <= 0.98 {
+                        self?.progressHandler?(verificationProgress, "Verifying checksum (this may take 10-30 seconds)...")
+                    }
+                }
+                RunLoop.main.add(updateTimer, forMode: .common)
+
+                // Run SHA256 verification on background thread (CPU-intensive for large files)
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let isValid = isoManager.verifySHA256(file: destinationURL, expectedHash: distro.sha256Checksum)
+
+                    DispatchQueue.main.async {
+                        updateTimer.invalidate()
+
+                        if !isValid {
+                            let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [NSLocalizedDescriptionKey: "SECURITY: SHA256 checksum verification failed - file may be corrupted or tampered"])
+                            try? FileManager.default.removeItem(at: destinationURL)
+
+                            // Clear the delegate reference
+                            isoManager.activeISODelegate = nil
+
+                            self?.completionHandler?(.failure(error))
+                            return
+                        }
+
+                        print("[Cache] ✓ SHA256 verification passed")
+                        self?.progressHandler?(1.0, "Checksum verified - Complete!")
+                        print("[Cache] Successfully cached \(distro.rawValue) ISO")
+
+                        // Clear the delegate reference
+                        isoManager.activeISODelegate = nil
+
+                        self?.completionHandler?(.success(destinationURL))
+                    }
+                }
+            } else {
+                // No checksum verification needed
+                progressHandler?(1.0, "Download complete!")
+                print("[Cache] Successfully cached \(distro.rawValue) ISO")
+
+                // Clear the delegate reference
+                isoManager.activeISODelegate = nil
+
+                completionHandler?(.success(destinationURL))
+            }
+        } catch {
+            print("[Cache] Failed to move ISO: \(error)")
+
+            // Clear the delegate reference
+            isoManager.activeISODelegate = nil
+
+            completionHandler?(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        NSLog("[ISO Download] urlSession didCompleteWithError called. Error: %@", error?.localizedDescription ?? "nil")
+        progressTimer?.invalidate()
+        progressTimer = nil
+
+        if let error = error {
+            NSLog("[Cache] Download failed: %@", error.localizedDescription)
+            print("[Cache] Download failed: \(error)")
+
+            // Clear the delegate reference
+            isoManager?.activeISODelegate = nil
+
+            completionHandler?(.failure(error))
         }
     }
 }

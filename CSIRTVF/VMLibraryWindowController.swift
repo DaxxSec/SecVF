@@ -362,16 +362,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             }
         }
 
-        // Increase window minimum size to show all buttons
-        window.minSize = NSSize(width: sidebarWidth + 800, height: 500)
+        // Increase window minimum size to show all buttons AND status bar (60px)
+        // Status bar is at y=0, so we need enough height to show: table view + buttons + status bar
+        let minHeightForStatusBar: CGFloat = 650  // Increased from 500 to ensure status bar is visible
+        window.minSize = NSSize(width: sidebarWidth + 800, height: minHeightForStatusBar)
 
-        // Set default window size to ensure all controls are visible
+        // Set default window size to ensure all controls are visible including status bar
         var windowFrame = window.frame
-        if windowFrame.size.width < sidebarWidth + 1000 || windowFrame.size.height < 600 {
+        if windowFrame.size.width < sidebarWidth + 1000 || windowFrame.size.height < minHeightForStatusBar {
             windowFrame.size.width = sidebarWidth + 1000
-            windowFrame.size.height = 600
+            windowFrame.size.height = minHeightForStatusBar
             windowFrame.origin.x -= (sidebarWidth + 1000 - window.frame.width) / 2  // Keep window centered
-            windowFrame.origin.y -= (600 - window.frame.height) / 2
+            windowFrame.origin.y -= (minHeightForStatusBar - window.frame.height) / 2
             window.setFrame(windowFrame, display: true, animate: false)
         }
     }
@@ -891,10 +893,21 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         progressAlert.alertStyle = .informational
         progressAlert.addButton(withTitle: "Cancel")
 
-        // Create a container view for progress bar and percentage label
-        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 45))
+        // Create a container view for progress bar, percentage label, and URL
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 75))
 
-        let progressIndicator = NSProgressIndicator(frame: NSRect(x: 0, y: 20, width: 300, height: 20))
+        // Add source URL label at top for security transparency
+        let urlLabel = NSTextField(labelWithString: "Source: Apple Inc. (mesu.apple.com)")
+        urlLabel.frame = NSRect(x: 0, y: 55, width: 400, height: 20)
+        urlLabel.alignment = .center
+        urlLabel.font = NSFont.systemFont(ofSize: 9)
+        urlLabel.textColor = .secondaryLabelColor
+        urlLabel.isEditable = false
+        urlLabel.isBordered = false
+        urlLabel.backgroundColor = .clear
+        containerView.addSubview(urlLabel)
+
+        let progressIndicator = NSProgressIndicator(frame: NSRect(x: 0, y: 30, width: 400, height: 20))
         progressIndicator.style = .bar
         progressIndicator.isIndeterminate = false
         progressIndicator.minValue = 0
@@ -903,7 +916,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Add percentage label below progress bar
         let percentageLabel = NSTextField(labelWithString: "0%")
-        percentageLabel.frame = NSRect(x: 0, y: 0, width: 300, height: 20)
+        percentageLabel.frame = NSRect(x: 0, y: 5, width: 400, height: 20)
         percentageLabel.alignment = .center
         percentageLabel.font = NSFont.systemFont(ofSize: 11)
         percentageLabel.textColor = .secondaryLabelColor
@@ -943,6 +956,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                     let percentage = progress * 100.0
                     progressIndicator.doubleValue = percentage
                     percentageLabel.stringValue = String(format: "%.1f%%", percentage)
+                    // Force visual update during modal run loop
+                    progressIndicator.display()
                 })
             },
             completionHandler: { [weak self] result in
@@ -967,6 +982,141 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 })
             }
         )
+    }
+
+    // MARK: - Linux VM Download
+
+    private func downloadAndPrepareLinuxVM(_ vmConfig: VMConfiguration, distro: LinuxDistro, isRouter: Bool) {
+        NSLog("[VMLibrary] === downloadAndPrepareLinuxVM() ENTERED ===")
+        NSLog("[VMLibrary] VM config: %@, distro: %@, isRouter: %d", vmConfig.name, distro.rawValue, isRouter)
+
+        // Check if ISO is already cached
+        let imageType = VMImageType.linux(distro: distro, version: distro.version, isSecurityRouter: isRouter)
+        if let cachedISO = ISOCacheManager.shared.getCachedImage(for: imageType) {
+            NSLog("[VMLibrary] ISO already cached at: %@", cachedISO.path)
+            // Start VM immediately with cached ISO
+            selectedVM = vmConfig
+            vmManager.updateLastUsedDate(vmConfig)
+            NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": vmConfig, "iso": cachedISO])
+            return
+        }
+
+        NSLog("[VMLibrary] ISO not cached, will download")
+
+        // Create progress alert
+        let progressAlert = NSAlert()
+        progressAlert.messageText = "Downloading \(distro.rawValue) ISO"
+        progressAlert.informativeText = "Initializing..."
+        progressAlert.alertStyle = .informational
+        progressAlert.addButton(withTitle: "Cancel")
+
+        // Create a container view for progress bar, percentage label, and URL
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 75))
+
+        // Add source URL label at top for security transparency
+        let urlLabel = NSTextField(labelWithString: "Source: \(distro.downloadURL)")
+        urlLabel.frame = NSRect(x: 0, y: 55, width: 400, height: 20)
+        urlLabel.alignment = .center
+        urlLabel.font = NSFont.systemFont(ofSize: 9)
+        urlLabel.textColor = .secondaryLabelColor
+        urlLabel.lineBreakMode = .byTruncatingMiddle
+        urlLabel.isEditable = false
+        urlLabel.isBordered = false
+        urlLabel.backgroundColor = .clear
+        containerView.addSubview(urlLabel)
+
+        let progressIndicator = NSProgressIndicator(frame: NSRect(x: 0, y: 30, width: 400, height: 20))
+        progressIndicator.style = .bar
+        progressIndicator.isIndeterminate = false
+        progressIndicator.minValue = 0
+        progressIndicator.maxValue = 100.0
+        containerView.addSubview(progressIndicator)
+
+        // Add percentage label below progress bar
+        let percentageLabel = NSTextField(labelWithString: "0%")
+        percentageLabel.frame = NSRect(x: 0, y: 5, width: 400, height: 20)
+        percentageLabel.alignment = .center
+        percentageLabel.font = NSFont.systemFont(ofSize: 11)
+        percentageLabel.textColor = .secondaryLabelColor
+        containerView.addSubview(percentageLabel)
+
+        progressAlert.accessoryView = containerView
+
+        // Show alert in background
+        DispatchQueue.main.async {
+            let response = progressAlert.runModal()
+            if response == .alertFirstButtonReturn {
+                // User clicked Cancel
+                print("Download cancelled by user")
+                // TODO: Add cancel support to ISOCacheManager
+            }
+        }
+
+        // Use centralized ISOCacheManager for ISO download
+        NSLog("[VMLibrary] Starting Linux ISO download flow...")
+        let cacheManager = ISOCacheManager.shared
+
+        NSLog("[VMLibrary] Created VMImageType: %@", imageType.description)
+
+        cacheManager.downloadImage(
+            for: imageType,
+            progressHandler: { progress, message in
+                // Use performSelector for modal dialog compatibility
+                RunLoop.main.perform(inModes: [.common], block: {
+                    progressAlert.informativeText = message
+                    let percentage = progress * 100.0
+                    progressIndicator.doubleValue = percentage
+                    percentageLabel.stringValue = String(format: "%.1f%%", percentage)
+                    // Force visual update during modal run loop
+                    progressIndicator.display()
+                })
+            },
+            completionHandler: { [weak self] result in
+                RunLoop.main.perform(inModes: [.common], block: {
+                    NSLog("[VMLibrary] downloadImage completion handler called")
+                    // Close progress window
+                    NSApp.abortModal()
+
+                    switch result {
+                    case .success(let isoURL):
+                        NSLog("[VMLibrary] ISO downloaded to: %@", isoURL.path)
+                        // Start VM with ISO
+                        self?.selectedVM = vmConfig
+                        self?.vmManager.updateLastUsedDate(vmConfig)
+                        // Keep library window visible
+                        NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": vmConfig, "iso": isoURL])
+
+                    case .failure(let error):
+                        NSLog("[VMLibrary] Download failed: %@", error.localizedDescription)
+                        self?.showAlert(message: "Failed to download \(distro.rawValue): \(error.localizedDescription)")
+                    }
+                })
+            }
+        )
+    }
+
+    // Helper function to map distro display names to LinuxDistro enum
+    private func mapDistroNameToEnum(_ distroName: String) -> LinuxDistro {
+        switch distroName {
+        case "Kali":
+            return .kali
+        case "Ubuntu Desktop":
+            return .ubuntu
+        case "Ubuntu Server":
+            return .ubuntuServer
+        case "Debian":
+            return .debian
+        case "Fedora":
+            return .fedora
+        case "ParrotOS":
+            return .parrot
+        case "Arch":
+            return .arch
+        case "Manjaro":
+            return .manjaro
+        default:
+            return .kali  // Default to Kali
+        }
     }
 
     // MARK: - Helper Methods
@@ -1013,38 +1163,68 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let createButton = alert.addButton(withTitle: "Select ISO")
         alert.addButton(withTitle: "Cancel")
 
-        // Create form (increased height for network configuration controls)
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 290))
+        // Create form (increased height for Linux router controls + distro selection)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 340))
 
         // Name field
         let nameLabel = NSTextField(labelWithString: "Name:")
-        nameLabel.frame = NSRect(x: 0, y: 260, width: 100, height: 20)
+        nameLabel.frame = NSRect(x: 0, y: 310, width: 100, height: 20)
         view.addSubview(nameLabel)
 
-        let nameField = NSTextField(frame: NSRect(x: 110, y: 258, width: 280, height: 24))
+        let nameField = NSTextField(frame: NSRect(x: 110, y: 308, width: 280, height: 24))
         nameField.stringValue = "New VM"
         view.addSubview(nameField)
 
         // OS Type dropdown
         let osLabel = NSTextField(labelWithString: "OS Type:")
-        osLabel.frame = NSRect(x: 0, y: 230, width: 100, height: 20)
+        osLabel.frame = NSRect(x: 0, y: 280, width: 100, height: 20)
         view.addSubview(osLabel)
 
-        let osPopup = NSPopUpButton(frame: NSRect(x: 110, y: 225, width: 150, height: 26), pullsDown: false)
+        let osPopup = NSPopUpButton(frame: NSRect(x: 110, y: 275, width: 150, height: 26), pullsDown: false)
         osPopup.addItem(withTitle: "Linux")
         osPopup.addItem(withTitle: "macOS")
         osPopup.selectItem(at: 0) // Default to Linux
         view.addSubview(osPopup)
+
+        // Linux Distribution dropdown (only visible for Linux VMs)
+        let distroLabel = NSTextField(labelWithString: "Distribution:")
+        distroLabel.frame = NSRect(x: 0, y: 250, width: 100, height: 20)
+        view.addSubview(distroLabel)
+
+        let distroPopup = NSPopUpButton(frame: NSRect(x: 110, y: 245, width: 200, height: 26), pullsDown: false)
+        distroPopup.addItem(withTitle: "Kali")
+        distroPopup.addItem(withTitle: "Ubuntu Desktop")
+        distroPopup.addItem(withTitle: "Ubuntu Server")
+        distroPopup.addItem(withTitle: "Debian")
+        distroPopup.addItem(withTitle: "Fedora")
+        distroPopup.addItem(withTitle: "ParrotOS")
+        distroPopup.addItem(withTitle: "Arch")
+        distroPopup.addItem(withTitle: "Manjaro")
+        distroPopup.selectItem(at: 0) // Default to Kali
+        view.addSubview(distroPopup)
+
+        // ISO Cache Status Label (below distro dropdown)
+        let isoCacheStatusLabel = NSTextField(labelWithString: "")
+        isoCacheStatusLabel.frame = NSRect(x: 110, y: 220, width: 280, height: 20)
+        isoCacheStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        isoCacheStatusLabel.isEditable = false
+        isoCacheStatusLabel.isBordered = false
+        isoCacheStatusLabel.drawsBackground = false
+        view.addSubview(isoCacheStatusLabel)
 
         // Delegate to handle dynamic UI updates
         class VMConfigDelegate: NSObject {
             weak var isoCheckbox: NSButton?
             weak var createButton: NSButton?
             weak var routerCheckbox: NSButton?
+            weak var linuxRouterCheckbox: NSButton?
             weak var routerLabel: NSTextField?
             weak var routerPopup: NSPopUpButton?
             weak var networkPopup: NSPopUpButton?
             weak var osPopup: NSPopUpButton?
+            weak var distroPopup: NSPopUpButton?
+            weak var distroLabel: NSTextField?
+            weak var isoCacheStatusLabel: NSTextField?
             weak var vmManager: VMManager?
 
             @objc func osTypeChanged(_ sender: NSPopUpButton) {
@@ -1052,12 +1232,88 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 isoCheckbox?.isHidden = isMacOS
                 createButton?.title = isMacOS ? "Create" : "Select ISO"
 
-                // Update network UI based on OS type
+                // Show/hide Linux-specific controls
+                distroPopup?.isHidden = isMacOS
+                distroLabel?.isHidden = isMacOS
+
+                // Update ISO cache status when showing Linux controls
+                if !isMacOS {
+                    updateISOCacheStatus()
+                } else {
+                    isoCacheStatusLabel?.stringValue = ""
+                }
+
+                // Update network UI based on OS type (this will handle linuxRouterCheckbox visibility)
                 updateNetworkUI()
             }
 
             @objc func networkModeChanged(_ sender: NSPopUpButton) {
                 updateNetworkUI()
+            }
+
+            @objc func linuxRouterCheckboxChanged(_ sender: NSButton) {
+                let isRouterMode = sender.state == .on
+
+                if isRouterMode {
+                    // Force Kali selection when router mode is enabled
+                    distroPopup?.selectItem(at: 0) // Kali is at index 0
+                    distroPopup?.isEnabled = false
+                    updateISOCacheStatus()
+                } else {
+                    // Re-enable distro selection when router mode is disabled
+                    distroPopup?.isEnabled = true
+                }
+            }
+
+            @objc func distroChanged(_ sender: NSPopUpButton) {
+                updateISOCacheStatus()
+            }
+
+            func updateISOCacheStatus() {
+                guard let distroPopup = distroPopup,
+                      let isoCacheStatusLabel = isoCacheStatusLabel,
+                      let selectedDistro = distroPopup.titleOfSelectedItem else { return }
+
+                // Map distro name to LinuxDistro enum
+                let linuxDistro: LinuxDistro
+                switch selectedDistro {
+                case "Kali":
+                    linuxDistro = .kali
+                case "Ubuntu Desktop":
+                    linuxDistro = .ubuntu
+                case "Ubuntu Server":
+                    linuxDistro = .ubuntuServer
+                case "Debian":
+                    linuxDistro = .debian
+                case "Fedora":
+                    linuxDistro = .fedora
+                case "ParrotOS":
+                    linuxDistro = .parrot
+                case "Arch":
+                    linuxDistro = .arch
+                case "Manjaro":
+                    linuxDistro = .manjaro
+                default:
+                    isoCacheStatusLabel.stringValue = ""
+                    return
+                }
+
+                let distroInfo = ISOCacheManager.shared.getDistributionInfo(for: linuxDistro)
+
+                if distroInfo.isCached, let downloadDate = distroInfo.lastDownloaded {
+                    // ISO is cached - show green text
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .short
+                    let dateString = formatter.string(from: downloadDate)
+
+                    isoCacheStatusLabel.stringValue = "ISO Cached! (downloaded: \(dateString))"
+                    isoCacheStatusLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 0.2, alpha: 1.0) // Green
+                } else {
+                    // ISO not cached - show red text
+                    isoCacheStatusLabel.stringValue = "Will download latest ISO"
+                    isoCacheStatusLabel.textColor = NSColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1.0) // Red
+                }
             }
 
             private func updateNetworkUI() {
@@ -1069,22 +1325,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 // Show/hide router options based on OS type and network mode
                 if isVirtual {
                     if isMacOS {
-                        // macOS in virtual mode: show router selection dropdown
+                        // macOS in virtual mode: show router selection dropdown only
                         routerCheckbox?.isHidden = true
+                        linuxRouterCheckbox?.isHidden = true
                         routerLabel?.isHidden = false
                         routerPopup?.isHidden = false
 
                         // Populate router dropdown with Linux VMs
                         populateRouterList()
                     } else {
-                        // Linux in virtual mode: show "act as router" checkbox
-                        routerCheckbox?.isHidden = false
+                        // Linux in virtual mode: show Linux Router checkbox only
+                        routerCheckbox?.isHidden = true
+                        linuxRouterCheckbox?.isHidden = false
                         routerLabel?.isHidden = true
                         routerPopup?.isHidden = true
                     }
                 } else {
                     // NAT mode: hide all router options
                     routerCheckbox?.isHidden = true
+                    linuxRouterCheckbox?.isHidden = true
                     routerLabel?.isHidden = true
                     routerPopup?.isHidden = true
                 }
@@ -1096,15 +1355,17 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
                 routerPopup.removeAllItems()
 
-                // Get all Linux VMs that could act as routers
-                let linuxVMs = vmManager.virtualMachines.filter { $0.osType.lowercased().contains("linux") }
+                // Get only Linux VMs that are configured as routers
+                let routerVMs = vmManager.virtualMachines.filter {
+                    $0.osType.lowercased().contains("linux") && $0.networkConfig.isRouter
+                }
 
-                if linuxVMs.isEmpty {
-                    routerPopup.addItem(withTitle: "No Linux VMs available")
+                if routerVMs.isEmpty {
+                    routerPopup.addItem(withTitle: "No router VMs available")
                     routerPopup.isEnabled = false
                 } else {
                     routerPopup.isEnabled = true
-                    for vm in linuxVMs {
+                    for vm in routerVMs {
                         routerPopup.addItem(withTitle: vm.name)
                     }
                 }
@@ -1115,68 +1376,75 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // CPU count
         let cpuLabel = NSTextField(labelWithString: "CPU Cores:")
-        cpuLabel.frame = NSRect(x: 0, y: 200, width: 100, height: 20)
+        cpuLabel.frame = NSRect(x: 0, y: 195, width: 100, height: 20)
         view.addSubview(cpuLabel)
 
-        let cpuField = NSTextField(frame: NSRect(x: 110, y: 198, width: 100, height: 24))
+        let cpuField = NSTextField(frame: NSRect(x: 110, y: 193, width: 100, height: 24))
         cpuField.stringValue = "2"
         view.addSubview(cpuField)
 
         // Memory size
         let memLabel = NSTextField(labelWithString: "Memory (GB):")
-        memLabel.frame = NSRect(x: 0, y: 170, width: 100, height: 20)
+        memLabel.frame = NSRect(x: 0, y: 165, width: 100, height: 20)
         view.addSubview(memLabel)
 
-        let memField = NSTextField(frame: NSRect(x: 110, y: 168, width: 100, height: 24))
+        let memField = NSTextField(frame: NSRect(x: 110, y: 163, width: 100, height: 24))
         memField.stringValue = "4"
         view.addSubview(memField)
 
         // Disk size
         let diskLabel = NSTextField(labelWithString: "Disk (GB):")
-        diskLabel.frame = NSRect(x: 0, y: 140, width: 100, height: 20)
+        diskLabel.frame = NSRect(x: 0, y: 135, width: 100, height: 20)
         view.addSubview(diskLabel)
 
-        let diskField = NSTextField(frame: NSRect(x: 110, y: 138, width: 100, height: 24))
+        let diskField = NSTextField(frame: NSRect(x: 110, y: 133, width: 100, height: 24))
         diskField.stringValue = "64"
         view.addSubview(diskField)
 
         // Network Mode dropdown
         let networkLabel = NSTextField(labelWithString: "Network:")
-        networkLabel.frame = NSRect(x: 0, y: 110, width: 100, height: 20)
+        networkLabel.frame = NSRect(x: 0, y: 105, width: 100, height: 20)
         view.addSubview(networkLabel)
 
-        let networkPopup = NSPopUpButton(frame: NSRect(x: 110, y: 105, width: 200, height: 26), pullsDown: false)
+        let networkPopup = NSPopUpButton(frame: NSRect(x: 110, y: 100, width: 200, height: 26), pullsDown: false)
         networkPopup.addItem(withTitle: "NAT (Internet Access)")
         networkPopup.addItem(withTitle: "Virtual Network (VM-to-VM)")
         networkPopup.selectItem(at: 0) // Default to NAT
         view.addSubview(networkPopup)
 
-        // Linux Router checkbox (only for Linux VMs in Virtual Network mode)
+        // Linux Router checkbox (top-level, always visible for Linux VMs)
+        let linuxRouterCheckbox = NSButton(checkboxWithTitle: "Linux Router", target: nil, action: nil)
+        linuxRouterCheckbox.frame = NSRect(x: 110, y: 75, width: 150, height: 20)
+        linuxRouterCheckbox.state = .off
+        linuxRouterCheckbox.isHidden = false  // Visible by default for Linux
+        view.addSubview(linuxRouterCheckbox)
+
+        // Network-based router checkbox (only for Linux VMs in Virtual Network mode)
         let routerCheckbox = NSButton(checkboxWithTitle: "Act as Router for other VMs", target: nil, action: nil)
-        routerCheckbox.frame = NSRect(x: 110, y: 80, width: 250, height: 20)
+        routerCheckbox.frame = NSRect(x: 110, y: 75, width: 250, height: 20)
         routerCheckbox.state = .off
         routerCheckbox.isHidden = true  // Hidden by default
         view.addSubview(routerCheckbox)
 
         // macOS Router selection (only for macOS VMs in Virtual Network mode)
         let routerLabel = NSTextField(labelWithString: "Route via:")
-        routerLabel.frame = NSRect(x: 110, y: 80, width: 70, height: 20)
+        routerLabel.frame = NSRect(x: 110, y: 75, width: 70, height: 20)
         routerLabel.isHidden = true  // Hidden by default
         view.addSubview(routerLabel)
 
-        let routerPopup = NSPopUpButton(frame: NSRect(x: 185, y: 75, width: 200, height: 26), pullsDown: false)
+        let routerPopup = NSPopUpButton(frame: NSRect(x: 185, y: 70, width: 200, height: 26), pullsDown: false)
         routerPopup.isHidden = true  // Hidden by default
         view.addSubview(routerPopup)
 
         // Rosetta support checkbox
         let rosettaCheckbox = NSButton(checkboxWithTitle: "Enable Rosetta (x86_64 emulation)", target: nil, action: nil)
-        rosettaCheckbox.frame = NSRect(x: 110, y: 50, width: 250, height: 20)
+        rosettaCheckbox.frame = NSRect(x: 110, y: 45, width: 250, height: 20)
         rosettaCheckbox.state = .off
         view.addSubview(rosettaCheckbox)
 
         // Install from ISO checkbox (only for Linux)
         let isoCheckbox = NSButton(checkboxWithTitle: "Install from ISO", target: nil, action: nil)
-        isoCheckbox.frame = NSRect(x: 110, y: 25, width: 200, height: 20)
+        isoCheckbox.frame = NSRect(x: 110, y: 20, width: 200, height: 20)
         isoCheckbox.state = .on
         view.addSubview(isoCheckbox)
 
@@ -1184,16 +1452,27 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         configDelegate.isoCheckbox = isoCheckbox
         configDelegate.createButton = createButton
         configDelegate.routerCheckbox = routerCheckbox
+        configDelegate.linuxRouterCheckbox = linuxRouterCheckbox
         configDelegate.routerLabel = routerLabel
         configDelegate.routerPopup = routerPopup
         configDelegate.networkPopup = networkPopup
         configDelegate.osPopup = osPopup
+        configDelegate.distroPopup = distroPopup
+        configDelegate.distroLabel = distroLabel
+        configDelegate.isoCacheStatusLabel = isoCacheStatusLabel
 
         // Set up delegate actions
         osPopup.target = configDelegate
         osPopup.action = #selector(VMConfigDelegate.osTypeChanged(_:))
         networkPopup.target = configDelegate
         networkPopup.action = #selector(VMConfigDelegate.networkModeChanged(_:))
+        linuxRouterCheckbox.target = configDelegate
+        linuxRouterCheckbox.action = #selector(VMConfigDelegate.linuxRouterCheckboxChanged(_:))
+        distroPopup.target = configDelegate
+        distroPopup.action = #selector(VMConfigDelegate.distroChanged(_:))
+
+        // Initialize ISO cache status check for Kali (default selection)
+        configDelegate.updateISOCacheStatus()
 
         alert.accessoryView = view
 
@@ -1206,10 +1485,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let enableRosetta = rosettaCheckbox.state == .on
             let needsISO = isoCheckbox.state == .on
             let networkModeIndex = networkPopup.indexOfSelectedItem
-            let isLinuxRouter = routerCheckbox.state == .on
+            let isLinuxRouter = routerCheckbox.state == .on || linuxRouterCheckbox.state == .on
             let selectedRouterName = routerPopup.titleOfSelectedItem
+            let selectedDistro = distroPopup.titleOfSelectedItem ?? "Kali"
 
             print("DEBUG: Creating VM with Rosetta: \(enableRosetta)")
+            print("DEBUG: Selected distro: \(selectedDistro)")
+            print("DEBUG: Is Linux Router: \(isLinuxRouter)")
 
             let memorySize = memoryGB * 1024 * 1024 * 1024
             let diskSize = diskGB * 1024 * 1024 * 1024
@@ -1222,6 +1504,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                     diskSize: diskSize,
                     osType: osType
                 )
+
+                // Store Linux distribution info in VM config
+                if osType == "Linux" {
+                    newVM.linuxDistribution = selectedDistro
+                    // Map distro name to version
+                    let distroEnum = mapDistroNameToEnum(selectedDistro)
+                    newVM.linuxVersion = distroEnum.version
+                }
 
                 // Configure network settings
                 if networkModeIndex == 1 {  // Virtual Network mode
@@ -1271,20 +1561,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                     downloadAndPrepareMacOSVM(newVM)
                     NSLog("[VMLibrary] downloadAndPrepareMacOSVM() call completed")
                 } else if needsISO {
-                    // For Linux, ask for ISO file
-                    let openPanel = NSOpenPanel()
-                    openPanel.canChooseFiles = true
-                    openPanel.allowsMultipleSelection = false
-                    openPanel.message = "Select an ISO file to install from"
-                    openPanel.allowedContentTypes = [.iso]
-
-                    if openPanel.runModal() == .OK {
-                        // Start VM with ISO
-                        selectedVM = newVM
-                        vmManager.updateLastUsedDate(newVM)
-                        // Keep library window visible
-                        NotificationCenter.default.post(name: .startVMWithISO, object: ["vm": newVM, "iso": openPanel.url!])
-                    }
+                    // For Linux, auto-download ISO via ISOCacheManager
+                    let distroEnum = mapDistroNameToEnum(selectedDistro)
+                    NSLog("[VMLibrary] %@ selected, checking cache/downloading ISO...", selectedDistro)
+                    downloadAndPrepareLinuxVM(newVM, distro: distroEnum, isRouter: isLinuxRouter)
                 }
             } catch {
                 showAlert(message: "Failed to create VM: \(error.localizedDescription)")
