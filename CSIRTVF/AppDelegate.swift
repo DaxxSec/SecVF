@@ -859,7 +859,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            self.createVirtualMachine(for: vmId)
+            // Only create VM if it doesn't already exist (prevents disk re-attachment errors)
+            if self.virtualMachines[vmId] == nil {
+                self.createVirtualMachine(for: vmId)
+            }
 
             guard let virtualMachine = self.virtualMachines[vmId],
                   let virtualMachineView = self.vmViews[vmId] else {
