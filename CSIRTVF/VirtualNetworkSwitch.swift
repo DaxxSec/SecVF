@@ -33,6 +33,10 @@ class VirtualSwitchPort {
     var connection: NWConnection?
     var isConnected: Bool = false
 
+    // FileHandles for bidirectional I/O
+    var readHandle: FileHandle?   // For receiving packets from VM
+    var writeHandle: FileHandle?  // For sending packets to VM
+
     // Traffic statistics
     var packetsReceived: UInt64 = 0
     var packetsSent: UInt64 = 0
@@ -130,16 +134,21 @@ class VirtualNetworkSwitch {
             let switchFd = fds[0]  // Switch side
             let vmFd = fds[1]      // VM side
 
-            // Switch keeps one end for packet forwarding
-            let switchHandle = FileHandle(fileDescriptor: switchFd, closeOnDealloc: true)
+            // Create separate file handles for reading and writing
+            // We need two handles because FileHandle can't do both simultaneously
+            let readHandle = FileHandle(fileDescriptor: switchFd, closeOnDealloc: false)
+            let writeFd = dup(switchFd)  // Duplicate the FD for writing
+            let writeHandle = FileHandle(fileDescriptor: writeFd, closeOnDealloc: true)
 
             // Create port entry
             let port = VirtualSwitchPort(vmId: vmId, vmName: vmName, socketPath: socketPath)
             port.isConnected = true
+            port.readHandle = readHandle
+            port.writeHandle = writeHandle
             ports[vmId] = port
 
             // Start receiving packets from this VM
-            startReceiving(from: switchHandle, vmId: vmId)
+            startReceiving(from: readHandle, vmId: vmId)
 
             log("VM connected to virtual switch: \(vmName) [Port: \(ports.count)]")
 
@@ -156,6 +165,11 @@ class VirtualNetworkSwitch {
             if let port = self.ports[vmId] {
                 port.connection?.cancel()
                 port.isConnected = false
+
+                // Close file handles
+                port.readHandle?.readabilityHandler = nil
+                try? port.readHandle?.close()
+                try? port.writeHandle?.close()
 
                 // Remove from MAC table
                 if let mac = port.macAddress {
@@ -274,16 +288,23 @@ class VirtualNetworkSwitch {
     }
 
     private func sendPacket(data: Data, toPort port: VirtualSwitchPort) {
-        // Write packet to VM's socket
-        // In production, we'd use proper async I/O here
-        // For now, we're relying on the FileHandle's write capability
+        guard let writeHandle = port.writeHandle, port.isConnected else {
+            log("Cannot send packet - port not connected or no write handle for \(port.vmName)", type: .error)
+            return
+        }
 
-        port.packetsSent += 1
-        port.bytesSent += UInt64(data.count)
+        do {
+            // Write the packet data to the socket
+            try writeHandle.write(contentsOf: data)
 
-        // Note: Actual sending happens via the FileHandle that the VM holds
-        // This is a limitation of the current architecture - we'd need to refactor
-        // to maintain write handles on our side for true switching
+            // Update statistics
+            port.packetsSent += 1
+            port.bytesSent += UInt64(data.count)
+
+            log("Sent \(data.count) bytes to \(port.vmName)", type: .debug)
+        } catch {
+            log("Failed to send packet to \(port.vmName): \(error.localizedDescription)", type: .error)
+        }
     }
 
     // MARK: - Statistics & Monitoring
