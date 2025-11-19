@@ -117,12 +117,71 @@ Each VM bundle contains:
 ### Rosetta Support (Apple Silicon)
 Enable Rosetta when creating Linux VMs to run x86_64 binaries transparently on ARM Linux. See [Apple's documentation](https://developer.apple.com/documentation/virtualization/running_intel_binaries_in_linux_vms_with_rosetta).
 
-### Clipboard Sharing
-Install SPICE agent in Linux VMs for seamless copy/paste:
+### Clipboard Sharing & File Transfer
+
+**Linux VMs:**
+The SPICE agent is already configured on the host side. Install in your guest:
+
 ```bash
-# Ubuntu/Debian
-sudo apt install spice-vdagent
+# Ubuntu/Debian/Kali
+sudo apt update
+sudo apt install spice-vdagent spice-vdagent-x11
+
+# Enable the service
+sudo systemctl enable spice-vdagent
+sudo systemctl start spice-vdagent
+
+# Reboot VM for clipboard to work
+sudo reboot
 ```
+
+**macOS VMs:**
+Apple's Virtualization framework doesn't support native clipboard for macOS guests. Alternatives:
+
+1. **Screen Sharing (Recommended)**:
+   - Enable "Screen Sharing" in VM's System Settings → Sharing
+   - Connect from host using Screen Sharing app
+   - Provides clipboard + drag-and-drop
+
+2. **Shared Directories** (Coming soon):
+   - Transfer files/text via shared folder between host and guest
+
+3. **Universal Clipboard** (Same Apple ID only):
+   - Enable Handoff on both host and VM
+   - Requires same Apple ID signed in
+
+### Deploying Scripts to VMs
+
+**For VMs without network access (isolated analysis):**
+
+The `scripts/` directory contains router setup scripts. To deploy to isolated VMs:
+
+```bash
+# Method 1: Before isolation - use SCP while VM has network
+scp scripts/kali-router-setup.sh user@vm-ip:/tmp/
+
+# Method 2: During VM installation - include scripts on installer ISO
+# (Advanced - requires custom ISO creation)
+
+# Method 3: Copy-paste method (always works)
+# 1. Open script in text editor on host
+# 2. Copy entire contents
+# 3. In VM terminal: nano /tmp/setup.sh
+# 4. Paste contents, save, chmod +x, run
+```
+
+**Automated deployment (recommended):**
+
+For first-time setup, run scripts while VM still has NAT networking:
+
+```bash
+# In your Linux VM with NAT network access:
+curl https://raw.githubusercontent.com/your-repo/SecVF/main/scripts/kali-router-setup.sh | sudo bash
+
+# Then switch to Virtual Network mode in SecVF
+```
+
+See [scripts/README.md](scripts/README.md) for detailed setup instructions.
 
 ### Virtual Network Switch
 Software-based Ethernet switch for VM-to-VM communication without physical network exposure. Perfect for malware analysis:

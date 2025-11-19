@@ -50,23 +50,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Load VMs asynchronously to avoid blocking main thread
         vmManager.initializeAsync { [weak self] in
             guard let self = self else { return }
-            print("DEBUG: VM initialization complete - VM count: \(self.vmManager.virtualMachines.count)")
             self.tableView?.reloadData()
             self.refreshStatusBar()
         }
 
         // Force the table to use view-based mode
         tableView?.rowSizeStyle = .default
-
-        // Debug: Print all table columns and their identifiers
-        if let tableView = tableView {
-            print("DEBUG: Table has \(tableView.tableColumns.count) columns:")
-            for column in tableView.tableColumns {
-                print("  - Column identifier: \(column.identifier.rawValue)")
-            }
-        } else {
-            print("WARNING: tableView is nil in windowDidLoad!")
-        }
 
         // Register for VM status change notifications
         NotificationCenter.default.addObserver(
@@ -460,20 +449,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Add status bar to window - add it LAST so it's on top
         contentView.addSubview(statusBarView)
         statusBar = statusBarView
-
-        print("DEBUG: Status bar created with frame: \(statusBarView.frame)")
-        print("DEBUG: Content view bounds: \(contentView.bounds)")
-        print("DEBUG: Status bar subviews count: \(statusBarView.subviews.count)")
-        print("DEBUG: Status bar is hidden: \(statusBarView.isHidden)")
     }
 
     func updateStatusBar(runningVMs: [(vm: VMConfiguration, state: String)]) {
         guard let container = runningVMsContainer, let label = statusLabel else {
-            print("DEBUG: Status bar container or label is nil!")
             return
         }
-
-        print("DEBUG: Updating status bar with \(runningVMs.count) running VMs")
 
         // Update count
         label.stringValue = "● RUNNING VMs: \(runningVMs.count)"
@@ -483,7 +464,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Add status item for each running VM
         for (vm, state) in runningVMs {
-            print("DEBUG: Adding status item for VM: \(vm.name), state: \(state)")
             let itemView = createVMStatusItem(vm: vm, state: state)
             container.addArrangedSubview(itemView)
         }
@@ -491,7 +471,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Force layout update
         container.needsLayout = true
         container.layoutSubtreeIfNeeded()
-        print("DEBUG: Status bar updated, container has \(container.arrangedSubviews.count) views")
     }
 
     private func createVMStatusItem(vm: VMConfiguration, state: String) -> NSView {
@@ -599,7 +578,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     @objc private func handleVMStatusChanged(_ notification: Notification) {
         // Refresh the table to show updated status
         DispatchQueue.main.async {
-            print("DEBUG: VM status changed, refreshing table")
             self.tableView?.reloadData()
 
             // Update status bar with current running VMs
@@ -609,7 +587,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     private func refreshStatusBar() {
         let runningVMs = vmManager.getRunningVMs()
-        print("DEBUG: Refreshing status bar - \(runningVMs.count) running VMs")
         let vmStates: [(vm: VMConfiguration, state: String)] = runningVMs.map { vm in
             let stateString: String
             switch vm.status {
@@ -622,7 +599,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             default:
                 stateString = "stopped"
             }
-            print("  - VM: \(vm.name), Status: \(stateString)")
             return (vm: vm, state: stateString)
         }
         updateStatusBar(runningVMs: vmStates)
@@ -631,18 +607,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     // MARK: - NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        let count = vmManager.virtualMachines.count
-        print("DEBUG: numberOfRows called, returning \(count)")
-        return count
+        return vmManager.virtualMachines.count
     }
 
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        print("DEBUG: viewFor tableColumn called for row \(row), column identifier: \(tableColumn?.identifier.rawValue ?? "nil")")
-
         guard row < vmManager.virtualMachines.count else {
-            print("DEBUG: Row \(row) out of bounds!")
             return nil
         }
 
@@ -652,7 +623,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         var cell = tableView.makeView(withIdentifier: tableColumn!.identifier, owner: self) as? NSTableCellView
 
         if cell == nil {
-            print("DEBUG: Creating new cell programmatically for identifier: \(tableColumn?.identifier.rawValue ?? "nil")")
             cell = NSTableCellView()
             cell?.identifier = tableColumn!.identifier
 
@@ -674,11 +644,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
 
         guard let finalCell = cell else {
-            print("DEBUG: Failed to create cell")
             return nil
         }
-
-        print("DEBUG: Cell ready for row \(row), column \(tableColumn?.identifier.rawValue ?? "nil")")
 
         switch tableColumn?.identifier.rawValue {
         case "NameColumn":
@@ -1130,10 +1097,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Reload VMs from disk asynchronously
         vmManager.initializeAsync { [weak self] in
             guard let self = self else { return }
-            print("DEBUG: Refreshing table with \(self.vmManager.virtualMachines.count) VMs")
-            for (index, vm) in self.vmManager.virtualMachines.enumerated() {
-                print("  - [\(index)] \(vm.name)")
-            }
             self.tableView?.reloadData()
             self.updateButtonStates()
         }
@@ -1488,10 +1451,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let isLinuxRouter = routerCheckbox.state == .on || linuxRouterCheckbox.state == .on
             let selectedRouterName = routerPopup.titleOfSelectedItem
             let selectedDistro = distroPopup.titleOfSelectedItem ?? "Kali"
-
-            print("DEBUG: Creating VM with Rosetta: \(enableRosetta)")
-            print("DEBUG: Selected distro: \(selectedDistro)")
-            print("DEBUG: Is Linux Router: \(isLinuxRouter)")
 
             let memorySize = memoryGB * 1024 * 1024 * 1024
             let diskSize = diskGB * 1024 * 1024 * 1024
