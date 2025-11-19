@@ -134,25 +134,24 @@ class VirtualNetworkSwitch {
             let switchFd = fds[0]  // Switch side
             let vmFd = fds[1]      // VM side
 
-            // Create separate file handles for reading and writing
-            // We need two handles because FileHandle can't do both simultaneously
-            let readHandle = FileHandle(fileDescriptor: switchFd, closeOnDealloc: false)
-            let writeFd = dup(switchFd)  // Duplicate the FD for writing
-            let writeHandle = FileHandle(fileDescriptor: writeFd, closeOnDealloc: true)
+            // Create FileHandle for the switch side
+            // This socket is bidirectional - we can both read and write on it
+            let switchHandle = FileHandle(fileDescriptor: switchFd, closeOnDealloc: true)
 
             // Create port entry
             let port = VirtualSwitchPort(vmId: vmId, vmName: vmName, socketPath: socketPath)
             port.isConnected = true
-            port.readHandle = readHandle
-            port.writeHandle = writeHandle
+            port.readHandle = switchHandle   // Read packets from VM
+            port.writeHandle = switchHandle  // Send packets to VM (same FD - it's bidirectional)
             ports[vmId] = port
 
             // Start receiving packets from this VM
-            startReceiving(from: readHandle, vmId: vmId)
+            startReceiving(from: switchHandle, vmId: vmId)
 
             log("VM connected to virtual switch: \(vmName) [Port: \(ports.count)]")
 
-            // Return the VM's end of the socketpair (connected datagram socket)
+            // Return the VM's end of the socketpair as a FileHandle
+            // The VM side is also bidirectional - VM can both send and receive
             return FileHandle(fileDescriptor: vmFd, closeOnDealloc: false)
         }
     }
