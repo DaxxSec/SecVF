@@ -29,7 +29,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     private var isoCacheLogViewer: LogViewerWindowController?
 
     // Switch statistics window (retained to prevent deallocation)
-    private var switchStatisticsWindow: SwitchStatisticsWindowController?
+    // TODO: Uncomment when SwitchStatisticsWindowController.swift is added to Xcode project
+    // private var switchStatisticsWindow: SwitchStatisticsWindowController?
 
     // ISO Cache Manager window (retained to prevent deallocation)
     // TODO: Add ISOCacheManagerWindow.swift to Xcode project
@@ -1082,12 +1083,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         // Print switch statistics to console for debugging
         VirtualNetworkSwitch.shared.printStatistics()
 
+        // TODO: Uncomment when SwitchStatisticsWindowController.swift is added to Xcode project
         // Create new viewer if nil or window was closed
-        if switchStatisticsWindow == nil || switchStatisticsWindow?.window == nil {
-            switchStatisticsWindow = SwitchStatisticsWindowController()
-        }
-        switchStatisticsWindow?.showWindow(nil)
-        switchStatisticsWindow?.window?.makeKeyAndOrderFront(nil)
+        // if switchStatisticsWindow == nil || switchStatisticsWindow?.window == nil {
+        //     switchStatisticsWindow = SwitchStatisticsWindowController()
+        // }
+        // switchStatisticsWindow?.showWindow(nil)
+        // switchStatisticsWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
     private func showLibraryWindow() {
