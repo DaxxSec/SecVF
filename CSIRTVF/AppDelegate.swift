@@ -28,6 +28,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     private var installationStatusView: NSTextField?
     private var isoCacheLogViewer: LogViewerWindowController?
 
+    // Switch statistics window (retained to prevent deallocation)
+    private var switchStatisticsWindow: SwitchStatisticsWindowController?
+
     // ISO Cache Manager window (retained to prevent deallocation)
     // TODO: Add ISOCacheManagerWindow.swift to Xcode project
     // private var isoCacheManagerWindow: ISOCacheManagerWindow?
@@ -1076,35 +1079,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     }
 
     @objc private func showSwitchStatistics() {
-        // Print switch statistics to console and show in alert
+        // Print switch statistics to console for debugging
         VirtualNetworkSwitch.shared.printStatistics()
 
-        let stats = VirtualNetworkSwitch.shared.getStatistics()
-
-        var message = "Virtual Network Switch Status\n\n"
-        message += "Running: \(stats["running"] as? Bool ?? false ? "Yes" : "No")\n"
-        message += "Connected Ports: \(stats["connectedPorts"] ?? 0)\n"
-        message += "Learned MACs: \(stats["learnedMACs"] ?? 0)\n"
-        message += "Packets Forwarded: \(stats["packetsForwarded"] ?? 0)\n"
-        message += "Packets Broadcast: \(stats["packetsBroadcast"] ?? 0)\n"
-
-        if let portStats = stats["ports"] as? [[String: Any]], !portStats.isEmpty {
-            message += "\nConnected VMs:\n"
-            for port in portStats {
-                message += "  • \(port["vmName"] as? String ?? "unknown")\n"
-                message += "    MAC: \(port["macAddress"] as? String ?? "unknown")\n"
-                message += "    RX: \(port["packetsRx"] ?? 0) packets\n"
-                message += "    TX: \(port["packetsTx"] ?? 0) packets\n"
-            }
-        } else {
-            message += "\nNo VMs currently connected to virtual switch."
+        // Create new viewer if nil or window was closed
+        if switchStatisticsWindow == nil || switchStatisticsWindow?.window == nil {
+            switchStatisticsWindow = SwitchStatisticsWindowController()
         }
-
-        let alert = NSAlert()
-        alert.messageText = "Virtual Switch Statistics"
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        alert.runModal()
+        switchStatisticsWindow?.showWindow(nil)
+        switchStatisticsWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
     private func showLibraryWindow() {

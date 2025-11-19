@@ -67,3 +67,6 @@ build/
 *.iso
 *.ipsw
 .claude/
+
+# Documentation archive (implementation notes, not for version control)
+docs/archive/
