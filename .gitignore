@@ -66,3 +66,4 @@ build/
 # VM Images - Large binary files downloaded at runtime
 *.iso
 *.ipsw
+.claude/
