@@ -94,9 +94,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         guard let window = window, let contentView = window.contentView else { return }
 
         let sidebarWidth: CGFloat = 220
+        let statusBarHeight: CGFloat = 60  // Reserve space for status bar at bottom
 
-        // Create sidebar view
-        let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: sidebarWidth, height: contentView.bounds.height))
+        // Create sidebar view - starts at y=statusBarHeight to avoid overlapping status bar
+        let sidebar = NSView(frame: NSRect(x: 0, y: statusBarHeight, width: sidebarWidth, height: contentView.bounds.height - statusBarHeight))
         sidebar.autoresizingMask = [.height]
         sidebar.wantsLayer = true
 
@@ -112,8 +113,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         gradientLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         sidebar.layer?.addSublayer(gradientLayer)
 
-        // Logo
-        let logoView = NSImageView(frame: NSRect(x: 40, y: contentView.bounds.height - 180, width: 170, height: 120))
+        // Logo - position relative to sidebar height, not contentView height
+        let logoView = NSImageView(frame: NSRect(x: 40, y: sidebar.bounds.height - 120, width: 170, height: 120))
         logoView.imageScaling = .scaleProportionallyUpOrDown
         logoView.image = createStylizedLogo()
         logoView.autoresizingMask = [.minYMargin]
@@ -121,7 +122,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Title - Two-tone: "security" in neon cyan, "VF" in olive green
         let titleLabel = NSTextField()
-        titleLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 220, width: sidebarWidth - 40, height: 35)
+        titleLabel.frame = NSRect(x: 20, y: sidebar.bounds.height - 160, width: sidebarWidth - 40, height: 35)
         titleLabel.alignment = .center
         titleLabel.isBordered = false
         titleLabel.isEditable = false
@@ -157,7 +158,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Subtitle - Light cyan
         let subtitleLabel = NSTextField(labelWithString: "VM Sandbox Environment")
-        subtitleLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 245, width: sidebarWidth - 40, height: 20)
+        subtitleLabel.frame = NSRect(x: 20, y: sidebar.bounds.height - 185, width: sidebarWidth - 40, height: 20)
         subtitleLabel.alignment = .center
         subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
         subtitleLabel.textColor = NSColor(red: 0.5, green: 0.75, blue: 0.8, alpha: 1.0)
@@ -168,13 +169,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         sidebar.addSubview(subtitleLabel)
 
         // Separator line
-        let separator1 = createSeparator(y: contentView.bounds.height - 270, width: sidebarWidth)
+        let separator1 = createSeparator(y: sidebar.bounds.height - 210, width: sidebarWidth)
         separator1.autoresizingMask = [.minYMargin, .width]
         sidebar.addSubview(separator1)
 
         // Stats/Info below title - Neon green accents - centered
         let statsLabel = NSTextField(labelWithString: "▸ Malware Analysis\n▸ Isolated Sandbox\n▸ Virtual Networking")
-        statsLabel.frame = NSRect(x: 20, y: contentView.bounds.height - 360, width: sidebarWidth - 40, height: 80)
+        statsLabel.frame = NSRect(x: 20, y: sidebar.bounds.height - 300, width: sidebarWidth - 40, height: 80)
         statsLabel.alignment = .center
         statsLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
         statsLabel.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 0.9)  // Neon green
@@ -373,33 +374,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let statusBarHeight: CGFloat = 60
         let sidebarWidth: CGFloat = 220
 
-        // First, move ALL existing subviews up by statusBarHeight (except sidebar)
-        for subview in contentView.subviews {
-            // Skip the sidebar (it's at x=0, width=220)
-            if subview.frame.minX == 0 && subview.frame.width == sidebarWidth {
-                continue
-            }
+        // No need to move subviews - the XIB already has them positioned correctly
+        // (buttons at y=78, scroll view at y=120) to accommodate the 60px status bar at y=0
 
-            // Move everything else up
-            var frame = subview.frame
-            if frame.origin.y < contentView.bounds.height / 2 {
-                // Only move things in the bottom half up
-                frame.origin.y += statusBarHeight
-            }
-            subview.frame = frame
-        }
-
-        // Adjust table view specifically
+        // Just ensure the scroll view has proper autoresizing
         if let scrollView = tableView?.enclosingScrollView {
-            var frame = scrollView.frame
-            frame.size.height -= statusBarHeight
-            scrollView.frame = frame
+            scrollView.autoresizingMask = [.width, .height]
         }
 
-        // Create status bar view
+        // Create status bar view - positioned at the very bottom
         let statusBarView = NSView(frame: NSRect(x: 0, y: 0, width: contentView.bounds.width, height: statusBarHeight))
         statusBarView.wantsLayer = true
-        statusBarView.autoresizingMask = [.width, .maxYMargin]
+        statusBarView.autoresizingMask = [.width, .maxYMargin]  // Pin to bottom, stretch horizontally
 
         // Cybersecurity dark background with subtle gradient
         let gradientLayer = CAGradientLayer()
@@ -418,17 +404,17 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         borderView.autoresizingMask = [.width, .maxYMargin]
         statusBarView.addSubview(borderView)
 
-        // Status label - shows running VMs count
+        // Status label - shows running VMs count - positioned in the left sidebar area
         let label = NSTextField(labelWithString: "● RUNNING VMs: 0")
-        label.frame = NSRect(x: sidebarWidth + 15, y: 25, width: 200, height: 20)
+        label.frame = NSRect(x: 15, y: 35, width: 200, height: 20)
         label.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
         label.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)  // Neon green
         label.autoresizingMask = [.maxXMargin]
         statusBarView.addSubview(label)
         statusLabel = label
 
-        // Container for running VMs (horizontally scrollable) - increased height
-        let scrollView = NSScrollView(frame: NSRect(x: sidebarWidth + 15, y: 2, width: contentView.bounds.width - sidebarWidth - 30, height: 28))
+        // Container for running VMs (horizontally scrollable) - positioned in the left sidebar area below the label
+        let scrollView = NSScrollView(frame: NSRect(x: 15, y: 5, width: sidebarWidth - 30, height: 25))
         scrollView.autoresizingMask = [.width]
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = false
@@ -892,7 +878,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         progressAlert.accessoryView = containerView
 
         // Show alert in background
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.async {
             let response = progressAlert.runModal()
             if response == .alertFirstButtonReturn {
                 // User clicked Cancel
@@ -1096,7 +1082,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func refreshTable() {
         // Reload VMs from disk asynchronously
         vmManager.initializeAsync { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             self.tableView?.reloadData()
             self.updateButtonStates()
         }
@@ -1445,7 +1431,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let cpuCount = Int(cpuField.stringValue) ?? 2
             let memoryGB = UInt64(memField.stringValue) ?? 4
             let diskGB = UInt64(diskField.stringValue) ?? 64
-            let enableRosetta = rosettaCheckbox.state == .on
+            _ = rosettaCheckbox.state == .on  // Reserved for future Rosetta support
             let needsISO = isoCheckbox.state == .on
             let networkModeIndex = networkPopup.indexOfSelectedItem
             let isLinuxRouter = routerCheckbox.state == .on || linuxRouterCheckbox.state == .on
