@@ -28,6 +28,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     private var installationStatusView: NSTextField?
     private var isoCacheLogViewer: LogViewerWindowController?
 
+    // Scripts USB attachment tracking
+    private var attachScriptsUSBFlags: [UUID: Bool] = [:]
+
     // Switch statistics window (retained to prevent deallocation)
     // TODO: Uncomment when SwitchStatisticsWindowController.swift is added to Xcode project
     // private var switchStatisticsWindow: SwitchStatisticsWindowController?
@@ -438,6 +441,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         return VZUSBMassStorageDeviceConfiguration(attachment: intallerDiskAttachment)
     }
 
+    private func createScriptsUSBConfiguration() -> VZUSBMassStorageDeviceConfiguration? {
+        guard let scriptsISOURL = ScriptsUSBManager.shared.scriptsISOURL else {
+            NSLog("[ScriptsUSB] Scripts ISO not found")
+            return nil
+        }
+
+        guard let scriptsAttachment = try? VZDiskImageStorageDeviceAttachment(url: scriptsISOURL, readOnly: true) else {
+            NSLog("[ScriptsUSB] Failed to create scripts disk attachment")
+            return nil
+        }
+
+        return VZUSBMassStorageDeviceConfiguration(attachment: scriptsAttachment)
+    }
+
     private func createNetworkDeviceConfiguration(for vmId: UUID) -> VZVirtioNetworkDeviceConfiguration {
         guard let vmConfig = vmConfigs[vmId] else {
             fatalError("VM configuration not found for vmId: \(vmId)")
@@ -791,6 +808,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
 
         disksArray.add(createBlockDeviceConfiguration(for: vmId))
+
+        // Check if scripts USB should be attached
+        if attachScriptsUSBFlags[vmId] == true {
+            if let scriptsUSB = createScriptsUSBConfiguration() {
+                disksArray.add(scriptsUSB)
+                NSLog("[ScriptsUSB] Attached scripts USB to VM")
+            }
+            // Clear the flag after use
+            attachScriptsUSBFlags.removeValue(forKey: vmId)
+        }
+
         guard let disks = disksArray as? [VZStorageDeviceConfiguration] else {
             fatalError("Invalid disksArray.")
         }
@@ -802,6 +830,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         virtualMachineConfiguration.keyboards = [VZUSBKeyboardConfiguration()]
         virtualMachineConfiguration.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
+
+        // Add XHCI USB controller for hot-plug support (macOS 15+)
+        if #available(macOS 15.0, *) {
+            let xhciController = VZXHCIControllerConfiguration()
+            virtualMachineConfiguration.usbControllers = [xhciController]
+            NSLog("[VM] Added XHCI USB controller for hot-plug support")
+        }
 
         if !isMacOS {
             // SPICE agent is only for Linux VMs
@@ -948,6 +983,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
+        // Clean up any stray windows from previous sessions (macOS window restoration)
+        closeAllVMWindows()
+
         // Setup Monitoring menu
         setupMonitoringMenu()
 
@@ -958,6 +996,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             self.showLibraryWindow()
         }
+    }
+
+    private func closeAllVMWindows() {
+        // Close any VM windows that might have been restored by macOS
+        for window in NSApp.windows {
+            // Check if this is a VM window (not the library window or other system windows)
+            if let identifier = window.identifier?.rawValue,
+               UUID(uuidString: identifier) != nil,
+               window.title.starts(with: "SecVF -") {
+                NSLog("[AppDelegate] Closing stray VM window from previous session: \(window.title)")
+                window.close()
+            }
+        }
+
+        // Clear all VM-related state
+        vmWindows.removeAll()
+        vmViews.removeAll()
+        virtualMachines.removeAll()
+        vmConfigs.removeAll()
+        installerISOPaths.removeAll()
+        needsInstallFlags.removeAll()
     }
 
     private func showSplashScreen() {
@@ -1039,6 +1098,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         // Typical order: App, File, Edit, View, Window, Help
         // We'll insert at index 1 (after App menu)
         mainMenu.insertItem(monitoringMenuItem, at: 1)
+
+        // Create Tools menu
+        setupToolsMenu(mainMenu: mainMenu)
+    }
+
+    private func setupToolsMenu(mainMenu: NSMenu) {
+        let toolsMenu = NSMenu(title: "Tools")
+
+        // Mount Scripts USB to VM
+        let scriptsUSBItem = NSMenuItem(
+            title: "Mount Scripts USB to VM...",
+            action: #selector(showMountScriptsDialog),
+            keyEquivalent: "u"
+        )
+        scriptsUSBItem.keyEquivalentModifierMask = [.command, .shift]
+        scriptsUSBItem.target = self
+        toolsMenu.addItem(scriptsUSBItem)
+
+        toolsMenu.addItem(NSMenuItem.separator())
+
+        // Rebuild Scripts ISO
+        let rebuildISOItem = NSMenuItem(
+            title: "Rebuild Scripts ISO",
+            action: #selector(rebuildScriptsISO),
+            keyEquivalent: ""
+        )
+        rebuildISOItem.target = self
+        toolsMenu.addItem(rebuildISOItem)
+
+        // Create top-level menu item
+        let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
+        toolsMenuItem.submenu = toolsMenu
+
+        // Insert after Monitoring menu (index 2)
+        mainMenu.insertItem(toolsMenuItem, at: 2)
     }
 
     @objc private func showSecurityLogs() {
@@ -1090,6 +1184,169 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         // }
         // switchStatisticsWindow?.showWindow(nil)
         // switchStatisticsWindow?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - Tools Menu Handlers
+
+    @objc private func showMountScriptsDialog() {
+        // Get list of VMs from VMManager
+        let allVMs = VMManager.shared.virtualMachines
+
+        if allVMs.isEmpty {
+            showAlert(title: "No VMs Available", message: "Create a VM first before mounting scripts.")
+            return
+        }
+
+        // Ensure scripts ISO exists
+        if !ScriptsUSBManager.shared.scriptsISOExists {
+            let alert = NSAlert()
+            alert.messageText = "Scripts ISO Not Found"
+            alert.informativeText = "The scripts ISO needs to be created first. Would you like to create it now?"
+            alert.addButton(withTitle: "Create ISO")
+            alert.addButton(withTitle: "Cancel")
+
+            if alert.runModal() == .alertFirstButtonReturn {
+                rebuildScriptsISO()
+            }
+            return
+        }
+
+        // Create VM selection dialog
+        let alert = NSAlert()
+        alert.messageText = "Mount Scripts USB to VM"
+        alert.informativeText = "Select a VM to attach the SecVF scripts USB.\n\nNote: If the VM is running, it will be stopped and restarted with the scripts USB attached."
+
+        // Create popup button for VM selection
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 300, height: 26))
+        for vm in allVMs {
+            let title = "\(vm.name) (\(vm.osType))"
+            popup.addItem(withTitle: title)
+            popup.lastItem?.representedObject = vm
+        }
+        alert.accessoryView = popup
+
+        alert.addButton(withTitle: "Mount & Start VM")
+        alert.addButton(withTitle: "Cancel")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            guard let selectedVM = popup.selectedItem?.representedObject as? VMConfiguration else { return }
+
+            // Check if VM is running - use hot-plug if available (macOS 15+)
+            if let runningVM = virtualMachines[selectedVM.id], runningVM.state == .running {
+                if #available(macOS 15.0, *) {
+                    // Hot-plug the scripts USB to the running VM
+                    hotPlugScriptsUSB(to: runningVM, vmName: selectedVM.name)
+                } else {
+                    // Fallback: restart VM with scripts attached (macOS < 15)
+                    restartVMWithScripts(selectedVM, runningVM: runningVM)
+                }
+                return
+            }
+
+            // VM not running - start it with scripts attached
+            startVMWithScripts(selectedVM)
+        }
+    }
+
+    @available(macOS 15.0, *)
+    private func hotPlugScriptsUSB(to vm: VZVirtualMachine, vmName: String) {
+        guard let scriptsISOURL = ScriptsUSBManager.shared.scriptsISOURL else {
+            showAlert(title: "Error", message: "Scripts ISO not found. Use Tools → Rebuild Scripts ISO first.")
+            return
+        }
+
+        // Get the XHCI USB controller from the running VM
+        guard let usbController = vm.usbControllers.first else {
+            showAlert(title: "Error", message: "No USB controller available. VM may need to be restarted.")
+            return
+        }
+
+        // Create the USB mass storage device configuration
+        guard let attachment = try? VZDiskImageStorageDeviceAttachment(url: scriptsISOURL, readOnly: true) else {
+            showAlert(title: "Error", message: "Failed to create disk attachment for scripts ISO.")
+            return
+        }
+
+        let usbConfig = VZUSBMassStorageDeviceConfiguration(attachment: attachment)
+        let usbDevice = VZUSBMassStorageDevice(configuration: usbConfig)
+
+        NSLog("[ScriptsUSB] Hot-plugging scripts USB to running VM: \(vmName)")
+
+        // Attach the USB device to the running VM
+        usbController.attach(device: usbDevice) { [weak self] error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    NSLog("[ScriptsUSB] Failed to hot-plug: \(error)")
+                    self?.showAlert(title: "Error", message: "Failed to mount scripts USB: \(error.localizedDescription)")
+                } else {
+                    NSLog("[ScriptsUSB] Successfully hot-plugged scripts USB!")
+                    self?.showAlert(title: "Success", message: "Scripts USB mounted to \(vmName)!\n\nIn Linux: mount /dev/sdb1 /mnt\nIn macOS: Check desktop for SecVF_SCRIPTS")
+                }
+            }
+        }
+    }
+
+    private func restartVMWithScripts(_ vm: VMConfiguration, runningVM: VZVirtualMachine) {
+        NSLog("[ScriptsUSB] Restarting VM \(vm.name) to attach scripts (fallback for older macOS)")
+        runningVM.stop { [weak self] error in
+            guard let self = self else { return }
+            if let error = error {
+                NSLog("[ScriptsUSB] Error stopping VM: \(error)")
+            }
+            DispatchQueue.main.async {
+                self.cleanupVMState(vmId: vm.id)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.startVMWithScripts(vm)
+                }
+            }
+        }
+    }
+
+    private func cleanupVMState(vmId: UUID) {
+        if let window = vmWindows[vmId] {
+            window.close()
+        }
+        virtualMachines.removeValue(forKey: vmId)
+        vmWindows.removeValue(forKey: vmId)
+        vmViews.removeValue(forKey: vmId)
+        vmConfigs.removeValue(forKey: vmId)
+        installerISOPaths.removeValue(forKey: vmId)
+        needsInstallFlags.removeValue(forKey: vmId)
+    }
+
+    private func startVMWithScripts(_ vm: VMConfiguration) {
+        attachScriptsUSBFlags[vm.id] = true
+        NSLog("[ScriptsUSB] Starting VM \(vm.name) with scripts USB attached")
+        NotificationCenter.default.post(name: .startVM, object: vm)
+    }
+
+    @objc private func rebuildScriptsISO() {
+        // Try to find scripts directory automatically
+        if let isoURL = ScriptsUSBManager.shared.createScriptsISO() {
+            showAlert(title: "Scripts ISO Created", message: "Successfully created scripts ISO at:\n\(isoURL.path)")
+        } else {
+            // Prompt user to select scripts directory
+            ScriptsUSBManager.shared.promptForScriptsDirectory { [weak self] url in
+                guard let url = url else { return }
+
+                if let isoURL = ScriptsUSBManager.shared.createScriptsISO(from: url.path) {
+                    self?.showAlert(title: "Scripts ISO Created", message: "Successfully created scripts ISO at:\n\(isoURL.path)")
+                } else {
+                    self?.showAlert(title: "Error", message: "Failed to create scripts ISO. Check console for details.")
+                }
+            }
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
     }
 
     private func showLibraryWindow() {

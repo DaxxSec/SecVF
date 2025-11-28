@@ -297,12 +297,122 @@ sudo rm /usr/local/bin/secvf-*
 sudo reboot
 ```
 
+---
+
+## Kali FakeNet Setup Script
+
+**File:** `kali-fakenet-setup.sh`
+
+### Purpose
+
+Transforms the Kali Router VM into a fake internet environment for malware analysis. All DNS queries resolve to the router, and fake services respond to HTTP, HTTPS, and other protocols. This tricks malware into thinking it has internet access while capturing all its network behavior.
+
+### Features
+
+1. **Fake DNS (dnsmasq)**
+   - ALL domains resolve to `10.0.100.1`
+   - Logs all DNS queries for analysis
+   - DHCP server for client VMs
+
+2. **Fake HTTP/HTTPS (nginx)**
+   - Responds to all HTTP requests with fake pages
+   - Handles Windows/macOS/Android connectivity checks
+   - Self-signed SSL certificate for HTTPS
+   - Logs all requests including POST data
+
+3. **Traffic Capture**
+   - Automatic PCAP capture of all traffic
+   - Stored in `/var/log/fakenet/`
+
+4. **Optional INetSim Integration**
+   - If INetSim is installed, provides comprehensive service simulation
+   - FTP, SMTP, POP3, IMAP, TFTP, NTP, and more
+
+### Prerequisites
+
+Run `kali-router-setup.sh` first to configure basic networking.
+
+### Usage
+
+```bash
+# Start FakeNet (all fake services)
+sudo ./kali-fakenet-setup.sh start
+
+# Check status and recent activity
+sudo ./kali-fakenet-setup.sh status
+
+# Stop all fake services
+sudo ./kali-fakenet-setup.sh stop
+```
+
+### Typical Malware Analysis Workflow
+
+1. **Prepare the environment:**
+   ```bash
+   sudo ./kali-router-setup.sh       # Configure networking
+   sudo ./kali-fakenet-setup.sh start  # Start fake services
+   ```
+
+2. **Start monitoring:**
+   ```bash
+   # Terminal 1: Watch DNS queries
+   tail -f /var/log/fakenet/dns.log
+
+   # Terminal 2: Watch HTTP requests
+   tail -f /var/log/fakenet/http-access.log
+
+   # Terminal 3: Watch for suspicious activity
+   tail -f /var/log/fakenet/suspicious-requests.log
+   ```
+
+3. **Start the malware VM** (e.g., MacOS Sandbox)
+
+4. **Observe malware behavior:**
+   - DNS lookups (C2 domains, update servers)
+   - HTTP/HTTPS requests (callbacks, data exfil)
+   - Connection attempts (ports, protocols)
+
+5. **Stop and analyze:**
+   ```bash
+   sudo ./kali-fakenet-setup.sh stop
+
+   # Analyze captured traffic
+   wireshark /var/log/fakenet/capture-*.pcap
+   ```
+
+### Log Files
+
+| File | Contents |
+|------|----------|
+| `/var/log/fakenet/dns.log` | All DNS queries |
+| `/var/log/fakenet/http-access.log` | HTTP request logs |
+| `/var/log/fakenet/https-access.log` | HTTPS request logs |
+| `/var/log/fakenet/suspicious-requests.log` | POST/PUT requests |
+| `/var/log/fakenet/capture-*.pcap` | Full packet capture |
+
+### Installing INetSim (Recommended)
+
+For more comprehensive service simulation:
+
+```bash
+sudo apt update
+sudo apt install inetsim
+```
+
+INetSim provides fake implementations of:
+- DNS, HTTP, HTTPS, FTP, FTPS
+- SMTP, SMTPS, POP3, IMAP
+- TFTP, NTP, Finger, and more
+
+---
+
 ## Support
 
 For issues or questions:
 - Check logs: `/var/log/secvf-router-setup.log`
 - Run diagnostics: `secvf-monitor`
 - Review firewall logs: `/var/log/iptables.log`
+- FakeNet logs: `/var/log/fakenet/`
 
 ## License
 

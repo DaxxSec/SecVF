@@ -8,5 +8,7 @@
 	<string>SecVF</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow for using audio input devices.</string>
+	<key>NSQuitAlwaysKeepsWindows</key>
+	<false/>
 </dict>
 </plist>
