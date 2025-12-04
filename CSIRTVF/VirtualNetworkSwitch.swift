@@ -92,19 +92,36 @@ class VirtualNetworkSwitch {
     }
 
     func shutdown() {
-        switchQueue.sync {
-            log("Shutting down virtual switch...")
+        // Use async to avoid blocking the caller, and inline disconnect logic
+        // to avoid queuing more async blocks that can't execute
+        switchQueue.async { [weak self] in
+            guard let self = self else { return }
 
-            // Disconnect all ports
-            for (_, port) in ports {
-                disconnectPort(vmId: port.vmId)
+            self.log("Shutting down virtual switch...")
+
+            // Disconnect all ports INLINE (don't call disconnectPort which queues more async work)
+            for (_, port) in self.ports {
+                port.isConnected = false
+
+                // Clear handler to stop receiving
+                port.readHandle?.readabilityHandler = nil
+
+                // DON'T explicitly close() - causes EXC_BAD_ACCESS if handler is still running
+                // FileHandle was created with closeOnDealloc: true, so just clear references
+                port.readHandle = nil
+                port.writeHandle = nil
+
+                // Remove from MAC table
+                if let mac = port.macAddress {
+                    self.macTable.removeValue(forKey: mac)
+                }
             }
 
-            ports.removeAll()
-            macTable.removeAll()
-            isRunning = false
+            self.ports.removeAll()
+            self.macTable.removeAll()
+            self.isRunning = false
 
-            log("Virtual switch shutdown complete")
+            self.log("Virtual switch shutdown complete")
         }
     }
 
@@ -161,24 +178,30 @@ class VirtualNetworkSwitch {
         switchQueue.async { [weak self] in
             guard let self = self else { return }
 
-            if let port = self.ports[vmId] {
-                port.connection?.cancel()
-                port.isConnected = false
-
-                // Close file handles
-                port.readHandle?.readabilityHandler = nil
-                try? port.readHandle?.close()
-                try? port.writeHandle?.close()
-
-                // Remove from MAC table
-                if let mac = port.macAddress {
-                    self.macTable.removeValue(forKey: mac)
-                }
-
-                self.ports.removeValue(forKey: vmId)
-
-                self.log("VM disconnected from virtual switch: \(port.vmName) [Remaining ports: \(self.ports.count)]")
+            // Use removeValue for atomic check-and-remove to prevent double processing
+            guard let port = self.ports.removeValue(forKey: vmId) else {
+                // Already disconnected (race with readabilityHandler or shutdown)
+                return
             }
+
+            port.connection?.cancel()
+            port.isConnected = false
+
+            // Clear handler to stop receiving - this prevents further callbacks
+            port.readHandle?.readabilityHandler = nil
+
+            // Remove from MAC table
+            if let mac = port.macAddress {
+                self.macTable.removeValue(forKey: mac)
+            }
+
+            // DON'T explicitly close() - the FileHandle was created with closeOnDealloc: true
+            // Calling close() while readabilityHandler might still be executing causes EXC_BAD_ACCESS
+            // Just clear our references and let ARC handle cleanup
+            port.readHandle = nil
+            port.writeHandle = nil
+
+            self.log("VM disconnected from virtual switch: \(port.vmName) [Remaining ports: \(self.ports.count)]")
         }
     }
 
@@ -186,10 +209,24 @@ class VirtualNetworkSwitch {
 
     private func startReceiving(from handle: FileHandle, vmId: UUID) {
         // Read Ethernet frames from VM
-        handle.readabilityHandler = { [weak self] handle in
+        // IMPORTANT: The handler runs on an internal dispatch queue, so we must be
+        // defensive against the port being disconnected while the handler runs.
+        handle.readabilityHandler = { [weak self] fileHandle in
             guard let self = self else { return }
 
-            let data = handle.availableData
+            // Check if port is still valid BEFORE calling availableData
+            // This prevents EXC_BAD_ACCESS when the handle is being closed
+            let portIsValid = self.switchQueue.sync { () -> Bool in
+                guard let port = self.ports[vmId] else { return false }
+                return port.isConnected
+            }
+
+            guard portIsValid else {
+                // Port was disconnected - don't touch the fileHandle
+                return
+            }
+
+            let data = fileHandle.availableData
             guard !data.isEmpty else {
                 // Connection closed
                 self.disconnectPort(vmId: vmId)
@@ -244,6 +281,10 @@ class VirtualNetworkSwitch {
         // Log EtherType for monitoring (helps detect unusual protocols)
         let etherTypeStr = String(format: "0x%04X", etherType)
         log("Packet from \(srcMAC) -> \(dstMAC), EtherType: \(etherTypeStr), Size: \(data.count) bytes", type: .debug)
+
+        // Capture packet for tshark analysis
+        let sourceVMName = port.vmName
+        PacketCaptureManager.shared.capturePacket(data, sourceVM: sourceVMName, destVM: dstMAC)
 
         // Forward packet based on destination MAC
         forwardPacket(data: data, dstMAC: dstMAC, srcMAC: srcMAC, fromVM: fromVM)
@@ -368,14 +409,14 @@ class VirtualNetworkSwitch {
         logToFile(message, type: type)
     }
 
-    private func logToFile(_ message: String, type: OSLogType) {
-        let logDir = NSHomeDirectory() + "/.avf/logs/"
-        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+    // Dedicated queue for log file I/O to prevent blocking switchQueue
+    private static let logQueue = DispatchQueue(label: "com.secvf.virtualswitch.log", qos: .utility)
 
+    private func logToFile(_ message: String, type: OSLogType) {
+        // Capture timestamp NOW, but do I/O on background queue
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let logFileName = "network-\(dateFormatter.string(from: Date())).log"
-        let logPath = logDir + logFileName
 
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let timestamp = dateFormatter.string(from: Date())
@@ -391,15 +432,22 @@ class VirtualNetworkSwitch {
 
         let logLine = "[\(timestamp)] [\(severityStr)] \(message)\n"
 
-        if let logData = logLine.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                    fileHandle.seekToEndOfFile()
-                    fileHandle.write(logData)
-                    fileHandle.closeFile()
+        // Move ALL file I/O to background queue to prevent blocking
+        Self.logQueue.async {
+            let logDir = NSHomeDirectory() + "/.avf/logs/"
+            try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+            let logPath = logDir + logFileName
+
+            if let logData = logLine.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: logPath) {
+                    if let fileHandle = FileHandle(forWritingAtPath: logPath) {
+                        fileHandle.seekToEndOfFile()
+                        fileHandle.write(logData)
+                        fileHandle.closeFile()
+                    }
+                } else {
+                    try? logData.write(to: URL(fileURLWithPath: logPath))
                 }
-            } else {
-                try? logData.write(to: URL(fileURLWithPath: logPath))
             }
         }
     }
