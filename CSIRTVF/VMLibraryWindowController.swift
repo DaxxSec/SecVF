@@ -337,21 +337,21 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         let activePanelWidth: CGFloat = 220
         let buttonRowHeight: CGFloat = 50
-        let padding: CGFloat = 15  // Increased padding for better spacing
+        let padding: CGFloat = 15
+        let packetPanelHeight: CGFloat = 180  // Horizontal packet panel below table
 
-        // Set window to proper size - wide enough to show all columns through "Last Used"
-        let minWidth: CGFloat = sidebarWidth + 680 + activePanelWidth + padding * 3  // Table needs ~680 for all columns
-        let minHeight: CGFloat = 500
+        // Set window to proper size
+        let minWidth: CGFloat = sidebarWidth + 680 + activePanelWidth + padding * 3
+        let minHeight: CGFloat = 600  // Increased to accommodate packet panel
         window.minSize = NSSize(width: minWidth, height: minHeight)
 
         // Set default window size on launch
         var windowFrame = window.frame
-        let defaultWidth: CGFloat = 1150  // Good default to show all columns
-        let defaultHeight: CGFloat = 550
+        let defaultWidth: CGFloat = 1150
+        let defaultHeight: CGFloat = 650  // Taller default
         if windowFrame.size.width < defaultWidth || windowFrame.size.height < defaultHeight {
             windowFrame.size.width = defaultWidth
             windowFrame.size.height = defaultHeight
-            // Center on screen
             if let screen = window.screen {
                 windowFrame.origin.x = (screen.visibleFrame.width - defaultWidth) / 2 + screen.visibleFrame.origin.x
                 windowFrame.origin.y = (screen.visibleFrame.height - defaultHeight) / 2 + screen.visibleFrame.origin.y
@@ -362,18 +362,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Calculate areas - ensure table and panel don't overlap
+        // Calculate areas - table above packet panel
         let tableX = sidebarWidth + padding
-        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3  // Leave gap for panel
-        let tableY = buttonRowHeight + padding
+        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
+        let tableY = buttonRowHeight + padding + packetPanelHeight + padding  // Above packet panel
         let tableHeight = contentHeight - tableY - padding
 
-        // Position the table scroll view with a border
+        // Position the table scroll view
         if let scrollView = tableView?.enclosingScrollView {
             scrollView.frame = NSRect(x: tableX, y: tableY, width: tableWidth, height: tableHeight)
             scrollView.autoresizingMask = [.width, .height]
-
-            // Add border to table
             scrollView.wantsLayer = true
             scrollView.layer?.borderWidth = 1
             scrollView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
@@ -398,25 +396,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func addStatusBar() {
         guard let window = window, let contentView = window.contentView else { return }
 
-        let panelWidth: CGFloat = 220
+        let sidebarWidth: CGFloat = 220
+        let activePanelWidth: CGFloat = 220
         let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
-        let panelSpacing: CGFloat = 10
+        let packetPanelHeight: CGFloat = 180
 
-        // Calculate panel heights - Active VMs gets 45% of available space, Packet Log gets 55%
-        let panelX = contentView.bounds.width - panelWidth - padding
-        let totalPanelHeight = contentView.bounds.height - buttonRowHeight - padding * 2
-        let activeVMsPanelHeight: CGFloat = totalPanelHeight * 0.45
-        let packetLogPanelHeight: CGFloat = totalPanelHeight * 0.55 - panelSpacing
+        let contentWidth = contentView.bounds.width
+        let contentHeight = contentView.bounds.height
 
         // ═══════════════════════════════════════════════════════════════
-        // ACTIVE VMs PANEL (Top)
+        // ACTIVE VMs PANEL (Right side - full height)
         // ═══════════════════════════════════════════════════════════════
-        let activeVMsPanelY = buttonRowHeight + padding + packetLogPanelHeight + panelSpacing
+        let activePanelX = contentWidth - activePanelWidth - padding
+        let activePanelY = buttonRowHeight + padding
+        let activePanelHeight = contentHeight - activePanelY - padding
 
-        let runningVMsPanel = NSView(frame: NSRect(x: panelX, y: activeVMsPanelY, width: panelWidth, height: activeVMsPanelHeight))
+        let runningVMsPanel = NSView(frame: NSRect(x: activePanelX, y: activePanelY, width: activePanelWidth, height: activePanelHeight))
         runningVMsPanel.wantsLayer = true
-        runningVMsPanel.autoresizingMask = [.minXMargin, .height, .minYMargin]
+        runningVMsPanel.autoresizingMask = [.minXMargin, .height]
 
         // Dark background with cyan border
         runningVMsPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
@@ -426,7 +424,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Panel title
         let titleLabel = NSTextField(labelWithString: "● ACTIVE VMs")
-        titleLabel.frame = NSRect(x: 12, y: activeVMsPanelHeight - 28, width: panelWidth - 24, height: 20)
+        titleLabel.frame = NSRect(x: 12, y: activePanelHeight - 28, width: activePanelWidth - 24, height: 20)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
         titleLabel.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)
         titleLabel.autoresizingMask = [.minYMargin]
@@ -434,14 +432,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         statusLabel = titleLabel
 
         // Separator
-        let separator = NSBox(frame: NSRect(x: 10, y: activeVMsPanelHeight - 38, width: panelWidth - 20, height: 1))
+        let separator = NSBox(frame: NSRect(x: 10, y: activePanelHeight - 38, width: activePanelWidth - 20, height: 1))
         separator.boxType = .separator
         separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)
         separator.autoresizingMask = [.minYMargin]
         runningVMsPanel.addSubview(separator)
 
         // Scrollable container for running VM items
-        let scrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: panelWidth - 16, height: activeVMsPanelHeight - 55))
+        let scrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: activePanelHeight - 55))
         scrollView.autoresizingMask = [.height]
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = true
@@ -449,7 +447,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
-        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: panelWidth - 16, height: activeVMsPanelHeight - 55))
+        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: activePanelHeight - 55))
         stackView.orientation = .vertical
         stackView.spacing = 10
         stackView.alignment = .centerX
@@ -462,7 +460,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Placeholder when no VMs running
         let placeholder = NSTextField(labelWithString: "No active VMs.\n\nSelect a VM and\nclick Start.")
-        placeholder.frame = NSRect(x: 12, y: activeVMsPanelHeight / 2 - 40, width: panelWidth - 24, height: 60)
+        placeholder.frame = NSRect(x: 12, y: activePanelHeight / 2 - 40, width: activePanelWidth - 24, height: 60)
         placeholder.font = NSFont.systemFont(ofSize: 10)
         placeholder.textColor = NSColor(white: 0.45, alpha: 1.0)
         placeholder.alignment = .center
@@ -471,21 +469,24 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         placeholder.drawsBackground = false
         placeholder.maximumNumberOfLines = 0
         placeholder.tag = 999
+        placeholder.autoresizingMask = [.minYMargin, .maxYMargin]
         runningVMsPanel.addSubview(placeholder)
 
         contentView.addSubview(runningVMsPanel)
         statusBar = runningVMsPanel
 
         // ═══════════════════════════════════════════════════════════════
-        // PACKET LOG PANEL (Bottom)
+        // PACKET LOG PANEL (Horizontal - below VM Table)
         // ═══════════════════════════════════════════════════════════════
+        let packetPanelX = sidebarWidth + padding
         let packetPanelY = buttonRowHeight + padding
+        let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
 
-        let packetPanel = NSView(frame: NSRect(x: panelX, y: packetPanelY, width: panelWidth, height: packetLogPanelHeight))
+        let packetPanel = NSView(frame: NSRect(x: packetPanelX, y: packetPanelY, width: packetPanelWidth, height: packetPanelHeight))
         packetPanel.wantsLayer = true
-        packetPanel.autoresizingMask = [.minXMargin, .height]
+        packetPanel.autoresizingMask = [.width]
 
-        // Dark background with yellow/orange border for packet analysis theme
+        // Dark background with yellow/orange border
         packetPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
         packetPanel.layer?.cornerRadius = 8
         packetPanel.layer?.borderWidth = 1
@@ -493,55 +494,61 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Panel title
         let packetTitle = NSTextField(labelWithString: "⚡ PACKET LOG")
-        packetTitle.frame = NSRect(x: 12, y: packetLogPanelHeight - 28, width: panelWidth - 24, height: 20)
+        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 120, height: 20)
         packetTitle.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
-        packetTitle.textColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)  // Yellow/gold
-        packetTitle.autoresizingMask = [.minYMargin]
+        packetTitle.textColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
         packetPanel.addSubview(packetTitle)
 
-        // Tab control (Packets / Protocols)
+        // Tab control (Packets / Protocols) - next to title
         let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 10, y: packetLogPanelHeight - 55, width: panelWidth - 20, height: 24)
+        tabControl.frame = NSRect(x: 130, y: packetPanelHeight - 30, width: 150, height: 24)
         tabControl.selectedSegment = 0
         tabControl.segmentStyle = .texturedSquare
-        tabControl.autoresizingMask = [.minYMargin]
         packetPanel.addSubview(tabControl)
         packetLogTabControl = tabControl
 
-        // Packets list container
-        let packetsScrollView = NSScrollView(frame: NSRect(x: 8, y: 45, width: panelWidth - 16, height: packetLogPanelHeight - 110))
-        packetsScrollView.autoresizingMask = [.height]
+        // Open Full Analysis button - top right
+        let openButton = NSButton(title: "Open Full Analysis", target: self, action: #selector(openPacketAnalysisWindow(_:)))
+        openButton.frame = NSRect(x: packetPanelWidth - 140, y: packetPanelHeight - 32, width: 130, height: 26)
+        openButton.bezelStyle = .rounded
+        openButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        openButton.autoresizingMask = [.minXMargin]
+        packetPanel.addSubview(openButton)
+
+        // Separator below header
+        let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 45, width: packetPanelWidth - 20, height: 1))
+        packetSeparator.boxType = .separator
+        packetSeparator.fillColor = NSColor(red: 0.8, green: 0.6, blue: 0.0, alpha: 0.3)
+        packetSeparator.autoresizingMask = [.width]
+        packetPanel.addSubview(packetSeparator)
+
+        // Packets list container - horizontal layout
+        let packetsScrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        packetsScrollView.autoresizingMask = [.width]
         packetsScrollView.hasHorizontalScroller = false
         packetsScrollView.hasVerticalScroller = true
         packetsScrollView.autohidesScrollers = true
         packetsScrollView.drawsBackground = false
         packetsScrollView.borderType = .noBorder
 
-        let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: panelWidth - 16, height: packetLogPanelHeight - 110))
+        let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
         packetsTextView.isEditable = false
         packetsTextView.drawsBackground = false
         packetsTextView.textColor = NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
-        packetsTextView.font = NSFont.monospacedSystemFont(ofSize: 8, weight: .regular)
-        packetsTextView.autoresizingMask = [.height, .width]
+        packetsTextView.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+        packetsTextView.autoresizingMask = [.width]
         packetsScrollView.documentView = packetsTextView
 
         packetPanel.addSubview(packetsScrollView)
         packetListContainer = packetsScrollView
 
         // Protocol stats container (hidden by default)
-        let protocolView = NSView(frame: NSRect(x: 8, y: 45, width: panelWidth - 16, height: packetLogPanelHeight - 110))
+        let protocolView = NSView(frame: NSRect(x: 8, y: 8, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
         protocolView.wantsLayer = true
         protocolView.isHidden = true
-        protocolView.autoresizingMask = [.height]
+        protocolView.autoresizingMask = [.width]
         packetPanel.addSubview(protocolView)
         protocolStatsContainer = protocolView
-
-        // Open Full Analysis button
-        let openButton = NSButton(title: "Open Full Analysis", target: self, action: #selector(openPacketAnalysisWindow(_:)))
-        openButton.frame = NSRect(x: 10, y: 10, width: panelWidth - 20, height: 28)
-        openButton.bezelStyle = .rounded
-        openButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        packetPanel.addSubview(openButton)
 
         contentView.addSubview(packetPanel)
         packetLogPanel = packetPanel
@@ -898,15 +905,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let sidebarWidth: CGFloat = 220
         let activePanelWidth: CGFloat = 220
         let buttonRowHeight: CGFloat = 50
-        let padding: CGFloat = 15  // Match adjustContentForSidebar padding
+        let padding: CGFloat = 15
+        let packetPanelHeight: CGFloat = 180
 
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Recalculate table position and size
+        // Recalculate table position and size (above packet panel)
         let tableX = sidebarWidth + padding
         let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let tableY = buttonRowHeight + padding
+        let tableY = buttonRowHeight + padding + packetPanelHeight + padding
         let tableHeight = contentHeight - tableY - padding
 
         if let scrollView = tableView?.enclosingScrollView {
@@ -926,12 +934,20 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             buttonX += buttonWidth + buttonSpacing
         }
 
-        // Recalculate Active VMs panel position
+        // Recalculate Active VMs panel position (right side, full height)
         if let panel = statusBar {
             let panelX = contentWidth - activePanelWidth - padding
             let panelY = buttonRowHeight + padding
             let panelHeight = contentHeight - panelY - padding
             panel.frame = NSRect(x: panelX, y: panelY, width: activePanelWidth, height: panelHeight)
+        }
+
+        // Recalculate Packet Log panel position (horizontal, below table)
+        if let packetPanel = packetLogPanel {
+            let packetX = sidebarWidth + padding
+            let packetY = buttonRowHeight + padding
+            let packetWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
+            packetPanel.frame = NSRect(x: packetX, y: packetY, width: packetWidth, height: packetPanelHeight)
         }
     }
 
