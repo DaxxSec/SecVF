@@ -11,6 +11,7 @@
                 <outlet property="cloneButton" destination="clone-button-id" id="clone-button-outlet"/>
                 <outlet property="deleteButton" destination="delete-button-id" id="delete-button-outlet"/>
                 <outlet property="importButton" destination="import-button-id" id="import-button-outlet"/>
+                <outlet property="configureButton" destination="configure-button-id" id="configure-button-outlet"/>
                 <outlet property="newButton" destination="new-button-id" id="new-button-outlet"/>
                 <outlet property="renameButton" destination="rename-button-id" id="rename-button-outlet"/>
                 <outlet property="startButton" destination="start-button-id" id="start-button-outlet"/>
@@ -352,6 +353,17 @@ DQ
                         </buttonCell>
                         <connections>
                             <action selector="importVM:" target="-2" id="import-action"/>
+                        </connections>
+                    </button>
+                    <button verticalHuggingPriority="750" fixedFrame="YES" translatesAutoresizingMaskIntoConstraints="NO" id="configure-button-id">
+                        <rect key="frame" x="530" y="78" width="92" height="32"/>
+                        <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMaxY="YES"/>
+                        <buttonCell key="cell" type="push" title="Config" bezelStyle="rounded" alignment="center" borderStyle="border" imageScaling="proportionallyDown" inset="2" id="configure-button-cell">
+                            <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                            <font key="font" metaFont="system"/>
+                        </buttonCell>
+                        <connections>
+                            <action selector="configureVM:" target="-2" id="configure-action"/>
                         </connections>
                     </button>
                 </subviews>

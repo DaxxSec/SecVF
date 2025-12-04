@@ -1,295 +1,160 @@
-# SecVF
+# SecVF - Computer Security Incident Response Team Virtualization Framework
 
-**Computer Security Incident Response Team Virtualization Framework**
-
-A macOS application for managing Linux and macOS virtual machines, designed for security research and malware analysis in isolated sandbox environments.
-
-## Recent Updates
-
-**November 2025**
-- ✅ **Critical Linux VM boot fix** - Fixed boolean logic bug causing Linux VMs to crash on startup
-- ✅ **Linux installation support** - Added automatic ISO detection and OS installation tracking for Linux VMs
-- ✅ **Legacy VM compatibility** - Intelligent distribution inference for existing VMs without metadata
-- ✅ **Real-time macOS IPSW download progress** - Fixed modal dialog threading issue, downloads now show live GB/percentage updates
-- ✅ **Enhanced security logging** - Comprehensive NSLog debugging for download flow validation
-- ✅ **ISO Cache Manager** - Centralized, secure ISO/IPSW download management with security audit logging
-- ✅ **Network config migration** - Moved network types to dedicated file for better organization
-
-## Overview
-
-SecVF provides a clean GUI for creating, managing, and monitoring virtual machines using Apple's native Virtualization framework. Built specifically for security teams, it offers VM-to-VM networking, real-time security monitoring, and complete isolation from your host system.
-
-## Why Apple Virtualization Framework?
-
-- **Native performance** - Hardware-accelerated virtualization with minimal overhead
-- **Apple Silicon optimized** - Exceptional efficiency on M-series chips
-- **Automatic display scaling** - VMs resize instantly with the window
-- **Native clipboard sharing** - Copy/paste between host and guest
-- **macOS guest support** - Run macOS VMs (not possible with QEMU)
-- **Rosetta translation** - Run x86_64 binaries in ARM Linux VMs
-- **Apple-maintained** - Official framework with regular updates and security hardening
+A native macOS virtualization framework for security research, malware analysis, and incident response. Built with Swift using Apple's Virtualization framework.
 
 ## Features
 
-### Core Functionality
-- **VM Library** - Browse, create, and manage Linux and macOS VMs
-- **Flexible Configuration** - Custom CPU, memory, and disk allocation per VM
-- **Network Modes** - NAT for internet access or isolated VM-to-VM networking
-- **VM Operations** - Start, stop, clone, rename, delete, and import VMs
-- **Smart IPSW Management** - Automatic macOS image caching and reuse
-- **Auto-Migration** - Migrates VMs from legacy locations on first launch
+### Virtual Machine Management
+- Multi-VM library with flexible configuration
+- Support for Linux (8 distros) and macOS virtual machines
+- Multi-window VM sessions
+- Clone, rename, delete VMs
+- Automatic ISO cache management
 
-### Linux VM Support
-- **Automatic OS installation tracking** - Detects when Linux VMs need installation
-- **ISO cache management** - Centralized storage in `~/.avf/VMImages/Linux/`
-- **Smart distribution detection** - Automatically infers distro from VM names for legacy VMs
-- **Supported distributions** (8 total):
-  - Ubuntu Desktop & Server (24.04 LTS)
-  - Debian (12.0)
-  - Fedora (39)
-  - Kali Linux (2024.1) - Security/pentesting focused
-  - Parrot Security (6.0) - Alternative security distro
-  - Arch Linux (Latest) - Rolling release
-  - Manjaro (23.1.3)
-- Boot from ISO for any ARM64 or x86_64 distribution
-- SPICE agent support for clipboard sharing
-- Optional Rosetta support for running x86_64 binaries on ARM Linux
-- **Progress tracking** for ISO downloads with live updates
+### Network Configuration
+- **NAT Mode** - Internet access through host
+- **Virtual Network Switch** - Isolated VM-to-VM communication
+- **Router VM** - Kali Linux router for traffic analysis
+- Real-time network traffic visualization
 
-### macOS VM Support
-- Automatic download of latest macOS restore images (15.6 GB)
-- **Real-time download progress** with live GB/percentage tracking
-- Full macOS guest support with native integration
-- **Smart IPSW caching** - Central storage in `~/.avf/MacOS/` shared across all macOS VMs
-- URL validation and CDN security checks (only downloads from official Apple servers)
-- TLS 1.2+ requirement with certificate validation
+### Packet Analysis (NEW)
 
-**See [ISOCACHE.md](ISOCACHE.md) for complete ISO Cache Manager documentation including security architecture, threat model, and audit logging.**
+SecVF integrates tshark for deep packet inspection of VM network traffic.
 
-**See [docs/LINUX-BOOT-FIX.md](docs/LINUX-BOOT-FIX.md) for detailed documentation of the critical Linux VM boot fix.**
+#### Mini Packet Log Panel
+The right sidebar displays a compact packet log with:
+- **Packets Tab** - Recent 15-20 packets with timestamp, protocol, and addresses
+- **Protocols Tab** - Live protocol breakdown (TCP, UDP, DNS, ARP, etc.)
+- Color-coded by protocol type
+- "Open Full Analysis" button
 
-## Getting Started
+#### Full Packet Analysis Window
+Access via **Monitoring > Packet Analysis** (Cmd+Shift+P):
 
-### Requirements
-- macOS 14.0 or later
-- Xcode (for building from source)
-- Apple Developer account (for code signing)
+| Feature | Description |
+|---------|-------------|
+| Live Capture | Start/Stop/Clear controls with real-time packet display |
+| Display Filter | Wireshark-style filters (e.g., `tcp`, `ip.addr == 10.0.100.1`) |
+| Packet Table | Sortable columns: Time, Source, Dest, Protocol, Length, Info |
+| Packet Details | Layer-by-layer decode tree (Ethernet, IP, TCP/UDP, etc.) |
+| Hex Dump | Raw packet bytes with ASCII representation |
+| PCAP Support | Open/Save PCAP files for offline analysis |
 
-### Building
+#### Requirements
 ```bash
-git clone <repository-url>
-open SecVF.xcodeproj
-# Configure signing in Xcode, then build (⌘R)
+# Install tshark (Wireshark CLI tools)
+brew install wireshark
 ```
 
-### First Launch
-VMs from legacy locations are automatically migrated to `~/.avf/Linux/` or `~/.avf/MacOS/`.
-
-## VM Storage Structure
-
-VMs are stored in the `~/.avf/` directory, organized by OS type:
-
-```
-~/.avf/
-├── Linux/          # Linux VMs
-│   └── [VM Name].bundle/
-│       ├── Disk.img
-│       ├── NVRAM
-│       ├── MachineIdentifier
-│       └── metadata.json
-├── MacOS/          # macOS VMs and shared IPSWs
-│   ├── [VM Name].bundle/
-│   └── *.ipsw      # Shared restore images
-└── VMImages/       # Cached ISO files
-    └── Linux/
-        └── [Distro]-[Version]/
-            └── *.iso
-```
-
-Each VM bundle contains:
-- **Disk.img**: Virtual disk image
-- **NVRAM**: Boot configuration (critical for Linux VMs)
-- **MachineIdentifier**: Unique VM identifier
-- **metadata.json**: Configuration including OS installation status
-
-## Advanced Features
-
-### Rosetta Support (Apple Silicon)
-Enable Rosetta when creating Linux VMs to run x86_64 binaries transparently on ARM Linux. See [Apple's documentation](https://developer.apple.com/documentation/virtualization/running_intel_binaries_in_linux_vms_with_rosetta).
-
-### Clipboard Sharing & File Transfer
-
-**Linux VMs:**
-The SPICE agent is already configured on the host side. Install in your guest:
-
-```bash
-# Ubuntu/Debian/Kali
-sudo apt update
-sudo apt install spice-vdagent spice-vdagent-x11
-
-# Enable the service
-sudo systemctl enable spice-vdagent
-sudo systemctl start spice-vdagent
-
-# Reboot VM for clipboard to work
-sudo reboot
-```
-
-**macOS VMs:**
-Apple's Virtualization framework doesn't support native clipboard for macOS guests. Alternatives:
-
-1. **Screen Sharing (Recommended)**:
-   - Enable "Screen Sharing" in VM's System Settings → Sharing
-   - Connect from host using Screen Sharing app
-   - Provides clipboard + drag-and-drop
-
-2. **Shared Directories** (Coming soon):
-   - Transfer files/text via shared folder between host and guest
-
-3. **Universal Clipboard** (Same Apple ID only):
-   - Enable Handoff on both host and VM
-   - Requires same Apple ID signed in
-
-### Deploying Scripts to VMs
-
-**For VMs without network access (isolated analysis):**
-
-The `scripts/` directory contains router setup scripts. To deploy to isolated VMs:
-
-```bash
-# Method 1: Before isolation - use SCP while VM has network
-scp scripts/kali-router-setup.sh user@vm-ip:/tmp/
-
-# Method 2: During VM installation - include scripts on installer ISO
-# (Advanced - requires custom ISO creation)
-
-# Method 3: Copy-paste method (always works)
-# 1. Open script in text editor on host
-# 2. Copy entire contents
-# 3. In VM terminal: nano /tmp/setup.sh
-# 4. Paste contents, save, chmod +x, run
-```
-
-**Automated deployment (recommended):**
-
-For first-time setup, run scripts while VM still has NAT networking:
-
-```bash
-# In your Linux VM with NAT network access:
-curl https://raw.githubusercontent.com/your-repo/SecVF/main/scripts/kali-router-setup.sh | sudo bash
-
-# Then switch to Virtual Network mode in SecVF
-```
-
-See [scripts/README.md](scripts/README.md) for detailed setup instructions.
-
-### Virtual Network Switch
-Software-based Ethernet switch for VM-to-VM communication without physical network exposure. Perfect for malware analysis:
-
-- Linux VMs act as routers with monitoring tools (Wireshark, tcpdump)
-- Route macOS VMs through Linux routers to capture malware traffic
-- Complete isolation from physical network
-- All traffic logged to `~/.avf/logs/network-YYYY-MM-DD.log`
-- Security features: MAC validation, rate limiting, spoofing detection
-
-**Network Modes:**
-- **NAT** - Direct internet access (default)
-- **Virtual Network** - VM-to-VM only, fully isolated
+### Security Analysis Tools
+- **Virtual Network Switch** - L2/L3 packet capture and forwarding
+- **Kali Router VM** - Traffic interception and analysis
+- **FakeNet Integration** - DNS/HTTP honeypot services
+- Security audit logging
 
 ### Real-Time Monitoring
-Access via menu bar `Monitoring` or keyboard shortcuts:
-- `⌘⇧1` - **Security Logs** - VM lifecycle, resource warnings, breakout detection
-- `⌘⇧2` - **Network Logs** - Packet forwarding, MAC learning, rate limiting
-- `⌘⇧3` - **Virtual Switch Stats** - Port status, packet counts, learned MACs
+| Viewer | Shortcut | Description |
+|--------|----------|-------------|
+| Security Logs | Cmd+Shift+1 | Filesystem changes, security events |
+| Network Logs | Cmd+Shift+2 | Virtual switch traffic logs |
+| Packet Analysis | Cmd+Shift+P | Deep packet inspection |
+| Switch Statistics | Cmd+Shift+3 | Network switch metrics |
+| ISO Cache Audit | Cmd+Shift+4 | Download validation logs |
 
-Features: Auto-refresh, syntax highlighting, auto-scroll, search (⌘F)
-Logs stored in `~/.avf/logs/`
+## Installation
 
-## Security & Malware Analysis
+### Prerequisites
+- macOS 14.0+ (Sonoma or later)
+- Apple Silicon or Intel Mac with Virtualization support
+- Xcode 15.0+
+- tshark (optional, for packet analysis): `brew install wireshark`
 
-Designed for security research and malware analysis with hardware-enforced VM isolation, real-time monitoring, breakout detection, and security event logging.
+### From Source
+```bash
+git clone https://github.com/ebay/secvf.git
+cd secvf
+open SecVF.xcodeproj
+```
 
-**Best Practices:**
-- Use dedicated VMs for each analysis session
-- Monitor logs: `tail -f ~/.avf/logs/security-$(date +%Y-%m-%d).log`
-- VMs have internet access - malware can communicate externally
-- Delete infected VMs after analysis
+Build and run with Xcode (Cmd+R).
 
-**See [SECURITY.md](SECURITY.md) for complete threat model, incident response procedures, and hardening recommendations.**
+## Usage
 
-## Troubleshooting
+### Creating a VM
+1. Click "New" in the VM Library
+2. Select OS type (Linux/macOS)
+3. Configure CPU, memory, disk size
+4. Select network mode (NAT or Virtual Network)
+5. Click "Create"
 
-### Linux VM Issues
+### Setting Up Malware Analysis Environment
+1. Create a Kali Router VM on Virtual Network
+2. Run `kali-router-setup.sh` on the router
+3. Create analysis VMs connected to Virtual Network
+4. Start packet capture in Packet Analysis window
+5. Execute malware sample and observe traffic
 
-**VM Crashes on Boot:**
-- Check if VM has proper NVRAM file (critical for boot)
-- Verify `osInstalled` status in metadata.json
-- For legacy VMs, ensure VM name contains distro (e.g., "Kali Router")
-- Review logs: `Console.app` and filter for "Linux VM"
+### Keyboard Shortcuts
+| Action | Shortcut |
+|--------|----------|
+| New VM | Cmd+N |
+| Start VM | Cmd+S |
+| Stop VM | Cmd+. |
+| Packet Analysis | Cmd+Shift+P |
+| Security Logs | Cmd+Shift+1 |
+| Network Logs | Cmd+Shift+2 |
 
-**Installation Not Starting:**
-- Ensure ISO is cached in `~/.avf/VMImages/Linux/[Distro]-[Version]/`
-- ISO file must be > 1MB (not a placeholder)
-- Check supported distributions list above
+## Project Structure
 
-**VM Won't Start:**
-- Verify VM bundle exists in `~/.avf/`
-- Check required files (Disk.img, NVRAM, MachineIdentifier)
-- Review console logs for specific errors
+```
+SecVF/
+├── SecVF/
+│   ├── AppDelegate.swift           # Main application delegate
+│   ├── VMConfiguration.swift       # VM configuration model
+│   ├── VMManager.swift             # VM lifecycle management
+│   ├── VMLibraryWindowController.swift  # Main window UI
+│   ├── VirtualNetworkSwitch.swift  # L2/L3 network switch
+│   ├── PacketCaptureManager.swift  # tshark integration (NEW)
+│   ├── PacketAnalysisWindowController.swift  # Packet UI (NEW)
+│   ├── LogViewerWindowController.swift  # Log viewer
+│   └── ...
+├── scripts/
+│   ├── kali-router-setup.sh        # Router VM configuration
+│   ├── kali-fakenet-setup.sh       # FakeNet honeypot setup
+│   └── macos-network-setup.sh      # macOS VM networking
+├── docs/
+│   ├── CHANGELOG.md                # Version history
+│   └── ...
+└── SecVFTests/                   # Unit tests
+```
 
-### macOS VM Issues
+## Tech Stack
 
-**Download Fails:**
-- Check internet connection
-- Ensure 15GB+ free space
-- Verify firewall allows Apple CDN access
-- Check `~/.avf/logs/` for download errors
+- **Swift** - Native macOS development
+- **Apple Virtualization Framework** - VM hypervisor
+- **AppKit** - macOS UI framework
+- **tshark/Wireshark** - Packet capture and analysis
 
-### General Issues
+## Contributing
 
-**Linux Installation:**
-- ISO must match Mac architecture (ARM64/x86_64)
-- Allocate 4GB+ memory for installation
-- Verify ISO checksum if available
-
-## Development Roadmap
-
-### Validation & Testing
-- [ ] Validate re-use of cached IPSW
-- [ ] Validate Linux downloading mechanisms for each distro (Kali, Ubuntu, Debian)
-- [ ] Write tests for the log functionality
-- [ ] Fix the UI VM state panel
-
-### Networking & Routing
-- [ ] Thoroughly test and understand software routing for VM-to-VM communications
-- [ ] Validate network isolation (ensure malware VMs can't reach host/external network)
-
-### Security & Setup
-- [ ] Implement enforcement of Kali VM requirements
-- [ ] Create setup scripts for Linux hosts
-- [ ] Create setup scripts for macOS hosts
-
-### Critical Features (CSIRT Requirements)
-- [ ] Implement VM snapshot/checkpoint functionality (critical for malware analysis)
-- [ ] Implement secure file transfer mechanism (samples in, artifacts/logs out)
-- [ ] Implement VM lifecycle/cleanup automation (prevent disk space exhaustion)
-- [ ] Add resource limits/quotas per VM (CPU/memory caps)
-
-### Integration & Tools
-- [ ] Improve error handling and user feedback throughout app
-- [ ] Add full PCAP network packet capture support (beyond logging)
-- [ ] Create VM templates/presets for common analysis scenarios
-- [ ] Add integration points for security tools (Wireshark, Volatility, YARA)
-
-### Documentation & Security
-- [ ] Write architecture documentation (network topology, security boundaries)
-- [ ] Write user guide/runbook for common analyst workflows
-- [ ] Perform security validation/penetration testing of isolation mechanisms
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-See LICENSE.txt for details.
+This project is licensed under the MIT License - see the LICENSE.txt file for details.
 
-## Credits
+## Acknowledgments
 
-Built using Apple's [Virtualization framework](https://developer.apple.com/documentation/virtualization).
+- Apple Virtualization Framework team
+- Wireshark/tshark developers
+- ItzDaxxy team
+
+---
+
+**Developed by ItzDaxxy**
+- 
+- itzdaxxy@users.noreply.github.com

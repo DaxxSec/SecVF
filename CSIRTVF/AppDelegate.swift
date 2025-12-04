@@ -35,6 +35,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     // TODO: Uncomment when SwitchStatisticsWindowController.swift is added to Xcode project
     // private var switchStatisticsWindow: SwitchStatisticsWindowController?
 
+    // Packet Analysis window (retained to prevent deallocation)
+    private var packetAnalysisWindow: PacketAnalysisWindowController?
+
     // ISO Cache Manager window (retained to prevent deallocation)
     // TODO: Add ISOCacheManagerWindow.swift to Xcode project
     // private var isoCacheManagerWindow: ISOCacheManagerWindow?
@@ -441,18 +444,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         return VZUSBMassStorageDeviceConfiguration(attachment: intallerDiskAttachment)
     }
 
-    private func createScriptsUSBConfiguration() -> VZUSBMassStorageDeviceConfiguration? {
-        guard let scriptsISOURL = ScriptsUSBManager.shared.scriptsISOURL else {
-            NSLog("[ScriptsUSB] Scripts ISO not found")
-            return nil
-        }
+    private func createScriptsUSBConfiguration(forMacOS: Bool) -> VZUSBMassStorageDeviceConfiguration? {
+        if forMacOS {
+            // macOS: Use read-only ISO (macOS can run scripts directly)
+            guard let scriptsISOURL = ScriptsUSBManager.shared.scriptsISOURL else {
+                NSLog("[ScriptsUSB] Scripts ISO not found")
+                return nil
+            }
 
-        guard let scriptsAttachment = try? VZDiskImageStorageDeviceAttachment(url: scriptsISOURL, readOnly: true) else {
-            NSLog("[ScriptsUSB] Failed to create scripts disk attachment")
-            return nil
-        }
+            guard let scriptsAttachment = try? VZDiskImageStorageDeviceAttachment(url: scriptsISOURL, readOnly: true) else {
+                NSLog("[ScriptsUSB] Failed to create scripts ISO attachment")
+                return nil
+            }
 
-        return VZUSBMassStorageDeviceConfiguration(attachment: scriptsAttachment)
+            return VZUSBMassStorageDeviceConfiguration(attachment: scriptsAttachment)
+        } else {
+            // Linux: Use writable FAT32 disk image (user can chmod +x)
+            guard let scriptsDiskURL = ScriptsUSBManager.shared.scriptsDiskURL else {
+                NSLog("[ScriptsUSB] Scripts disk image not found")
+                return nil
+            }
+
+            guard let scriptsAttachment = try? VZDiskImageStorageDeviceAttachment(url: scriptsDiskURL, readOnly: false) else {
+                NSLog("[ScriptsUSB] Failed to create scripts disk attachment")
+                return nil
+            }
+
+            return VZUSBMassStorageDeviceConfiguration(attachment: scriptsAttachment)
+        }
     }
 
     private func createNetworkDeviceConfiguration(for vmId: UUID) -> VZVirtioNetworkDeviceConfiguration {
@@ -709,12 +728,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                             self.vmConfigs[vmId] = vmConfig
                             self.needsInstallFlags[vmId] = false
 
-                            // Save metadata
+                            // Save metadata AND update VMManager's in-memory copy
                             do {
-                                let encoder = JSONEncoder()
-                                encoder.outputFormatting = .prettyPrinted
-                                let data = try encoder.encode(vmConfig)
-                                try data.write(to: URL(fileURLWithPath: vmConfig.metadataPath))
+                                try VMManager.shared.saveVMConfiguration(vmConfig)
                                 NSLog("[macOS Install] Metadata saved - macOS marked as installed")
                             } catch {
                                 NSLog("[macOS Install] ERROR: Failed to save metadata: \(error)")
@@ -811,9 +827,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // Check if scripts USB should be attached
         if attachScriptsUSBFlags[vmId] == true {
-            if let scriptsUSB = createScriptsUSBConfiguration() {
+            if let scriptsUSB = createScriptsUSBConfiguration(forMacOS: isMacOS) {
                 disksArray.add(scriptsUSB)
-                NSLog("[ScriptsUSB] Attached scripts USB to VM")
+                NSLog("[ScriptsUSB] Attached scripts \(isMacOS ? "ISO" : "disk image") to VM")
             }
             // Clear the flag after use
             attachScriptsUSBFlags.removeValue(forKey: vmId)
@@ -1056,6 +1072,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         monitoringMenu.addItem(NSMenuItem.separator())
 
+        // Packet Analysis menu item
+        let packetAnalysisItem = NSMenuItem(
+            title: "Packet Analysis",
+            action: #selector(showPacketAnalysis),
+            keyEquivalent: "p"
+        )
+        packetAnalysisItem.keyEquivalentModifierMask = [.command, .shift]
+        packetAnalysisItem.target = self
+        monitoringMenu.addItem(packetAnalysisItem)
+
         // Virtual Switch Statistics
         let switchStatsItem = NSMenuItem(
             title: "Virtual Switch Statistics",
@@ -1151,6 +1177,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
         networkLogViewer?.showWindow(nil)
         networkLogViewer?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func showPacketAnalysis() {
+        // Create new viewer if nil or window was closed
+        if packetAnalysisWindow == nil || packetAnalysisWindow?.window == nil {
+            packetAnalysisWindow = PacketAnalysisWindowController()
+        }
+        packetAnalysisWindow?.showWindow(nil)
+        packetAnalysisWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func showISOCacheLogs() {
@@ -1322,17 +1357,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
     @objc private func rebuildScriptsISO() {
         // Try to find scripts directory automatically
+        var results: [String] = []
+        var hadError = false
+
+        // Create ISO for macOS VMs (read-only is fine)
         if let isoURL = ScriptsUSBManager.shared.createScriptsISO() {
-            showAlert(title: "Scripts ISO Created", message: "Successfully created scripts ISO at:\n\(isoURL.path)")
+            results.append("ISO: \(isoURL.lastPathComponent)")
         } else {
+            hadError = true
+        }
+
+        // Create writable disk image for Linux VMs
+        if let diskURL = ScriptsUSBManager.shared.createScriptsDisk() {
+            results.append("Disk (writable): \(diskURL.lastPathComponent)")
+        } else {
+            hadError = true
+        }
+
+        if !results.isEmpty {
+            showAlert(title: "Scripts Created", message: "Successfully created:\n\(results.joined(separator: "\n"))")
+        } else if hadError {
             // Prompt user to select scripts directory
             ScriptsUSBManager.shared.promptForScriptsDirectory { [weak self] url in
                 guard let url = url else { return }
 
+                var results2: [String] = []
                 if let isoURL = ScriptsUSBManager.shared.createScriptsISO(from: url.path) {
-                    self?.showAlert(title: "Scripts ISO Created", message: "Successfully created scripts ISO at:\n\(isoURL.path)")
+                    results2.append("ISO: \(isoURL.lastPathComponent)")
+                }
+                if let diskURL = ScriptsUSBManager.shared.createScriptsDisk(from: url.path) {
+                    results2.append("Disk (writable): \(diskURL.lastPathComponent)")
+                }
+
+                if !results2.isEmpty {
+                    self?.showAlert(title: "Scripts Created", message: "Successfully created:\n\(results2.joined(separator: "\n"))")
                 } else {
-                    self?.showAlert(title: "Error", message: "Failed to create scripts ISO. Check console for details.")
+                    self?.showAlert(title: "Error", message: "Failed to create scripts. Check console for details.")
                 }
             }
         }
@@ -1442,10 +1502,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         NSLog("%@", errorMsg)
         print("Virtual machine did stop with error: \(error.localizedDescription)")
 
-        // Write to debug file
-        let debugPath = "/tmp/claude/secvf-delegate-error.txt"
-        try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
-
         // NETWORK: Disconnect from virtual switch if in virtual network mode
         if vmConfig.networkConfig.mode == .virtual {
             VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
@@ -1491,10 +1547,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         NSLog("[DELEGATE] guestDidStop called - VM stopped normally: \(vmConfig.name)")
         print("Guest did stop virtual machine.")
-
-        // Write to debug file
-        let debugPath = "/tmp/claude/secvf-delegate-stop.txt"
-        try? "guestDidStop called - normal VM shutdown: \(vmConfig.name)".write(toFile: debugPath, atomically: true, encoding: .utf8)
 
         // SECURITY: Stop security monitoring
         VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
