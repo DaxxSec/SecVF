@@ -78,7 +78,20 @@ echo ""
 echo -e "${GREEN}Configuration applied!${NC}"
 echo ""
 echo "Verifying..."
-ifconfig $INTERFACE | grep "inet "
+
+# Give the interface a moment to apply settings
+sleep 1
+
+# Check if IP was assigned (don't exit on failure)
+ASSIGNED_IP=$(ifconfig $INTERFACE 2>/dev/null | grep "inet " | awk '{print $2}' || true)
+
+if [ -n "$ASSIGNED_IP" ]; then
+    echo -e "${GREEN}✓ PASS${NC} - Interface configured with IP: $ASSIGNED_IP"
+else
+    echo -e "${RED}✗ FAIL${NC} - Could not verify IP assignment on $INTERFACE"
+    echo "  Try running: ifconfig $INTERFACE"
+    exit 1
+fi
 
 echo ""
 echo -e "${GREEN}=== Setup Complete! ===${NC}"

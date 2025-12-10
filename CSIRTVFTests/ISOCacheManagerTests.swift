@@ -61,7 +61,7 @@ final class ISOCacheManagerTests: XCTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
 
-    func testSecurityRouterAllowsKali() {
+    func testSecurityRouterAllowsKali() { 
         // Kali router should pass validation (even if download fails due to network)
         let kaliRouter = VMImageType.linux(distro: .kali, version: "2024.1", isSecurityRouter: true)
 

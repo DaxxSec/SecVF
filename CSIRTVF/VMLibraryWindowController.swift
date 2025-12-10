@@ -28,9 +28,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     // Packet Log Panel
     private var packetLogPanel: NSView?
     private var packetLogTabControl: NSSegmentedControl?
+    private var packetVMFilterControl: NSSegmentedControl?
     private var packetListContainer: NSScrollView?
     private var protocolStatsContainer: NSView?
     private var packetAnalysisWindowController: PacketAnalysisWindowController?
+    private var currentVMFilter: String = "macOS"  // Default to macOS packets
+    private var filterARPEnabled: Bool = true  // Filter ARP by default
+    private var arpFilteredCount: Int = 0
+    private var arpFilterCountLabel: NSTextField?
 
     override var windowNibName: NSNib.Name? {
         return "VMLibraryWindow"
@@ -98,6 +103,29 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         tableView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
         tableView?.enclosingScrollView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
         tableView?.gridColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan grid
+
+        // Style toolbar buttons to match session panel
+        styleToolbarButtons()
+    }
+
+    private func styleToolbarButtons() {
+        let accentColor = NSColor(red: 0.0, green: 0.7, blue: 0.9, alpha: 1.0)  // Cyan accent
+
+        let buttons: [NSButton?] = [newButton, startButton, deleteButton, renameButton, cloneButton, importButton, configureButton]
+
+        for button in buttons.compactMap({ $0 }) {
+            let title = button.title
+            button.isBordered = false
+            button.wantsLayer = true
+            button.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.2, alpha: 1.0).cgColor
+            button.layer?.borderColor = accentColor.withAlphaComponent(0.5).cgColor
+            button.layer?.borderWidth = 1.0
+            button.layer?.cornerRadius = 5
+            button.attributedTitle = NSAttributedString(string: title, attributes: [
+                .foregroundColor: accentColor,
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+            ])
+        }
     }
 
     private func addSidebar() {
@@ -214,6 +242,66 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Adjust existing content to make room for sidebar
         adjustContentForSidebar(sidebarWidth: sidebarWidth)
+    }
+
+    private func createProtocolLegend(width: CGFloat, height: CGFloat) -> NSView {
+        let legendView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        legendView.wantsLayer = true
+        legendView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor
+        legendView.layer?.cornerRadius = 6
+        legendView.layer?.borderWidth = 1
+        legendView.layer?.borderColor = NSColor(red: 0.0, green: 0.5, blue: 0.7, alpha: 0.3).cgColor
+
+        // Legend title
+        let titleLabel = NSTextField(labelWithString: "⚡ PROTOCOL COLORS")
+        titleLabel.frame = NSRect(x: 8, y: height - 18, width: width - 16, height: 14)
+        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
+        titleLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0)
+        legendView.addSubview(titleLabel)
+
+        // Protocol colors - matching the packet log colors
+        let protocols: [(String, NSColor)] = [
+            ("TCP", NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0)),     // Cyan
+            ("UDP", NSColor(red: 0.6, green: 1.0, blue: 0.6, alpha: 1.0)),     // Green
+            ("DNS", NSColor(red: 1.0, green: 0.9, blue: 0.4, alpha: 1.0)),     // Yellow
+            ("HTTP", NSColor(red: 1.0, green: 0.6, blue: 0.3, alpha: 1.0)),    // Orange
+            ("ARP", NSColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1.0)),     // Gray
+            ("ICMP", NSColor(red: 1.0, green: 0.5, blue: 0.5, alpha: 1.0)),    // Red/Pink
+            ("IPv6", NSColor(red: 0.8, green: 0.6, blue: 1.0, alpha: 1.0)),    // Purple
+            ("TLS", NSColor(red: 0.3, green: 1.0, blue: 0.8, alpha: 1.0))      // Teal
+        ]
+
+        let colWidth = (width - 16) / 2
+        let rowHeight: CGFloat = 14
+        var col = 0
+        var row = 0
+
+        for (proto, color) in protocols {
+            let x = 8 + CGFloat(col) * colWidth
+            let y = height - 34 - CGFloat(row) * rowHeight
+
+            // Color dot
+            let dot = NSView(frame: NSRect(x: x, y: y + 3, width: 8, height: 8))
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = color.cgColor
+            dot.layer?.cornerRadius = 4
+            legendView.addSubview(dot)
+
+            // Protocol name
+            let label = NSTextField(labelWithString: proto)
+            label.frame = NSRect(x: x + 12, y: y, width: colWidth - 16, height: 12)
+            label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+            label.textColor = color
+            legendView.addSubview(label)
+
+            col += 1
+            if col >= 2 {
+                col = 0
+                row += 1
+            }
+        }
+
+        return legendView
     }
 
     private func createStylizedLogo() -> NSImage {
@@ -406,10 +494,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let contentHeight = contentView.bounds.height
 
         // ═══════════════════════════════════════════════════════════════
-        // ACTIVE VMs PANEL (Right side - full height)
+        // ACTIVE VMs PANEL (Right side - same height as VM table)
         // ═══════════════════════════════════════════════════════════════
         let activePanelX = contentWidth - activePanelWidth - padding
-        let activePanelY = buttonRowHeight + padding
+        let activePanelY = buttonRowHeight + padding + packetPanelHeight + padding  // Same as table Y
         let activePanelHeight = contentHeight - activePanelY - padding
 
         let runningVMsPanel = NSView(frame: NSRect(x: activePanelX, y: activePanelY, width: activePanelWidth, height: activePanelHeight))
@@ -460,7 +548,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Placeholder when no VMs running
         let placeholder = NSTextField(labelWithString: "No active VMs.\n\nSelect a VM and\nclick Start.")
-        placeholder.frame = NSRect(x: 12, y: activePanelHeight / 2 - 40, width: activePanelWidth - 24, height: 60)
+        placeholder.frame = NSRect(x: 12, y: activePanelHeight / 2 - 30, width: activePanelWidth - 24, height: 60)
         placeholder.font = NSFont.systemFont(ofSize: 10)
         placeholder.textColor = NSColor(white: 0.45, alpha: 1.0)
         placeholder.alignment = .center
@@ -476,11 +564,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         statusBar = runningVMsPanel
 
         // ═══════════════════════════════════════════════════════════════
-        // PACKET LOG PANEL (Horizontal - below VM Table)
+        // PACKET LOG PANEL (Horizontal - below VM Table, extends to Active VMs)
         // ═══════════════════════════════════════════════════════════════
         let packetPanelX = sidebarWidth + padding
         let packetPanelY = buttonRowHeight + padding
-        let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
+        let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5  // Reduced gap
 
         let packetPanel = NSView(frame: NSRect(x: packetPanelX, y: packetPanelY, width: packetPanelWidth, height: packetPanelHeight))
         packetPanel.wantsLayer = true
@@ -494,24 +582,63 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Panel title
         let packetTitle = NSTextField(labelWithString: "⚡ PACKET LOG")
-        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 120, height: 20)
-        packetTitle.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
+        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 110, height: 20)
+        packetTitle.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
         packetTitle.textColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
         packetPanel.addSubview(packetTitle)
 
         // Tab control (Packets / Protocols) - next to title
         let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 130, y: packetPanelHeight - 30, width: 150, height: 24)
+        tabControl.frame = NSRect(x: 120, y: packetPanelHeight - 30, width: 130, height: 24)
         tabControl.selectedSegment = 0
         tabControl.segmentStyle = .texturedSquare
         packetPanel.addSubview(tabControl)
         packetLogTabControl = tabControl
 
-        // Open Full Analysis button - top right
+        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols
+        let vmFilterControl = NSSegmentedControl(labels: ["macOS", "Kali", "All"], trackingMode: .selectOne, target: self, action: #selector(vmFilterChanged(_:)))
+        vmFilterControl.frame = NSRect(x: 258, y: packetPanelHeight - 30, width: 140, height: 24)
+        vmFilterControl.selectedSegment = 0  // Default to macOS
+        vmFilterControl.segmentStyle = .texturedSquare
+        vmFilterControl.setWidth(45, forSegment: 0)  // macOS
+        vmFilterControl.setWidth(45, forSegment: 1)  // Kali
+        vmFilterControl.setWidth(40, forSegment: 2)  // All
+        packetPanel.addSubview(vmFilterControl)
+        packetVMFilterControl = vmFilterControl
+
+        // Filter ARP checkbox (checked by default)
+        let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
+        arpCheckbox.frame = NSRect(x: 400, y: packetPanelHeight - 30, width: 80, height: 24)
+        arpCheckbox.state = .on  // Checked by default
+        arpCheckbox.font = NSFont.systemFont(ofSize: 10)
+        arpCheckbox.contentTintColor = NSColor.white
+        packetPanel.addSubview(arpCheckbox)
+
+        // ARP filtered count label (yellow, compact format)
+        let arpCountLabel = NSTextField(labelWithString: "(0)")
+        arpCountLabel.frame = NSRect(x: 478, y: packetPanelHeight - 28, width: 45, height: 18)
+        arpCountLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        arpCountLabel.textColor = NSColor(red: 1.0, green: 0.85, blue: 0.0, alpha: 1.0)  // Yellow
+        arpCountLabel.alignment = .left
+        packetPanel.addSubview(arpCountLabel)
+        arpFilterCountLabel = arpCountLabel
+
+        // Open Full Analysis button - top right (styled to match toolbar)
         let openButton = NSButton(title: "Open Full Analysis", target: self, action: #selector(openPacketAnalysisWindow(_:)))
         openButton.frame = NSRect(x: packetPanelWidth - 140, y: packetPanelHeight - 32, width: 130, height: 26)
-        openButton.bezelStyle = .rounded
-        openButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        openButton.isBordered = false
+        openButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        openButton.wantsLayer = true
+        let btnAccent = NSColor(red: 0.0, green: 0.7, blue: 0.9, alpha: 1.0)
+        openButton.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.2, alpha: 1.0).cgColor
+        openButton.layer?.borderColor = btnAccent.withAlphaComponent(0.5).cgColor
+        openButton.layer?.borderWidth = 1.0
+        openButton.layer?.cornerRadius = 5
+        openButton.contentTintColor = btnAccent
+        openButton.attributedTitle = NSAttributedString(string: "Open Full Analysis", attributes: [
+            .foregroundColor: btnAccent,
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium)
+        ])
         openButton.autoresizingMask = [.minXMargin]
         packetPanel.addSubview(openButton)
 
@@ -553,6 +680,32 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         contentView.addSubview(packetPanel)
         packetLogPanel = packetPanel
 
+        // ═══════════════════════════════════════════════════════════════
+        // PROTOCOL LEGEND PANEL (Right side - below Active VMs, same level as packet panel)
+        // ═══════════════════════════════════════════════════════════════
+        let legendPanelX = activePanelX
+        let legendPanelY = buttonRowHeight + padding
+        let legendPanelWidth = activePanelWidth
+        let legendPanelHeight = packetPanelHeight
+
+        let legendPanel = NSView(frame: NSRect(x: legendPanelX, y: legendPanelY, width: legendPanelWidth, height: legendPanelHeight))
+        legendPanel.wantsLayer = true
+        legendPanel.autoresizingMask = [.minXMargin]
+
+        // Dark background with cyan border (matching Active VMs panel)
+        legendPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
+        legendPanel.layer?.cornerRadius = 8
+        legendPanel.layer?.borderWidth = 1
+        legendPanel.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
+
+        // Add the protocol legend centered in the panel
+        let legendHeight: CGFloat = 95
+        let legendView = createProtocolLegend(width: legendPanelWidth - 16, height: legendHeight)
+        legendView.frame = NSRect(x: 8, y: (legendPanelHeight - legendHeight) / 2, width: legendPanelWidth - 16, height: legendHeight)
+        legendPanel.addSubview(legendView)
+
+        contentView.addSubview(legendPanel)
+
         // Subscribe to packet capture notifications
         NotificationCenter.default.addObserver(
             self,
@@ -579,6 +732,83 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
     }
 
+    @objc private func vmFilterChanged(_ sender: NSSegmentedControl) {
+        // Update filter based on selected segment
+        switch sender.selectedSegment {
+        case 0:
+            currentVMFilter = "macOS"
+        case 1:
+            currentVMFilter = "Kali"
+        case 2:
+            currentVMFilter = "All"
+        default:
+            currentVMFilter = "All"
+        }
+
+        // Clear current display and refresh with filtered packets
+        clearPacketLog()
+        refreshPacketLogWithFilter()
+    }
+
+    @objc private func toggleARPFilter(_ sender: NSButton) {
+        filterARPEnabled = sender.state == .on
+        arpFilterCountLabel?.isHidden = !filterARPEnabled
+        if !filterARPEnabled {
+            arpFilteredCount = 0
+            arpFilterCountLabel?.stringValue = "(0)"
+        }
+        // Refresh display with new filter setting
+        clearPacketLog()
+        refreshPacketLogWithFilter()
+    }
+
+    private func clearPacketLog() {
+        guard let scrollView = packetListContainer,
+              let textView = scrollView.documentView as? NSTextView else { return }
+        textView.textStorage?.setAttributedString(NSAttributedString(string: ""))
+    }
+
+    private func refreshPacketLogWithFilter() {
+        // Reset ARP counter when refreshing
+        arpFilteredCount = 0
+
+        // Get recent packets and display those matching the filter
+        let recentPackets = PacketCaptureManager.shared.getRecentPackets(count: 100)
+        for packet in recentPackets {
+            if packetMatchesFilter(packet) {
+                // Filter ARP packets if enabled
+                if filterARPEnabled && packet.protocol.uppercased() == "ARP" {
+                    arpFilteredCount += 1
+                    continue
+                }
+                addPacketToMiniLog(packet)
+            }
+        }
+
+        // Update the ARP filter count label
+        arpFilterCountLabel?.stringValue = "(\(arpFilteredCount))"
+    }
+
+    private func packetMatchesFilter(_ packet: CapturedPacket) -> Bool {
+        // tshark packets pass all filters since we can't determine source VM
+        if packet.sourceVM.lowercased() == "tshark" {
+            return true
+        }
+
+        switch currentVMFilter {
+        case "macOS":
+            return packet.sourceVM.lowercased().contains("mac")
+        case "Kali":
+            return packet.sourceVM.lowercased().contains("kali") ||
+                   packet.sourceVM.lowercased().contains("linux") ||
+                   packet.sourceVM.lowercased().contains("router")
+        case "All":
+            return true
+        default:
+            return true
+        }
+    }
+
     @objc private func openPacketAnalysisWindow(_ sender: Any) {
         if packetAnalysisWindowController == nil {
             packetAnalysisWindowController = PacketAnalysisWindowController()
@@ -588,6 +818,19 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     @objc private func handlePacketCaptured(_ notification: Notification) {
         guard let packet = notification.userInfo?["packet"] as? CapturedPacket else { return }
+
+        // Only display if packet matches current VM filter
+        guard packetMatchesFilter(packet) else { return }
+
+        // Filter ARP packets if enabled
+        if filterARPEnabled && packet.protocol.uppercased() == "ARP" {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.arpFilteredCount += 1
+                self.arpFilterCountLabel?.stringValue = "(\(self.arpFilteredCount))"
+            }
+            return
+        }
 
         DispatchQueue.main.async { [weak self] in
             self?.addPacketToMiniLog(packet)
@@ -662,7 +905,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         var yOffset = container.bounds.height - 20
 
-        for (index, stat) in stats.prefix(10).enumerated() {
+        for (_, stat) in stats.prefix(10).enumerated() {
             let label = NSTextField(labelWithString: "\(stat.protocol): \(stat.count)")
             label.frame = NSRect(x: 5, y: yOffset, width: container.bounds.width - 10, height: 16)
             label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
@@ -718,33 +961,46 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let clientVMs = runningVMs.filter { !$0.vm.networkConfig.isRouter }
         let hasActiveNetwork = routerVM != nil && !clientVMs.isEmpty
 
-        // Add status items with network visualization between them
+        // Add status items with network visualization between router and clients
+        var visualizationAdded = false
+
         for (index, (vm, state)) in runningVMs.enumerated() {
             let itemView = createVMStatusItem(vm: vm, state: state)
             container.addArrangedSubview(itemView)
 
-            // Add network visualization after the first (non-router) VM if we have an active network
-            if hasActiveNetwork && index == 0 && !vm.networkConfig.isRouter {
-                let netView = NetworkTrafficView(frame: NSRect(x: 0, y: 0, width: 188, height: 160))
+            // Add network visualization after the router VM (between router and clients)
+            if hasActiveNetwork && !visualizationAdded && vm.networkConfig.isRouter {
+                let netView = NetworkTrafficView(frame: NSRect(x: 0, y: 0, width: 188, height: 120))
                 netView.translatesAutoresizingMaskIntoConstraints = false
                 netView.widthAnchor.constraint(equalToConstant: 188).isActive = true
-                netView.heightAnchor.constraint(equalToConstant: 160).isActive = true
+                netView.heightAnchor.constraint(equalToConstant: 120).isActive = true
+                netView.sourceVMName = clientVMs.first?.vm.name ?? "Client"
+                netView.routerVMName = vm.name
+
+                container.addArrangedSubview(netView)
+                networkVisualizationView = netView
+                netView.startAnimation()
+                visualizationAdded = true
+
+                // Start stats update timer
+                startStatsUpdateTimer()
+            }
+            // Also handle case where router isn't first - add after first client
+            else if hasActiveNetwork && !visualizationAdded && index == 0 && !vm.networkConfig.isRouter {
+                let netView = NetworkTrafficView(frame: NSRect(x: 0, y: 0, width: 188, height: 120))
+                netView.translatesAutoresizingMaskIntoConstraints = false
+                netView.widthAnchor.constraint(equalToConstant: 188).isActive = true
+                netView.heightAnchor.constraint(equalToConstant: 120).isActive = true
                 netView.sourceVMName = vm.name
                 netView.routerVMName = routerVM?.vm.name ?? "Router"
 
                 container.addArrangedSubview(netView)
                 networkVisualizationView = netView
                 netView.startAnimation()
+                visualizationAdded = true
 
-                // Start stats update timer
                 startStatsUpdateTimer()
             }
-        }
-
-        // If the first VM IS the router, add visualization after it instead
-        if hasActiveNetwork && runningVMs.first?.vm.networkConfig.isRouter == true && runningVMs.count >= 2 {
-            // Already handled in the loop above, or we need to insert differently
-            // The visualization should go between router and client
         }
 
         // Force layout update
@@ -783,7 +1039,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func createVMStatusItem(vm: VMConfiguration, state: String) -> NSView {
         // Vertical card layout for each VM - fits in 200px wide panel
         let cardWidth: CGFloat = 188
-        let cardHeight: CGFloat = 70
+        let cardHeight: CGFloat = 85  // Taller to fit network toggle
 
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
         containerView.wantsLayer = true
@@ -792,6 +1048,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         containerView.layer?.borderWidth = 1
         containerView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.5).cgColor
         containerView.translatesAutoresizingMaskIntoConstraints = false
+
+        // Store VM ID in layer name for button lookups (safer than hash)
+        containerView.layer?.name = vm.id.uuidString
 
         // Size constraints
         containerView.widthAnchor.constraint(equalToConstant: cardWidth).isActive = true
@@ -826,18 +1085,52 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         nameLabel.lineBreakMode = .byTruncatingTail
         containerView.addSubview(nameLabel)
 
-        // OS type (second line)
+        // OS type label (second line, left side)
         let osLabel = NSTextField(labelWithString: vm.osType)
-        osLabel.frame = NSRect(x: 8, y: cardHeight - 38, width: cardWidth - 16, height: 14)
+        osLabel.frame = NSRect(x: 8, y: cardHeight - 38, width: 50, height: 14)
         osLabel.font = NSFont.systemFont(ofSize: 9)
         osLabel.textColor = NSColor(white: 0.6, alpha: 1.0)
         containerView.addSubview(osLabel)
 
+        // Network state label and colored button (second line, right side)
+        let networkMode = vm.networkConfig.mode == .virtual ? "Isolated" : "NAT"
+        let networkColor = vm.networkConfig.mode == .virtual
+            ? NSColor(red: 0.0, green: 0.8, blue: 0.4, alpha: 1.0)   // Bright green for isolated (secure)
+            : NSColor(red: 0.95, green: 0.25, blue: 0.25, alpha: 1.0) // Red for NAT (less secure)
+
+        // "Network State:" label
+        let netStateLabel = NSTextField(labelWithString: "Network:")
+        netStateLabel.frame = NSRect(x: 60, y: cardHeight - 38, width: 50, height: 14)
+        netStateLabel.font = NSFont.systemFont(ofSize: 8)
+        netStateLabel.textColor = NSColor(white: 0.5, alpha: 1.0)
+        containerView.addSubview(netStateLabel)
+
+        // Network mode button with colored background
+        let netButton = NSButton(frame: NSRect(x: 110, y: cardHeight - 40, width: 70, height: 18))
+        netButton.title = networkMode
+        netButton.bezelStyle = .roundRect
+        netButton.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
+        netButton.controlSize = .mini
+        netButton.wantsLayer = true
+        netButton.layer?.backgroundColor = networkColor.withAlphaComponent(0.25).cgColor
+        netButton.layer?.borderColor = networkColor.cgColor
+        netButton.layer?.borderWidth = 1.5
+        netButton.layer?.cornerRadius = 4
+        netButton.contentTintColor = networkColor
+        netButton.target = self
+        netButton.action = #selector(toggleNetworkMode(_:))
+        netButton.toolTip = vm.networkConfig.mode == .virtual
+            ? "Isolated: VM-to-VM only (secure)"
+            : "NAT: Internet access (less secure)"
+        // Store VM ID in identifier
+        netButton.identifier = NSUserInterfaceItemIdentifier(vm.id.uuidString)
+        containerView.addSubview(netButton)
+
         // Action buttons row (bottom)
         let buttonY: CGFloat = 6
         let buttonHeight: CGFloat = 20
-        let buttonWidth: CGFloat = 50
-        let buttonSpacing: CGFloat = 6
+        let buttonWidth: CGFloat = 56
+        let buttonSpacing: CGFloat = 4
 
         // Stop button
         let stopButton = NSButton(frame: NSRect(x: 8, y: buttonY, width: buttonWidth, height: buttonHeight))
@@ -847,7 +1140,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         stopButton.controlSize = .small
         stopButton.target = self
         stopButton.action = #selector(stopVMFromStatusBar(_:))
-        stopButton.tag = vm.id.hashValue
+        stopButton.identifier = NSUserInterfaceItemIdentifier(vm.id.uuidString)
         containerView.addSubview(stopButton)
 
         // Restart button
@@ -858,7 +1151,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         restartButton.controlSize = .small
         restartButton.target = self
         restartButton.action = #selector(restartVMFromStatusBar(_:))
-        restartButton.tag = vm.id.hashValue
+        restartButton.identifier = NSUserInterfaceItemIdentifier(vm.id.uuidString)
         containerView.addSubview(restartButton)
 
         // Pause button
@@ -869,25 +1162,79 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         pauseButton.controlSize = .small
         pauseButton.target = self
         pauseButton.action = #selector(pauseVMFromStatusBar(_:))
-        pauseButton.tag = vm.id.hashValue
+        pauseButton.identifier = NSUserInterfaceItemIdentifier(vm.id.uuidString)
         containerView.addSubview(pauseButton)
 
         return containerView
     }
 
+    private func findVMByIdentifier(_ identifier: NSUserInterfaceItemIdentifier?) -> VMConfiguration? {
+        guard let idString = identifier?.rawValue,
+              let uuid = UUID(uuidString: idString) else { return nil }
+        return vmManager.virtualMachines.first { $0.id == uuid }
+    }
+
     @objc private func stopVMFromStatusBar(_ sender: NSButton) {
-        // TODO: Implement stop VM functionality
-        print("Stop VM with hash: \(sender.tag)")
+        guard let vm = findVMByIdentifier(sender.identifier) else {
+            NSLog("[VMLibrary] Stop: VM not found")
+            return
+        }
+        NSLog("[VMLibrary] Stopping VM: \(vm.name)")
+        NotificationCenter.default.post(name: .stopVM, object: vm)
     }
 
     @objc private func restartVMFromStatusBar(_ sender: NSButton) {
-        // TODO: Implement restart VM functionality
-        print("Restart VM with hash: \(sender.tag)")
+        guard let vm = findVMByIdentifier(sender.identifier) else {
+            NSLog("[VMLibrary] Restart: VM not found")
+            return
+        }
+        NSLog("[VMLibrary] Restarting VM: \(vm.name)")
+        // Stop then start
+        NotificationCenter.default.post(name: .stopVM, object: vm)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            NotificationCenter.default.post(name: .startVM, object: vm)
+        }
     }
 
     @objc private func pauseVMFromStatusBar(_ sender: NSButton) {
-        // TODO: Implement pause VM functionality
-        print("Pause VM with hash: \(sender.tag)")
+        guard let vm = findVMByIdentifier(sender.identifier) else {
+            NSLog("[VMLibrary] Pause: VM not found")
+            return
+        }
+        NSLog("[VMLibrary] Pause/Resume VM: \(vm.name)")
+        NotificationCenter.default.post(name: .pauseVM, object: vm)
+    }
+
+    @objc private func toggleNetworkMode(_ sender: NSButton) {
+        guard var vm = findVMByIdentifier(sender.identifier) else {
+            NSLog("[VMLibrary] Toggle network: VM not found")
+            return
+        }
+
+        // Toggle network mode
+        let newMode: NetworkMode = vm.networkConfig.mode == .virtual ? .nat : .virtual
+        vm.networkConfig.mode = newMode
+
+        // Save configuration
+        do {
+            try vmManager.saveVMConfiguration(vm)
+            NSLog("[VMLibrary] Network mode changed to \(newMode) for VM: \(vm.name)")
+
+            // Show warning for NAT mode (less secure)
+            if newMode == .nat {
+                let alert = NSAlert()
+                alert.messageText = "Network Mode Changed"
+                alert.informativeText = "VM '\(vm.name)' now has NAT (internet) access.\n\nWarning: This is less secure for malware analysis. The VM can potentially reach external networks."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+
+            // Refresh the status bar to show new network state
+            refreshStatusBar()
+        } catch {
+            NSLog("[VMLibrary] Failed to save network config: \(error)")
+        }
     }
 
     // MARK: - NSWindowDelegate
@@ -934,10 +1281,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             buttonX += buttonWidth + buttonSpacing
         }
 
-        // Recalculate Active VMs panel position (right side, full height)
+        // Recalculate Active VMs panel position (right side, same height as table)
         if let panel = statusBar {
             let panelX = contentWidth - activePanelWidth - padding
-            let panelY = buttonRowHeight + padding
+            let panelY = buttonRowHeight + padding + packetPanelHeight + padding  // Same as table Y
             let panelHeight = contentHeight - panelY - padding
             panel.frame = NSRect(x: panelX, y: panelY, width: activePanelWidth, height: panelHeight)
         }
@@ -2292,17 +2639,22 @@ class NetworkTrafficView: NSView {
         let portsText = "PORTS: \(connectedPorts)"
         portsText.draw(at: CGPoint(x: statsX + 5, y: statsY + statsHeight - 74), withAttributes: valueAttrs)
 
-        // Draw source/dest labels
-        let labelAttrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 8, weight: .semibold),
+        // Draw direction arrows - properly centered on line
+        let arrowAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
             .foregroundColor: NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.8)
         ]
 
+        // Measure arrow width to center properly
+        let downArrow = NSAttributedString(string: "▼", attributes: arrowAttrs)
+        let upArrow = NSAttributedString(string: "▲", attributes: arrowAttrs)
+        let arrowSize = downArrow.size()
+
         // Top arrow (down) - centered on line
-        "▼".draw(at: CGPoint(x: lineX - 5, y: lineTop + 2), withAttributes: labelAttrs)
+        downArrow.draw(at: CGPoint(x: lineX - arrowSize.width / 2, y: lineTop + 2))
 
         // Bottom arrow (up) - centered on line
-        "▲".draw(at: CGPoint(x: lineX - 5, y: lineBottom - 15), withAttributes: labelAttrs)
+        upArrow.draw(at: CGPoint(x: lineX - arrowSize.width / 2, y: lineBottom - arrowSize.height - 2))
     }
 
     private func formatNumber(_ num: Int) -> String {
@@ -2331,6 +2683,8 @@ class NetworkTrafficView: NSView {
 extension Notification.Name {
     static let startVM = Notification.Name("startVM")
     static let startVMWithISO = Notification.Name("startVMWithISO")
+    static let stopVM = Notification.Name("stopVM")
+    static let pauseVM = Notification.Name("pauseVM")
     static let vmStatusChanged = Notification.Name("vmStatusChanged")
 }
 

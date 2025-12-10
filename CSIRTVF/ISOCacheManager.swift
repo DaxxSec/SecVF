@@ -284,21 +284,22 @@ class ISOCacheManager {
             auditLog("Creating security router VM with Kali Linux")
         }
 
-        // Check if already cached
-        if let cachedURL = getCachedImage(for: imageType) {
-            NSLog("[ISOCacheManager] Using cached image, skipping download")
-            completionHandler(.success(cachedURL))
-            return
-        }
-
         // Download based on type
         NSLog("[ISOCacheManager] Switching on imageType...")
         switch imageType {
         case .macOS(let version):
-            NSLog("[ISOCacheManager] Case is macOS, calling downloadMacOSImage...")
+            // macOS: Always go through MacOSVMInstaller which handles freshness validation
+            // It compares cached IPSW filename with Apple's latest to ensure we have current version
+            NSLog("[ISOCacheManager] Case is macOS, calling downloadMacOSImage (handles its own cache/freshness check)...")
             downloadMacOSImage(version: version, progressHandler: progressHandler, completionHandler: completionHandler)
         case .linux(let distro, let version, let isSecurityRouter):
-            NSLog("[ISOCacheManager] Case is Linux")
+            // Linux: Check cache first, download if not found
+            if let cachedURL = getCachedImage(for: imageType) {
+                NSLog("[ISOCacheManager] Using cached Linux ISO, skipping download")
+                completionHandler(.success(cachedURL))
+                return
+            }
+            NSLog("[ISOCacheManager] Case is Linux, no cache found")
             auditLog("Download requested: \(distro.rawValue) \(version) (router: \(isSecurityRouter))")
             downloadLinuxISO(distro: distro, version: version, progressHandler: progressHandler, completionHandler: completionHandler)
         }
@@ -387,12 +388,10 @@ class ISOCacheManager {
 
     private func getImagePath(for imageType: VMImageType) -> String {
         switch imageType {
-        case .macOS(let version):
-            // Format: ~/.avf/VMImages/MacOS/UniversalMac_15.6.1_2025-11-14/
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyy-MM-dd"
-            let today = dateFormatter.string(from: Date())
-            return "\(cacheRoot)MacOS/UniversalMac_\(version)_\(today)/"
+        case .macOS:
+            // macOS IPSWs are stored in ~/.avf/MacOS/ (managed by MacOSVMInstaller)
+            // MacOSVMInstaller handles freshness validation by comparing filenames with Apple's servers
+            return NSHomeDirectory() + "/.avf/MacOS/"
 
         case .linux(let distro, let version, _):
             // Format: ~/.avf/VMImages/Linux/Ubuntu-24.04/

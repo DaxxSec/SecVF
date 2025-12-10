@@ -62,6 +62,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             name: .startVMWithISO,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleStopVM(_:)),
+            name: .stopVM,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePauseVM(_:)),
+            name: .pauseVM,
+            object: nil
+        )
     }
 
     // MARK: - Notification Handlers
@@ -290,6 +304,75 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         installerISOPaths[vm.id] = iso
 
         showMainWindowAndStartVM(for: vm.id)
+    }
+
+    @objc private func handleStopVM(_ notification: Notification) {
+        guard let vm = notification.object as? VMConfiguration else { return }
+
+        NSLog("[AppDelegate] Stop VM requested: \(vm.name)")
+
+        // Find the running VZVirtualMachine for this VM
+        guard let virtualMachine = virtualMachines[vm.id] else {
+            NSLog("[AppDelegate] VM \(vm.name) is not running")
+            return
+        }
+
+        // Request graceful stop
+        virtualMachine.stop { error in
+            if let error = error {
+                NSLog("[AppDelegate] Error stopping VM \(vm.name): \(error)")
+                // If graceful stop fails, try requestStop (sends ACPI power button)
+                do {
+                    try virtualMachine.requestStop()
+                    NSLog("[AppDelegate] Sent stop request to VM \(vm.name)")
+                } catch let stopError {
+                    NSLog("[AppDelegate] Failed to request stop for VM \(vm.name): \(stopError)")
+                }
+            } else {
+                NSLog("[AppDelegate] VM \(vm.name) stopped successfully")
+            }
+        }
+    }
+
+    @objc private func handlePauseVM(_ notification: Notification) {
+        guard let vm = notification.object as? VMConfiguration else { return }
+
+        NSLog("[AppDelegate] Pause/Resume VM requested: \(vm.name)")
+
+        // Find the running VZVirtualMachine for this VM
+        guard let virtualMachine = virtualMachines[vm.id] else {
+            NSLog("[AppDelegate] VM \(vm.name) is not running")
+            return
+        }
+
+        // Toggle pause state
+        if virtualMachine.state == .paused {
+            virtualMachine.resume { result in
+                switch result {
+                case .success:
+                    NSLog("[AppDelegate] VM \(vm.name) resumed")
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: .vmStatusChanged, object: nil)
+                    }
+                case .failure(let error):
+                    NSLog("[AppDelegate] Error resuming VM \(vm.name): \(error)")
+                }
+            }
+        } else if virtualMachine.state == .running {
+            virtualMachine.pause { result in
+                switch result {
+                case .success:
+                    NSLog("[AppDelegate] VM \(vm.name) paused")
+                    DispatchQueue.main.async {
+                        NotificationCenter.default.post(name: .vmStatusChanged, object: nil)
+                    }
+                case .failure(let error):
+                    NSLog("[AppDelegate] Error pausing VM \(vm.name): \(error)")
+                }
+            }
+        } else {
+            NSLog("[AppDelegate] Cannot pause/resume VM \(vm.name) in state: \(virtualMachine.state.rawValue)")
+        }
     }
 
     private func showMainWindowAndStartVM(for vmId: UUID) {

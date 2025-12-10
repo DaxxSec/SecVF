@@ -23,6 +23,7 @@ struct CapturedPacket {
     let info: String
     let rawData: Data
     let decodedLayers: [PacketLayer]
+    let sourceVM: String  // VM name that originated this packet
 }
 
 struct PacketLayer {
@@ -261,16 +262,16 @@ class PacketCaptureManager {
     // MARK: - Packet Capture (called from VirtualNetworkSwitch)
 
     func capturePacket(_ data: Data, sourceVM: String, destVM: String) {
-        guard isCapturing, let handle = fifoWriteHandle else { return }
-
         captureQueue.async { [weak self] in
             guard let self = self else { return }
 
-            // Write packet to FIFO in pcap format
-            self.writePcapPacket(data)
-
-            // Also store raw packet for direct display if tshark parsing fails
+            // Always store raw packet for mini log display
             self.storeRawPacket(data, sourceVM: sourceVM, destVM: destVM)
+
+            // Only write to tshark FIFO if capture is running
+            if self.isCapturing, self.fifoWriteHandle != nil {
+                self.writePcapPacket(data)
+            }
         }
     }
 
@@ -380,7 +381,8 @@ class PacketCaptureManager {
             length: data.count,
             info: info,
             rawData: data,
-            decodedLayers: []
+            decodedLayers: [],
+            sourceVM: sourceVM
         )
 
         addPacket(packet)
@@ -543,7 +545,8 @@ class PacketCaptureManager {
             length: length,
             info: info,
             rawData: Data(),
-            decodedLayers: decodedLayers
+            decodedLayers: decodedLayers,
+            sourceVM: "tshark"  // Parsed from tshark, source VM unknown
         )
     }
 
@@ -592,12 +595,14 @@ class PacketCaptureManager {
             capturedPackets.removeFirst(capturedPackets.count - maxPackets)
         }
 
-        // Notify observers
-        NotificationCenter.default.post(
-            name: .packetCaptured,
-            object: nil,
-            userInfo: ["packet": packet]
-        )
+        // Notify observers on main thread for reliable UI updates
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                name: .packetCaptured,
+                object: nil,
+                userInfo: ["packet": packet]
+            )
+        }
     }
 
     private func updateProtocolStats(_ proto: String, bytes: Int) {
@@ -609,7 +614,10 @@ class PacketCaptureManager {
             protocolCounts[proto] = ProtocolCount(protocol: proto, count: 1, bytes: bytes)
         }
 
-        NotificationCenter.default.post(name: .protocolStatsUpdated, object: nil)
+        // Notify on main thread for reliable UI updates
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .protocolStatsUpdated, object: nil)
+        }
     }
 
     // MARK: - Data Access
