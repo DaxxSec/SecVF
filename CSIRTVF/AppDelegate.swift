@@ -956,8 +956,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             """
             NSLog("%@", errorMsg)
 
-            // Write to debug file
-            let debugPath = "/tmp/claude/secvf-crash-debug.txt"
+            // Write to secure debug file (user-only permissions)
+            let logsDir = NSHomeDirectory() + "/.avf/logs/"
+            try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            let debugPath = logsDir + "secvf-crash-debug.txt"
             try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
 
             fatalError("VM configuration validation failed: \(error)")
@@ -1059,8 +1062,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     """
                     NSLog("%@", errorMsg)
 
-                    // Write to debug file
-                    let debugPath = "/tmp/claude/secvf-crash-debug.txt"
+                    // Write to secure debug file (user-only permissions)
+                    let logsDir = NSHomeDirectory() + "/.avf/logs/"
+                    try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
+                                                            attributes: [.posixPermissions: 0o700])
+                    let debugPath = logsDir + "secvf-crash-debug.txt"
                     try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
 
                     fatalError("Virtual machine failed to start with error: \(error)")
