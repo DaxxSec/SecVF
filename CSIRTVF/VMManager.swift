@@ -523,8 +523,12 @@ class VMManager {
             virtualMachines[index].status = status
             print("Updated VM '\(vmConfig.name)' status to: \(virtualMachines[index].statusDisplayString)")
 
-            // Post notification so library window can refresh
-            NotificationCenter.default.post(name: .vmStatusChanged, object: virtualMachines[index])
+            // Post notification on main thread to ensure UI observers run consistently
+            // (delegate callbacks may come from background threads)
+            let updatedVM = virtualMachines[index]
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .vmStatusChanged, object: updatedVM)
+            }
         }
     }
 

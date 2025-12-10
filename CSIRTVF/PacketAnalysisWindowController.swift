@@ -120,15 +120,92 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         autoScrollCheckbox.contentTintColor = NSColor.white
         toolbarView.addSubview(autoScrollCheckbox)
 
-        // Row 2: Filter
+        // Row 2: Filter with preset dropdown
         let filterLabel = NSTextField(labelWithString: "Filter:")
         filterLabel.frame = NSRect(x: 15, y: 10, width: 45, height: 24)
         filterLabel.textColor = NSColor.white
         filterLabel.font = NSFont.systemFont(ofSize: 12)
         toolbarView.addSubview(filterLabel)
 
-        filterTextField = NSTextField(frame: NSRect(x: 65, y: 10, width: width - 180, height: 24))
-        filterTextField.placeholderString = "e.g., tcp, udp, ip.addr == 10.0.100.1, tcp.port == 80"
+        // Preset filters popup - MALWARE ANALYSIS FOCUSED
+        let presetPopup = NSPopUpButton(frame: NSRect(x: 60, y: 10, width: 180, height: 24), pullsDown: true)
+        presetPopup.font = NSFont.systemFont(ofSize: 10)
+        presetPopup.addItem(withTitle: "⚡ Malware Analysis Filters")
+        presetPopup.menu?.addItem(NSMenuItem.separator())
+
+        // === C2 (Command & Control) Detection ===
+        let c2Header = NSMenuItem(title: "── C2 DETECTION ──", action: nil, keyEquivalent: "")
+        c2Header.isEnabled = false
+        presetPopup.menu?.addItem(c2Header)
+
+        presetPopup.addItem(withTitle: "Non-Apple DNS (Suspicious)")
+        presetPopup.addItem(withTitle: "Direct IP Connections (No DNS)")
+        presetPopup.addItem(withTitle: "Suspicious TLDs (.tk/.ml/.ga/.cf)")
+        presetPopup.addItem(withTitle: "Non-Browser HTTP (curl/wget/python)")
+        presetPopup.addItem(withTitle: "Non-Standard Ports")
+        presetPopup.addItem(withTitle: "Short TCP Connections (Beacon)")
+
+        // === Data Exfiltration ===
+        presetPopup.menu?.addItem(NSMenuItem.separator())
+        let exfilHeader = NSMenuItem(title: "── DATA EXFIL ──", action: nil, keyEquivalent: "")
+        exfilHeader.isEnabled = false
+        presetPopup.menu?.addItem(exfilHeader)
+
+        presetPopup.addItem(withTitle: "DNS Tunneling (Long Queries)")
+        presetPopup.addItem(withTitle: "Large Outbound Transfers")
+        presetPopup.addItem(withTitle: "ICMP with Payload (Covert Channel)")
+        presetPopup.addItem(withTitle: "Base64 in HTTP")
+
+        // === Encrypted Traffic ===
+        presetPopup.menu?.addItem(NSMenuItem.separator())
+        let tlsHeader = NSMenuItem(title: "── TLS ANALYSIS ──", action: nil, keyEquivalent: "")
+        tlsHeader.isEnabled = false
+        presetPopup.menu?.addItem(tlsHeader)
+
+        presetPopup.addItem(withTitle: "TLS Handshakes Only")
+        presetPopup.addItem(withTitle: "Self-Signed Certificates")
+        presetPopup.addItem(withTitle: "TLS Without SNI (Hidden Dest)")
+        presetPopup.addItem(withTitle: "Certificate Exchange")
+
+        // === Network Recon ===
+        presetPopup.menu?.addItem(NSMenuItem.separator())
+        let reconHeader = NSMenuItem(title: "── RECON & SCANNING ──", action: nil, keyEquivalent: "")
+        reconHeader.isEnabled = false
+        presetPopup.menu?.addItem(reconHeader)
+
+        presetPopup.addItem(withTitle: "Port Scanning (SYN Flood)")
+        presetPopup.addItem(withTitle: "ARP Requests (Host Discovery)")
+        presetPopup.addItem(withTitle: "ICMP Echo (Ping Sweep)")
+        presetPopup.addItem(withTitle: "SMB Enumeration")
+
+        // === Lateral Movement ===
+        presetPopup.menu?.addItem(NSMenuItem.separator())
+        let lateralHeader = NSMenuItem(title: "── LATERAL MOVEMENT ──", action: nil, keyEquivalent: "")
+        lateralHeader.isEnabled = false
+        presetPopup.menu?.addItem(lateralHeader)
+
+        presetPopup.addItem(withTitle: "SSH Traffic")
+        presetPopup.addItem(withTitle: "Remote Desktop (RDP/VNC)")
+        presetPopup.addItem(withTitle: "File Sharing (SMB/AFP)")
+
+        // === Protocol Specific ===
+        presetPopup.menu?.addItem(NSMenuItem.separator())
+        let protoHeader = NSMenuItem(title: "── PROTOCOLS ──", action: nil, keyEquivalent: "")
+        protoHeader.isEnabled = false
+        presetPopup.menu?.addItem(protoHeader)
+
+        presetPopup.addItem(withTitle: "All DNS Traffic")
+        presetPopup.addItem(withTitle: "All HTTP/HTTPS")
+        presetPopup.addItem(withTitle: "All TCP")
+        presetPopup.addItem(withTitle: "All UDP")
+        presetPopup.addItem(withTitle: "All ARP")
+
+        presetPopup.target = self
+        presetPopup.action = #selector(presetFilterSelected(_:))
+        toolbarView.addSubview(presetPopup)
+
+        filterTextField = NSTextField(frame: NSRect(x: 250, y: 10, width: width - 365, height: 24))
+        filterTextField.placeholderString = "Custom filter or select preset →"
         filterTextField.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         filterTextField.target = self
         filterTextField.action = #selector(applyFilter(_:))
@@ -359,6 +436,81 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         }
     }
 
+    @objc private func presetFilterSelected(_ sender: NSPopUpButton) {
+        guard let selectedTitle = sender.selectedItem?.title else { return }
+
+        // Map menu titles to actual filter expressions
+        // These are protocol-based filters that work with our basic packet parsing
+        let filterMap: [String: String] = [
+            // C2 Detection
+            "Non-Apple DNS (Suspicious)": "dns and not apple and not icloud",
+            "Direct IP Connections (No DNS)": "tcp and not dns and not arp",
+            "Suspicious TLDs (.tk/.ml/.ga/.cf)": "dns and (tk or ml or ga or cf or gq)",
+            "Non-Browser HTTP (curl/wget/python)": "http",
+            "Non-Standard Ports": "tcp and not 80 and not 443 and not 22 and not 53",
+            "Short TCP Connections (Beacon)": "tcp",
+
+            // Data Exfiltration
+            "DNS Tunneling (Long Queries)": "dns",
+            "Large Outbound Transfers": "tcp",
+            "ICMP with Payload (Covert Channel)": "icmp",
+            "Base64 in HTTP": "http",
+
+            // TLS Analysis
+            "TLS Handshakes Only": "tls or ssl",
+            "Self-Signed Certificates": "tls or ssl",
+            "TLS Without SNI (Hidden Dest)": "tls or ssl",
+            "Certificate Exchange": "tls or ssl",
+
+            // Recon & Scanning
+            "Port Scanning (SYN Flood)": "tcp",
+            "ARP Requests (Host Discovery)": "arp",
+            "ICMP Echo (Ping Sweep)": "icmp",
+            "SMB Enumeration": "smb or tcp 445 or tcp 139",
+
+            // Lateral Movement
+            "SSH Traffic": "tcp 22 or ssh",
+            "Remote Desktop (RDP/VNC)": "tcp 3389 or tcp 5900 or tcp 5901",
+            "File Sharing (SMB/AFP)": "smb or afp or tcp 445 or tcp 548",
+
+            // Protocols
+            "All DNS Traffic": "dns",
+            "All HTTP/HTTPS": "http or https or tcp 80 or tcp 443",
+            "All TCP": "tcp",
+            "All UDP": "udp",
+            "All ARP": "arp"
+        ]
+
+        if let filter = filterMap[selectedTitle] {
+            filterTextField.stringValue = filter
+            currentFilter = filter.lowercased()
+            reloadPackets()
+            updateStatus()
+
+            // Show info about what this filter detects
+            showFilterInfo(for: selectedTitle)
+        }
+    }
+
+    private func showFilterInfo(for filterName: String) {
+        let infoMap: [String: String] = [
+            "Non-Apple DNS (Suspicious)": "DNS queries NOT to Apple/iCloud - potential C2 communication",
+            "Direct IP Connections (No DNS)": "TCP to raw IPs without DNS lookup - malware often does this",
+            "Suspicious TLDs (.tk/.ml/.ga/.cf)": "Free TLDs commonly used by malware for C2 domains",
+            "Non-Browser HTTP (curl/wget/python)": "HTTP from non-browser tools - may be scripted malware",
+            "DNS Tunneling (Long Queries)": "Unusually long DNS names may hide exfiltrated data",
+            "ARP Requests (Host Discovery)": "ARP requests can indicate network reconnaissance",
+            "Port Scanning (SYN Flood)": "Multiple SYN packets to different ports = scanning",
+            "ICMP with Payload (Covert Channel)": "ICMP with data payload may be covert channel",
+            "TLS Without SNI (Hidden Dest)": "TLS without Server Name Indication hides destination",
+            "SSH Traffic": "SSH can be used for tunneling and lateral movement"
+        ]
+
+        if let info = infoMap[filterName] {
+            NSLog("[PacketAnalysis] Filter applied: \(filterName) - \(info)")
+        }
+    }
+
     @objc private func applyFilter(_ sender: Any) {
         currentFilter = filterTextField.stringValue.lowercased().trimmingCharacters(in: .whitespaces)
         reloadPackets()
@@ -405,35 +557,86 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     private func passesFilter(_ packet: CapturedPacket) -> Bool {
         guard !currentFilter.isEmpty else { return true }
 
-        let filter = currentFilter
+        let filter = currentFilter.lowercased()
+        let proto = packet.protocol.lowercased()
+        let info = packet.info.lowercased()
 
-        // Simple protocol filter
-        if filter == "tcp" && packet.protocol.lowercased() != "tcp" { return false }
-        if filter == "udp" && packet.protocol.lowercased() != "udp" { return false }
-        if filter == "icmp" && packet.protocol.lowercased() != "icmp" { return false }
-        if filter == "arp" && packet.protocol.lowercased() != "arp" { return false }
-        if filter == "dns" && packet.protocol.lowercased() != "dns" { return false }
-        if filter == "http" && !["http", "https"].contains(packet.protocol.lowercased()) { return false }
+        // Handle "or" expressions - any term matching means pass
+        if filter.contains(" or ") {
+            let terms = filter.components(separatedBy: " or ")
+            for term in terms {
+                if matchesSingleTerm(packet, term: term.trimmingCharacters(in: .whitespaces)) {
+                    return true
+                }
+            }
+            return false
+        }
 
-        // IP address filter (simple implementation)
-        if filter.contains("ip.addr") {
-            if let ipMatch = filter.components(separatedBy: "==").last?.trimmingCharacters(in: .whitespaces) {
-                if packet.sourceIP != ipMatch && packet.destIP != ipMatch {
+        // Handle "and" expressions - all terms must match
+        if filter.contains(" and ") {
+            let terms = filter.components(separatedBy: " and ")
+            for term in terms {
+                if !matchesSingleTerm(packet, term: term.trimmingCharacters(in: .whitespaces)) {
                     return false
                 }
             }
+            return true
         }
 
-        // Port filter (simple implementation)
-        if filter.contains("port") {
-            if let portMatch = filter.components(separatedBy: "==").last?.trimmingCharacters(in: .whitespaces) {
-                if !packet.info.contains(portMatch) {
-                    return false
-                }
+        // Single term filter
+        return matchesSingleTerm(packet, term: filter)
+    }
+
+    private func matchesSingleTerm(_ packet: CapturedPacket, term: String) -> Bool {
+        let proto = packet.protocol.lowercased()
+        let info = packet.info.lowercased()
+
+        // Protocol filters
+        if term == "tcp" { return proto == "tcp" }
+        if term == "udp" { return proto == "udp" }
+        if term == "icmp" { return proto == "icmp" }
+        if term == "arp" { return proto == "arp" }
+        if term == "dns" { return proto == "dns" }
+        if term == "http" { return proto == "http" || info.contains("http") }
+        if term == "https" { return proto == "https" || info.contains("https") || info.contains(":443") }
+        if term == "ipv6" { return proto == "ipv6" }
+        if term == "ssh" { return info.contains(":22") || info.contains("ssh") }
+        if term == "smb" { return info.contains(":445") || info.contains("smb") }
+        if term == "afp" { return info.contains(":548") || info.contains("afp") }
+
+        // Port filters: "tcp 80", "tcp 443", "port 22"
+        if term.hasPrefix("tcp ") {
+            let port = term.replacingOccurrences(of: "tcp ", with: "")
+            return proto == "tcp" && (info.contains(":\(port)") || info.contains("→\(port)") || info.contains("->\(port)"))
+        }
+        if term.hasPrefix("udp ") {
+            let port = term.replacingOccurrences(of: "udp ", with: "")
+            return proto == "udp" && (info.contains(":\(port)") || info.contains("→\(port)") || info.contains("->\(port)"))
+        }
+        if term.hasPrefix("port ") {
+            let port = term.replacingOccurrences(of: "port ", with: "")
+            return info.contains(":\(port)") || info.contains("→\(port)") || info.contains("->\(port)")
+        }
+
+        // IP address filter
+        if term.contains("ip.addr") {
+            if let ipMatch = term.components(separatedBy: "==").last?.trimmingCharacters(in: .whitespaces) {
+                return packet.sourceIP == ipMatch || packet.destIP == ipMatch
             }
         }
 
-        return true
+        // "not" prefix for exclusion
+        if term.hasPrefix("not ") {
+            let innerTerm = String(term.dropFirst(4))
+            return !matchesSingleTerm(packet, term: innerTerm)
+        }
+
+        // Text search in info field
+        if info.contains(term) || proto.contains(term) {
+            return true
+        }
+
+        return false
     }
 
     // MARK: - UI Updates
