@@ -6,6 +6,69 @@ class ScriptsUSBManager {
 
     static let shared = ScriptsUSBManager()
 
+    // MARK: - Security: Path Sanitization
+
+    /// SECURITY: Validate and sanitize a file path before passing to external processes
+    /// Prevents path injection attacks via special characters or path traversal
+    private func sanitizePath(_ path: String) -> String? {
+        // Normalize the path first
+        let normalized = (path as NSString).standardizingPath
+
+        // Check for path traversal attempts
+        if normalized.contains("..") {
+            NSLog("[ScriptsUSB] SECURITY: Path traversal attempt detected in: %@", path)
+            return nil
+        }
+
+        // Only allow safe characters: alphanumeric, slash, dash, underscore, dot, space
+        // This prevents shell injection via backticks, $(), semicolons, etc.
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/_-. "))
+        for scalar in normalized.unicodeScalars {
+            if !allowedCharacters.contains(scalar) {
+                NSLog("[ScriptsUSB] SECURITY: Disallowed character '%@' (U+%04X) in path: %@",
+                      String(scalar), scalar.value, path)
+                return nil
+            }
+        }
+
+        // Ensure path doesn't start with a dash (could be interpreted as option)
+        if normalized.hasPrefix("-") {
+            NSLog("[ScriptsUSB] SECURITY: Path starts with dash (option injection): %@", path)
+            return nil
+        }
+
+        // Verify the path exists and is a directory (for source directories)
+        // Note: This is optional - caller may want to validate this themselves
+
+        return normalized
+    }
+
+    /// SECURITY: Validate a path is within expected boundaries
+    private func isPathWithinAllowedDirectories(_ path: String) -> Bool {
+        let normalized = (path as NSString).standardizingPath
+        let homeDir = NSHomeDirectory()
+
+        // Allow paths within:
+        // 1. User's home directory
+        // 2. App bundle
+        // 3. /tmp (for temporary operations)
+        let allowedPrefixes = [
+            homeDir,
+            Bundle.main.bundlePath,
+            "/tmp/",
+            "/private/tmp/"
+        ]
+
+        for prefix in allowedPrefixes {
+            if normalized.hasPrefix(prefix) {
+                return true
+            }
+        }
+
+        NSLog("[ScriptsUSB] SECURITY: Path outside allowed directories: %@", path)
+        return false
+    }
+
     private let scriptsDiskPath: String      // Writable disk image for Linux
     private let scriptsISOPath: String       // Read-only ISO for macOS
     private let scriptsStagingPath: String
@@ -53,10 +116,21 @@ class ScriptsUSBManager {
     /// Create or update the writable scripts disk image (for Linux VMs)
     /// Returns the URL of the created disk image, or nil on failure
     func createScriptsDisk(from scriptsDirectory: String? = nil) -> URL? {
-        let sourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
+        let rawSourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
 
-        guard let sourceDir = sourceDir else {
+        guard let rawSourceDir = rawSourceDir else {
             NSLog("[ScriptsUSB] ERROR: Could not find scripts source directory")
+            return nil
+        }
+
+        // SECURITY: Sanitize and validate the source directory path
+        guard let sourceDir = sanitizePath(rawSourceDir) else {
+            NSLog("[ScriptsUSB] SECURITY: Source directory path failed sanitization: %@", rawSourceDir)
+            return nil
+        }
+
+        guard isPathWithinAllowedDirectories(sourceDir) else {
+            NSLog("[ScriptsUSB] SECURITY: Source directory outside allowed paths: %@", sourceDir)
             return nil
         }
 
@@ -231,10 +305,21 @@ class ScriptsUSBManager {
     /// Create or update the scripts ISO (for macOS VMs - read-only is fine)
     /// Returns the URL of the created ISO, or nil on failure
     func createScriptsISO(from scriptsDirectory: String? = nil) -> URL? {
-        let sourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
+        let rawSourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
 
-        guard let sourceDir = sourceDir else {
+        guard let rawSourceDir = rawSourceDir else {
             NSLog("[ScriptsUSB] ERROR: Could not find scripts source directory")
+            return nil
+        }
+
+        // SECURITY: Sanitize and validate the source directory path
+        guard let sourceDir = sanitizePath(rawSourceDir) else {
+            NSLog("[ScriptsUSB] SECURITY: Source directory path failed sanitization: %@", rawSourceDir)
+            return nil
+        }
+
+        guard isPathWithinAllowedDirectories(sourceDir) else {
+            NSLog("[ScriptsUSB] SECURITY: Source directory outside allowed paths: %@", sourceDir)
             return nil
         }
 

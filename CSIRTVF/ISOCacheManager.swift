@@ -269,6 +269,29 @@ class ISOCacheManager {
     ) {
         NSLog("[ISOCacheManager] downloadImage() called")
 
+        // SECURITY: Verify caller is legitimate (main app, not external process)
+        guard verifyCallerIsMainApp() else {
+            let error = NSError(
+                domain: "ISOCacheManager",
+                code: 300,
+                userInfo: [NSLocalizedDescriptionKey: "SECURITY: Download request rejected - invalid caller context"]
+            )
+            auditLog("SECURITY ALERT: Download rejected - failed caller verification")
+            completionHandler(.failure(error))
+            return
+        }
+
+        // SECURITY: Rate limiting to prevent abuse
+        guard checkRateLimit() else {
+            let error = NSError(
+                domain: "ISOCacheManager",
+                code: 301,
+                userInfo: [NSLocalizedDescriptionKey: "SECURITY: Download rate limit exceeded - please wait before retrying"]
+            )
+            completionHandler(.failure(error))
+            return
+        }
+
         // SECURITY: Enforce Kali Linux for security router VMs
         if case .linux(let distro, _, let isSecurityRouter) = imageType, isSecurityRouter {
             guard distro == .kali else {
@@ -689,9 +712,23 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
                     }
                 }
             } else {
-                // No checksum verification needed
-                progressHandler?(1.0, "Download complete!")
-                print("[Cache] Successfully cached \(distro.rawValue) ISO")
+                // SECURITY WARNING: Placeholder checksum - cannot verify file integrity
+                let warningMsg = "WARNING: SHA256 checksum not available for \(distro.rawValue) - file integrity unverified"
+                print("[SECURITY] \(warningMsg)")
+
+                // Log to audit trail
+                let timestamp = ISO8601DateFormatter().string(from: Date())
+                let auditEntry = "[\(timestamp)] SECURITY WARNING: Downloaded \(distro.rawValue) ISO without checksum verification (placeholder checksum)\n"
+                let auditPath = NSHomeDirectory() + "/.avf/logs/iso-cache-audit.log"
+                if let data = auditEntry.data(using: .utf8),
+                   let handle = FileHandle(forWritingAtPath: auditPath) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+
+                progressHandler?(1.0, "⚠️ Download complete (checksum not verified)")
+                print("[Cache] Successfully cached \(distro.rawValue) ISO (UNVERIFIED)")
 
                 // Clear the delegate reference
                 isoManager.activeISODelegate = nil
