@@ -31,11 +31,53 @@ struct DistroConfiguration: Codable, Identifiable {
     /// Official download URL (must be HTTPS from approved domain)
     let downloadURL: String
 
-    /// SHA256 checksum for integrity verification
+    /// SHA256 checksum for integrity verification (fallback if dynamic fetch fails)
     let sha256Checksum: String
 
     /// Maximum expected file size in GB (for DoS protection)
     let expectedMaxSizeGB: Double
+
+    /// URL to fetch current SHA256 checksum from official source (optional)
+    /// If provided, checksum will be fetched dynamically at download time
+    let checksumURL: String?
+
+    /// Format of the checksum file (defaults to sha256sums if not specified)
+    let checksumFormat: ChecksumFileFormat?
+
+    /// Coding keys to handle optional fields with defaults
+    enum CodingKeys: String, CodingKey {
+        case id, displayName, version, releaseDate, downloadURL
+        case sha256Checksum, expectedMaxSizeGB, checksumURL, checksumFormat
+    }
+
+    /// Custom decoder to handle optional fields
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        version = try container.decode(String.self, forKey: .version)
+        releaseDate = try container.decode(String.self, forKey: .releaseDate)
+        downloadURL = try container.decode(String.self, forKey: .downloadURL)
+        sha256Checksum = try container.decode(String.self, forKey: .sha256Checksum)
+        expectedMaxSizeGB = try container.decode(Double.self, forKey: .expectedMaxSizeGB)
+        checksumURL = try container.decodeIfPresent(String.self, forKey: .checksumURL)
+        checksumFormat = try container.decodeIfPresent(ChecksumFileFormat.self, forKey: .checksumFormat)
+    }
+
+    /// Manual initializer for hardcoded defaults
+    init(id: String, displayName: String, version: String, releaseDate: String,
+         downloadURL: String, sha256Checksum: String, expectedMaxSizeGB: Double,
+         checksumURL: String? = nil, checksumFormat: ChecksumFileFormat? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.version = version
+        self.releaseDate = releaseDate
+        self.downloadURL = downloadURL
+        self.sha256Checksum = sha256Checksum
+        self.expectedMaxSizeGB = expectedMaxSizeGB
+        self.checksumURL = checksumURL
+        self.checksumFormat = checksumFormat
+    }
 
     /// Parsed release date
     var releaseDateParsed: Date {
@@ -43,6 +85,11 @@ struct DistroConfiguration: Codable, Identifiable {
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")
         return formatter.date(from: releaseDate) ?? Date.distantPast
+    }
+
+    /// Get the ISO filename from the download URL
+    var isoFilename: String {
+        return URL(string: downloadURL)?.lastPathComponent ?? ""
     }
 }
 

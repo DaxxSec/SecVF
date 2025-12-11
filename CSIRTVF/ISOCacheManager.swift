@@ -545,6 +545,7 @@ class ISOCacheManager {
         delegate.completionHandler = completionHandler
         delegate.destinationURL = destinationURL
         delegate.distro = distro
+        delegate.distroConfig = DistroConfigurationManager.shared.configuration(for: distro)
         delegate.isoManager = self
 
         // Store delegate to keep it alive during download
@@ -698,6 +699,7 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
     var completionHandler: ((Result<URL, Error>) -> Void)?
     var destinationURL: URL?
     var distro: LinuxDistro?
+    var distroConfig: DistroConfiguration?  // For dynamic checksum fetching
     var isoManager: ISOCacheManager?
     var progressTimer: Timer?
     var downloadTask: URLSessionDownloadTask?
@@ -744,72 +746,111 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
             }
             try FileManager.default.moveItem(at: location, to: destinationURL)
 
-            // SECURITY: Verify SHA256 checksum (when not placeholder)
-            if !distro.sha256Checksum.hasPrefix("PLACEHOLDER") {
-                progressHandler?(0.86, "Download complete - Verifying checksum...")
-                print("[Cache] Verifying SHA256 checksum...")
+            // SECURITY: Verify SHA256 checksum
+            // First try dynamic fetch from official source, fall back to static checksum
+            progressHandler?(0.86, "Fetching checksum from official source...")
 
-                // Show periodic progress updates during verification
-                var verificationProgress = 0.86
-                let updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-                    verificationProgress += 0.01
-                    if verificationProgress <= 0.98 {
-                        self?.progressHandler?(verificationProgress, "Verifying checksum (this may take 10-30 seconds)...")
-                    }
-                }
-                RunLoop.main.add(updateTimer, forMode: .common)
+            // Check if we have a checksumURL for dynamic fetching
+            if let config = distroConfig,
+               let checksumURL = config.checksumURL,
+               !checksumURL.isEmpty {
+                // Dynamic checksum fetch
+                let format = config.checksumFormat ?? .sha256sums
+                let filename = config.isoFilename
 
-                // Run SHA256 verification on background thread (CPU-intensive for large files)
-                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                    let isValid = isoManager.verifySHA256(file: destinationURL, expectedHash: distro.sha256Checksum)
+                print("[Cache] Fetching checksum dynamically from: \(checksumURL)")
 
-                    DispatchQueue.main.async {
-                        updateTimer.invalidate()
+                ChecksumFetcher.shared.fetchChecksum(
+                    distroID: config.id,
+                    checksumURL: checksumURL,
+                    format: format,
+                    isoFilename: filename
+                ) { [weak self] result in
+                    switch result {
+                    case .success(let checksum, _):
+                        print("[Cache] Dynamic checksum fetched: \(checksum.prefix(16))...")
+                        self?.verifyAndComplete(
+                            destinationURL: destinationURL,
+                            expectedHash: checksum,
+                            distro: distro,
+                            isoManager: isoManager,
+                            checksumSource: "official source"
+                        )
 
-                        if !isValid {
-                            let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [NSLocalizedDescriptionKey: "SECURITY: SHA256 checksum verification failed - file may be corrupted or tampered"])
-                            try? FileManager.default.removeItem(at: destinationURL)
+                    case .notFound(let reason):
+                        // Fall back to static checksum if available and not placeholder
+                        print("[Cache] Dynamic fetch failed (\(reason)), trying static checksum...")
+                        let staticChecksum = distro.sha256Checksum
 
-                            // Clear the delegate reference
-                            isoManager.activeISODelegate = nil
-
-                            self?.completionHandler?(.failure(error))
-                            return
+                        if !staticChecksum.hasPrefix("PLACEHOLDER") && !staticChecksum.hasPrefix("FETCH_") {
+                            self?.verifyAndComplete(
+                                destinationURL: destinationURL,
+                                expectedHash: staticChecksum,
+                                distro: distro,
+                                isoManager: isoManager,
+                                checksumSource: "static fallback"
+                            )
+                        } else {
+                            // No valid checksum available
+                            self?.completeWithoutVerification(
+                                destinationURL: destinationURL,
+                                distro: distro,
+                                isoManager: isoManager,
+                                reason: "dynamic fetch failed and no static checksum"
+                            )
                         }
 
-                        print("[Cache] ✓ SHA256 verification passed")
-                        self?.progressHandler?(1.0, "Checksum verified - Complete!")
-                        print("[Cache] Successfully cached \(distro.rawValue) ISO")
+                    case .networkError(let error):
+                        // Fall back to static checksum if available and not placeholder
+                        print("[Cache] Dynamic fetch network error (\(error.localizedDescription)), trying static checksum...")
+                        let staticChecksum = distro.sha256Checksum
 
-                        // Clear the delegate reference
-                        isoManager.activeISODelegate = nil
+                        if !staticChecksum.hasPrefix("PLACEHOLDER") && !staticChecksum.hasPrefix("FETCH_") {
+                            self?.verifyAndComplete(
+                                destinationURL: destinationURL,
+                                expectedHash: staticChecksum,
+                                distro: distro,
+                                isoManager: isoManager,
+                                checksumSource: "static fallback"
+                            )
+                        } else {
+                            // No valid checksum available
+                            self?.completeWithoutVerification(
+                                destinationURL: destinationURL,
+                                distro: distro,
+                                isoManager: isoManager,
+                                reason: "dynamic fetch failed and no static checksum"
+                            )
+                        }
 
-                        self?.completionHandler?(.success(destinationURL))
+                    case .securityError(let msg):
+                        print("[Cache] SECURITY: Checksum fetch rejected - \(msg)")
+                        self?.completeWithoutVerification(
+                            destinationURL: destinationURL,
+                            distro: distro,
+                            isoManager: isoManager,
+                            reason: "security error: \(msg)"
+                        )
                     }
                 }
+            } else if !distro.sha256Checksum.hasPrefix("PLACEHOLDER") && !distro.sha256Checksum.hasPrefix("FETCH_") {
+                // No dynamic URL, but have static checksum
+                print("[Cache] Using static checksum (no checksumURL configured)")
+                verifyAndComplete(
+                    destinationURL: destinationURL,
+                    expectedHash: distro.sha256Checksum,
+                    distro: distro,
+                    isoManager: isoManager,
+                    checksumSource: "static config"
+                )
             } else {
-                // SECURITY WARNING: Placeholder checksum - cannot verify file integrity
-                let warningMsg = "WARNING: SHA256 checksum not available for \(distro.rawValue) - file integrity unverified"
-                print("[SECURITY] \(warningMsg)")
-
-                // Log to audit trail
-                let timestamp = ISO8601DateFormatter().string(from: Date())
-                let auditEntry = "[\(timestamp)] SECURITY WARNING: Downloaded \(distro.rawValue) ISO without checksum verification (placeholder checksum)\n"
-                let auditPath = NSHomeDirectory() + "/.avf/logs/iso-cache-audit.log"
-                if let data = auditEntry.data(using: .utf8),
-                   let handle = FileHandle(forWritingAtPath: auditPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-
-                progressHandler?(1.0, "⚠️ Download complete (checksum not verified)")
-                print("[Cache] Successfully cached \(distro.rawValue) ISO (UNVERIFIED)")
-
-                // Clear the delegate reference
-                isoManager.activeISODelegate = nil
-
-                completionHandler?(.success(destinationURL))
+                // No checksum available at all
+                completeWithoutVerification(
+                    destinationURL: destinationURL,
+                    distro: distro,
+                    isoManager: isoManager,
+                    reason: "no checksum configured"
+                )
             }
         } catch {
             print("[Cache] Failed to move ISO: \(error)")
@@ -835,5 +876,93 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
 
             completionHandler?(.failure(error))
         }
+    }
+
+    // MARK: - Verification Helpers
+
+    /// Verify checksum and complete download
+    private func verifyAndComplete(
+        destinationURL: URL,
+        expectedHash: String,
+        distro: LinuxDistro,
+        isoManager: ISOCacheManager,
+        checksumSource: String
+    ) {
+        progressHandler?(0.88, "Verifying checksum (\(checksumSource))...")
+        print("[Cache] Verifying SHA256 checksum from \(checksumSource)...")
+
+        // Show periodic progress updates during verification
+        var verificationProgress = 0.88
+        let updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            verificationProgress += 0.01
+            if verificationProgress <= 0.98 {
+                self?.progressHandler?(verificationProgress, "Verifying checksum (this may take 10-30 seconds)...")
+            }
+        }
+        RunLoop.main.add(updateTimer, forMode: .common)
+
+        // Run SHA256 verification on background thread (CPU-intensive for large files)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let isValid = isoManager.verifySHA256(file: destinationURL, expectedHash: expectedHash)
+
+            DispatchQueue.main.async {
+                updateTimer.invalidate()
+
+                if !isValid {
+                    let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [
+                        NSLocalizedDescriptionKey: "SECURITY: SHA256 checksum verification failed - file may be corrupted or tampered"
+                    ])
+                    try? FileManager.default.removeItem(at: destinationURL)
+
+                    // Clear the delegate reference
+                    isoManager.activeISODelegate = nil
+
+                    self?.completionHandler?(.failure(error))
+                    return
+                }
+
+                print("[Cache] ✓ SHA256 verification passed (source: \(checksumSource))")
+                self?.progressHandler?(1.0, "Checksum verified - Complete!")
+                print("[Cache] Successfully cached \(distro.rawValue) ISO")
+
+                // Clear the delegate reference
+                isoManager.activeISODelegate = nil
+
+                self?.completionHandler?(.success(destinationURL))
+            }
+        }
+    }
+
+    /// Complete download without checksum verification (with warning)
+    private func completeWithoutVerification(
+        destinationURL: URL,
+        distro: LinuxDistro,
+        isoManager: ISOCacheManager,
+        reason: String
+    ) {
+        let warningMsg = "WARNING: SHA256 checksum not verified for \(distro.rawValue) (\(reason))"
+        print("[SECURITY] \(warningMsg)")
+
+        // Log to audit trail
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let auditEntry = "[\(timestamp)] SECURITY WARNING: Downloaded \(distro.rawValue) ISO without checksum verification (\(reason))\n"
+        let auditPath = NSHomeDirectory() + "/.avf/logs/iso-cache-audit.log"
+        if let data = auditEntry.data(using: .utf8) {
+            if let handle = FileHandle(forWritingAtPath: auditPath) {
+                handle.seekToEndOfFile()
+                handle.write(data)
+                handle.closeFile()
+            } else {
+                try? data.write(to: URL(fileURLWithPath: auditPath))
+            }
+        }
+
+        progressHandler?(1.0, "⚠️ Download complete (checksum not verified)")
+        print("[Cache] Successfully cached \(distro.rawValue) ISO (UNVERIFIED)")
+
+        // Clear the delegate reference
+        isoManager.activeISODelegate = nil
+
+        completionHandler?(.success(destinationURL))
     }
 }
