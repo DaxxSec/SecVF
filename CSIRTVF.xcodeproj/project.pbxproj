@@ -43,6 +43,9 @@
 		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
 		NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
+		NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */; };
+		NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTNM001NTNM001NTNM001001 /* NotificationNames.swift */; };
+		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -99,6 +102,9 @@
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroConfiguration.swift; sourceTree = "<group>"; };
 		DSTJ001DSTJ001DSTJ001001 /* distros.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = distros.json; sourceTree = "<group>"; };
+		NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTrafficView.swift; sourceTree = "<group>"; };
+		NTNM001NTNM001NTNM001001 /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
+		UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTTypeExtensions.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -161,7 +167,10 @@
 				DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */,
 				LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */,
 				NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */,
+				NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */,
+				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
+				UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */,
 				PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */,
 				8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */,
 				8FDC7765280E2517002AA4ED /* Info.plist */,
@@ -344,6 +353,9 @@
 				DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */,
 				LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */,
 				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
+				NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */,
+				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
+				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
 				PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */,
 				VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */,
