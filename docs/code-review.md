@@ -1,17 +1,143 @@
-The comprehensive code review is complete. Key findings:
+# Code Review: SecVF - Status Update
 
-**Good news**: Many issues from the previous review have been addressed:
-- Streaming SHA256 (no more 8GB memory loads)
-- Fixed bundle ID validation
-- Added protocol abstractions for DI
-- Implemented Combine publishers
-- Added integration tests
-- Externalized distro config
+## Completed Items
 
-**Critical remaining issue**: 7/8 Linux distros have placeholder SHA256 checksums in `distros.json`, meaning ISO integrity cannot be verified for most downloads. Only Kali has a real checksum.
+### Security (Critical)
 
-**Other notable issues**:
-- `AppDelegate.swift` at 1725 lines needs refactoring
-- VM name validation lacks path traversal protection
-- Typo at `AppDelegate.swift:1722` ("Netowrk")
-- User override config at `~/.avf/distros.json` could bypass URL security if not validated
+| Item | Status | Commit |
+|------|--------|--------|
+| SHA256 placeholder checksums | ✅ Fixed | Dynamic fetching from official CDNs |
+| Bundle ID validation | ✅ Fixed | Exact match validation |
+| VM name path traversal | ✅ Fixed | Prevents /, \, .., hidden files |
+| User config URL bypass | ✅ Fixed | Validates against bundle's approved domains |
+| Streaming SHA256 | ✅ Fixed | 1MB buffer, no memory spike |
+| Thread-based check | ✅ Removed | Was false security |
+| Log path injection | ✅ Fixed | URL-based path construction |
+
+### Code Quality
+
+| Item | Status | Notes |
+|------|--------|-------|
+| LayoutConstants | ✅ Extracted | Centralized UI constants |
+| AppColors | ✅ Extracted | Centralized color definitions |
+| NetworkProtocolColors | ✅ Extracted | Protocol color mapping |
+| NetworkTrafficView | ✅ Extracted | From VMLibraryWindowController |
+| NotificationNames | ✅ Extracted | Centralized notification names |
+| UTTypeExtensions | ✅ Extracted | File type identifiers |
+| Protocol abstractions | ✅ Added | VMManagerProtocol, NetworkSwitchProtocol, PacketCaptureProtocol |
+| Integration tests | ✅ Added | 25 tests for component integration |
+| Combine publishers | ✅ Added | Reactive updates in PacketCaptureManager |
+| Distro configuration | ✅ Externalized | distros.json with dynamic checksums |
+| ProcessExecutor | ✅ Added | Consolidated process execution |
+| ProtocolInfo | ✅ Added | Protocol metadata structure |
+| SecVFError | ✅ Added | Typed error handling |
+
+### Remaining (Lower Priority)
+
+| Item | Priority | Notes |
+|------|----------|-------|
+| AppDelegate refactoring | P1 | 1724 lines, tightly coupled - needs careful planning |
+| @MainActor annotations | P3 | Would touch all UI code |
+| Timer → Combine migration | P3 | Combine publishers available, migration optional |
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         SecVF App                              │
+├─────────────────────────────────────────────────────────────────┤
+│  AppDelegate.swift (1724 lines - refactor candidate)            │
+│  ├── VM lifecycle (start/stop/pause handlers)                   │
+│  ├── VZ configuration builders                                  │
+│  ├── Menu setup (Monitoring, Tools)                             │
+│  └── VZVirtualMachineDelegate                                   │
+├─────────────────────────────────────────────────────────────────┤
+│  VMManager.swift                                                │
+│  ├── VM CRUD operations                                         │
+│  ├── Path traversal protection ✅                               │
+│  └── Implements VMManagerProtocol ✅                            │
+├─────────────────────────────────────────────────────────────────┤
+│  ISOCacheManager.swift                                          │
+│  ├── Dynamic checksum fetching ✅                               │
+│  ├── Streaming SHA256 verification ✅                           │
+│  └── Per-distro size limits ✅                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  ChecksumFetcher.swift ✅ (NEW)                                 │
+│  ├── Fetches SHA256SUMS from official CDNs                      │
+│  ├── Supports sha256sums / fedora formats                       │
+│  └── 24-hour cache in ~/.avf/checksums-cache.json               │
+├─────────────────────────────────────────────────────────────────┤
+│  DistroConfiguration.swift                                      │
+│  ├── JSON config loading from distros.json                      │
+│  ├── User config domain validation ✅                           │
+│  └── checksumURL / checksumFormat fields ✅                     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Dynamic Checksum Flow
+
+```
+ISO Download Request
+        │
+        ▼
+┌───────────────────┐
+│ ChecksumFetcher   │
+│  .fetchChecksum() │
+└─────────┬─────────┘
+          │
+    ┌─────┴─────┐
+    │   Cache   │ ← 24hr TTL
+    │   Hit?    │
+    └─────┬─────┘
+          │
+    No    │    Yes
+    │     └────────────► Return cached hash
+    ▼
+┌───────────────────┐
+│ Fetch from        │
+│ checksumURL       │
+│ (official CDN)    │
+└─────────┬─────────┘
+          │
+    ┌─────┴─────┐
+    │  Success? │
+    └─────┬─────┘
+          │
+    No    │    Yes
+    │     │
+    │     └────────────► Cache & verify ISO
+    ▼
+┌───────────────────┐
+│ Fallback to       │
+│ static checksum   │
+│ (if not PLACEHOLDER)
+└─────────┬─────────┘
+          │
+    ┌─────┴─────┐
+    │  Valid?   │
+    └─────┬─────┘
+          │
+    No    │    Yes
+    │     │
+    │     └────────────► Verify ISO
+    ▼
+┌───────────────────┐
+│ Proceed unverified│
+│ (with warning)    │
+└───────────────────┘
+```
+
+## Next Steps (If Continuing)
+
+1. **AppDelegate Refactoring** (requires careful planning):
+   - Extract `VMConfigurationBuilder` (device configs)
+   - Extract `MenuBarController` (menu setup/handlers)
+   - Requires moving state and updating all references
+
+2. **@MainActor Annotations**:
+   - Add to all UI classes for thread safety
+   - LogViewerWindowController already has it
+
+3. **Timer → Combine Migration**:
+   - VMLibraryWindowController stats timer
+   - Combine publishers already available in PacketCaptureManager
