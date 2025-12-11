@@ -233,8 +233,12 @@ class LogViewerWindowController: NSWindowController {
         dateFormatter.dateFormat = "yyyy-MM-dd"
         let dateStr = dateFormatter.string(from: Date())
 
-        let logDir = NSHomeDirectory() + "/.avf/logs/"
-        return logDir + "\(logType.rawValue)-\(dateStr).log"
+        // SECURITY: Use URL-based path construction to prevent path injection
+        let logDir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".avf")
+            .appendingPathComponent("logs")
+        let logFile = "\(logType.rawValue)-\(dateStr).log"
+        return logDir.appendingPathComponent(logFile).path
     }
 
     // MARK: - Auto-Refresh

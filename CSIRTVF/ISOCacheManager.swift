@@ -126,6 +126,29 @@ enum LinuxDistro: String, Codable {
         }
     }
 
+    // SECURITY: Per-distro size limits (more restrictive than blanket 20GB)
+    // Prevents malicious mirrors from serving oversized files that fill disk
+    var expectedMaxSizeGB: Double {
+        switch self {
+        case .ubuntu:
+            return 6.0      // Ubuntu Desktop ~5.5GB
+        case .ubuntuServer:
+            return 3.0      // Ubuntu Server ~2.5GB
+        case .debian:
+            return 4.0      // Debian netinst ~600MB, full ~4GB
+        case .fedora:
+            return 7.0      // Fedora Server DVD ~6.5GB
+        case .kali:
+            return 8.0      // Kali installer ~4GB, full ~8GB
+        case .parrot:
+            return 6.0      // Parrot Security ~5GB
+        case .arch:
+            return 2.0      // Arch minimal ~800MB
+        case .manjaro:
+            return 5.0      // Manjaro minimal ~4GB
+        }
+    }
+
     // SECURITY: Whitelist of approved download domains (official CDNs only)
     static var approvedDomains: Set<String> {
         return [
@@ -191,17 +214,20 @@ class ISOCacheManager {
             return false
         }
 
-        // Verify it's our app
-        guard bundleID.contains("SecVF") else {
+        // SECURITY: Verify it's our app using exact bundle ID match
+        // (contains() was weak - allowed "com.attacker.FakeSecVF" to pass)
+        let validBundleIDs = [
+            "com.ItzDaxxy.SecVF",
+            "com.daxxsec.SecVF"
+        ]
+        guard validBundleIDs.contains(bundleID) else {
             auditLog("SECURITY ALERT: Unknown bundle ID '\(bundleID)' - rejecting request")
             return false
         }
 
-        // Check we're on the main thread (UI-initiated)
-        guard Thread.isMainThread else {
-            auditLog("SECURITY ALERT: Download request from background thread - rejecting")
-            return false
-        }
+        // Note: Thread checking removed - not a meaningful security control
+        // Attackers can easily dispatch to main thread. Real security comes from
+        // bundle ID verification and URL whitelisting above.
 
         return true
     }
@@ -645,14 +671,18 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
 
         progressHandler?(0.9, "Download complete, validating...")
 
-        // SECURITY: Validate file size (reject >20GB to prevent DoS)
+        // SECURITY: Validate file size using per-distro limits
+        // (More restrictive than blanket 20GB - prevents malicious mirrors filling disk)
         if let fileSize = try? FileManager.default.attributesOfItem(atPath: location.path)[.size] as? Int64 {
             let sizeGB = Double(fileSize) / (1024 * 1024 * 1024)
-            print("[Cache] Downloaded file size: \(String(format: "%.2f", sizeGB)) GB")
+            let maxSizeGB = distro.expectedMaxSizeGB
+            print("[Cache] Downloaded file size: \(String(format: "%.2f", sizeGB)) GB (max: \(maxSizeGB) GB for \(distro.rawValue))")
             progressHandler?(0.92, "Downloaded \(String(format: "%.2f", sizeGB)) GB")
 
-            if sizeGB > 20 {
-                let error = NSError(domain: "ISOCacheManager", code: 101, userInfo: [NSLocalizedDescriptionKey: "SECURITY: File too large (\(String(format: "%.2f", sizeGB)) GB) - max 20GB allowed"])
+            if sizeGB > maxSizeGB {
+                let error = NSError(domain: "ISOCacheManager", code: 101, userInfo: [
+                    NSLocalizedDescriptionKey: "SECURITY: File too large (\(String(format: "%.2f", sizeGB)) GB) - max \(maxSizeGB) GB allowed for \(distro.rawValue)"
+                ])
                 try? FileManager.default.removeItem(at: location)
                 completionHandler?(.failure(error))
                 return
