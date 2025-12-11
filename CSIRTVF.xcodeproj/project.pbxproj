@@ -38,6 +38,9 @@
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
 		CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */; };
+		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
+		NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */; };
+		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -89,6 +92,9 @@
 		DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManagerTests.swift; sourceTree = "<group>"; };
 		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
+		NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSwitchProtocol.swift; sourceTree = "<group>"; };
+		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -143,6 +149,7 @@
 		8FF8298B27500C060037FA83 /* SecVF */ = {
 			isa = PBXGroup;
 			children = (
+				PROT000PROT000PROT000000 /* Protocols */,
 				ALERT001ALERT001ALERT001 /* AlertPresenter.swift */,
 				APPCO001APPCO001APPCO001 /* AppColors.swift */,
 				CSERR001CSERR001CSERR001 /* SecVFError.swift */,
@@ -201,6 +208,16 @@
 				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
 			);
 			path = SecVFTests;
+			sourceTree = "<group>";
+		};
+		PROT000PROT000PROT000000 /* Protocols */ = {
+			isa = PBXGroup;
+			children = (
+				VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */,
+				NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */,
+				PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */,
+			);
+			path = Protocols;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -313,6 +330,9 @@
 				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
 				PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */,
+				VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */,
+				NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */,
+				PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */,
 				8FF8298D27500C060037FA83 /* AppDelegate.swift in Sources */,
 				AA1111AA11111111AA111AA1 /* VMConfiguration.swift in Sources */,
 				AA2222AA22222222AA222AA2 /* VMManager.swift in Sources */,

@@ -116,20 +116,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     private func styleToolbarButtons() {
-        let accentColor = NSColor(red: 0.0, green: 0.7, blue: 0.9, alpha: 1.0)  // Cyan accent
-
         let buttons: [NSButton?] = [newButton, startButton, deleteButton, renameButton, cloneButton, importButton, configureButton]
 
         for button in buttons.compactMap({ $0 }) {
             let title = button.title
             button.isBordered = false
             button.wantsLayer = true
-            button.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.2, alpha: 1.0).cgColor
-            button.layer?.borderColor = accentColor.withAlphaComponent(0.5).cgColor
+            button.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+            button.layer?.borderColor = AppColors.accentCyan.withAlphaComponent(0.5).cgColor
             button.layer?.borderWidth = 1.0
             button.layer?.cornerRadius = 5
             button.attributedTitle = NSAttributedString(string: title, attributes: [
-                .foregroundColor: accentColor,
+                .foregroundColor: AppColors.accentCyan,
                 .font: NSFont.systemFont(ofSize: 11, weight: .medium)
             ])
         }
@@ -636,14 +634,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         openButton.isBordered = false
         openButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
         openButton.wantsLayer = true
-        let btnAccent = NSColor(red: 0.0, green: 0.7, blue: 0.9, alpha: 1.0)
-        openButton.layer?.backgroundColor = NSColor(red: 0.15, green: 0.15, blue: 0.2, alpha: 1.0).cgColor
-        openButton.layer?.borderColor = btnAccent.withAlphaComponent(0.5).cgColor
+        openButton.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        openButton.layer?.borderColor = AppColors.accentCyan.withAlphaComponent(0.5).cgColor
         openButton.layer?.borderWidth = 1.0
         openButton.layer?.cornerRadius = 5
-        openButton.contentTintColor = btnAccent
+        openButton.contentTintColor = AppColors.accentCyan
         openButton.attributedTitle = NSAttributedString(string: "Open Full Analysis", attributes: [
-            .foregroundColor: btnAccent,
+            .foregroundColor: AppColors.accentCyan,
             .font: NSFont.systemFont(ofSize: 10, weight: .medium)
         ])
         openButton.autoresizingMask = [.minXMargin]
