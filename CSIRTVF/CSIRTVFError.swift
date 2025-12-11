@@ -53,6 +53,14 @@ enum SecVFError: LocalizedError {
     // MARK: - Graphics Errors
     case graphicsConfigurationFailed
 
+    // MARK: - Scripts USB Errors
+    case scriptsSourceNotFound
+    case scriptsPathSanitizationFailed(path: String)
+    case scriptsPathOutsideAllowed(path: String)
+    case scriptsDiskCreationFailed(reason: String)
+    case scriptsISOCreationFailed(reason: String)
+    case scriptsCopyFailed(underlying: Error)
+
     var errorDescription: String? {
         switch self {
         // VM Configuration
@@ -125,6 +133,20 @@ enum SecVFError: LocalizedError {
         // Graphics
         case .graphicsConfigurationFailed:
             return "Failed to configure graphics device"
+
+        // Scripts USB
+        case .scriptsSourceNotFound:
+            return "Could not find scripts source directory"
+        case .scriptsPathSanitizationFailed(let path):
+            return "Scripts path failed security validation: \(path)"
+        case .scriptsPathOutsideAllowed(let path):
+            return "Scripts path outside allowed directories: \(path)"
+        case .scriptsDiskCreationFailed(let reason):
+            return "Failed to create scripts disk image: \(reason)"
+        case .scriptsISOCreationFailed(let reason):
+            return "Failed to create scripts ISO: \(reason)"
+        case .scriptsCopyFailed(let error):
+            return "Failed to copy scripts: \(error.localizedDescription)"
         }
     }
 
@@ -144,6 +166,12 @@ enum SecVFError: LocalizedError {
             return "Check the VM configuration for invalid settings."
         case .vmStartFailed:
             return "Try stopping any other running VMs and restart this one."
+        case .scriptsSourceNotFound:
+            return "Ensure the scripts folder is included in the app bundle or accessible from the development path."
+        case .scriptsPathSanitizationFailed, .scriptsPathOutsideAllowed:
+            return "Only use scripts from trusted locations within your home directory or app bundle."
+        case .scriptsDiskCreationFailed, .scriptsISOCreationFailed:
+            return "Check that you have write permissions to ~/.avf and sufficient disk space."
         default:
             return nil
         }

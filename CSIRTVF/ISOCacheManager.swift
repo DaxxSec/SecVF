@@ -34,28 +34,31 @@ enum LinuxDistro: String, Codable {
     case manjaro = "Manjaro"
 
     // Release date of the current version
+    // Uses safe date initialization with fallback to avoid force unwraps
     var releaseDate: Date {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
+        // Static formatter for consistent date parsing
+        let formatter: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            f.locale = Locale(identifier: "en_US_POSIX")
+            return f
+        }()
 
+        let dateString: String
         switch self {
-        case .ubuntu:
-            return formatter.date(from: "2024-04-25")!  // Ubuntu 24.04 LTS Desktop
-        case .ubuntuServer:
-            return formatter.date(from: "2024-04-25")!  // Ubuntu 24.04 LTS Server
-        case .debian:
-            return formatter.date(from: "2023-06-10")!  // Debian 12
-        case .fedora:
-            return formatter.date(from: "2023-11-07")!  // Fedora 39
-        case .kali:
-            return formatter.date(from: "2024-03-11")!  // Kali 2024.1
-        case .parrot:
-            return formatter.date(from: "2024-01-15")!  // Parrot 6.0
-        case .arch:
-            return formatter.date(from: "2024-11-01")!  // Rolling release - approximate
-        case .manjaro:
-            return formatter.date(from: "2024-01-28")!  // Manjaro 23.1.3
+        case .ubuntu:       dateString = "2024-04-25"  // Ubuntu 24.04 LTS Desktop
+        case .ubuntuServer: dateString = "2024-04-25"  // Ubuntu 24.04 LTS Server
+        case .debian:       dateString = "2023-06-10"  // Debian 12
+        case .fedora:       dateString = "2023-11-07"  // Fedora 39
+        case .kali:         dateString = "2024-03-11"  // Kali 2024.1
+        case .parrot:       dateString = "2024-01-15"  // Parrot 6.0
+        case .arch:         dateString = "2024-11-01"  // Rolling release - approximate
+        case .manjaro:      dateString = "2024-01-28"  // Manjaro 23.1.3
         }
+
+        // Safe fallback: if parsing fails (should never happen with hardcoded dates),
+        // return a distant past date rather than crashing
+        return formatter.date(from: dateString) ?? Date.distantPast
     }
 
     // Version string

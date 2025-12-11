@@ -6,6 +6,7 @@
 import Cocoa
 import Virtualization
 
+@MainActor
 class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
 
     @IBOutlet weak var tableView: NSTableView?
@@ -39,6 +40,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     override var windowNibName: NSNib.Name? {
         return "VMLibraryWindow"
+    }
+
+    deinit {
+        // Clean up timer and notification observers to prevent memory leaks
+        statsUpdateTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func windowDidLoad() {
@@ -999,7 +1006,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // PERFORMANCE: 2.0s interval is sufficient for stats display - 0.5s was excessive
         // Network stats don't change rapidly enough to warrant 2Hz updates
         statsUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.updateNetworkStats()
+            // Timer callback is nonisolated, dispatch to main actor
+            Task { @MainActor in
+                self?.updateNetworkStats()
+            }
         }
     }
 
