@@ -7,6 +7,7 @@
 
 import Cocoa
 
+@MainActor
 class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
 
     // UI Components

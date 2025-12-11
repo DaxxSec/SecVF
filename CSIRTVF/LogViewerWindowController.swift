@@ -23,6 +23,7 @@ enum LogType: String {
     }
 }
 
+@MainActor
 class LogViewerWindowController: NSWindowController {
 
     private var textView: NSTextView!
@@ -57,7 +58,8 @@ class LogViewerWindowController: NSWindowController {
     }
 
     deinit {
-        stopAutoRefresh()
+        // Directly invalidate timer in deinit (nonisolated context)
+        refreshTimer?.invalidate()
     }
 
     // MARK: - UI Setup
@@ -246,7 +248,10 @@ class LogViewerWindowController: NSWindowController {
     private func startAutoRefresh() {
         // Refresh every 2 seconds
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            self?.loadLogContent()
+            // Timer callback is nonisolated, dispatch to main actor
+            Task { @MainActor in
+                self?.loadLogContent()
+            }
         }
     }
 

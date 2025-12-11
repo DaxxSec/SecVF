@@ -114,24 +114,24 @@ class ScriptsUSBManager {
     }
 
     /// Create or update the writable scripts disk image (for Linux VMs)
-    /// Returns the URL of the created disk image, or nil on failure
-    func createScriptsDisk(from scriptsDirectory: String? = nil) -> URL? {
+    /// Returns Result with the URL of the created disk image, or typed error on failure
+    func createScriptsDisk(from scriptsDirectory: String? = nil) -> Result<URL, SecVFError> {
         let rawSourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
 
         guard let rawSourceDir = rawSourceDir else {
             NSLog("[ScriptsUSB] ERROR: Could not find scripts source directory")
-            return nil
+            return .failure(.scriptsSourceNotFound)
         }
 
         // SECURITY: Sanitize and validate the source directory path
         guard let sourceDir = sanitizePath(rawSourceDir) else {
             NSLog("[ScriptsUSB] SECURITY: Source directory path failed sanitization: %@", rawSourceDir)
-            return nil
+            return .failure(.scriptsPathSanitizationFailed(path: rawSourceDir))
         }
 
         guard isPathWithinAllowedDirectories(sourceDir) else {
             NSLog("[ScriptsUSB] SECURITY: Source directory outside allowed paths: %@", sourceDir)
-            return nil
+            return .failure(.scriptsPathOutsideAllowed(path: sourceDir))
         }
 
         NSLog("[ScriptsUSB] Creating writable scripts disk from: \(sourceDir)")
@@ -164,11 +164,11 @@ class ScriptsUSBManager {
             if createProcess.terminationStatus != 0 {
                 let output = String(data: createPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 NSLog("[ScriptsUSB] ERROR creating disk image: \(output)")
-                return nil
+                return .failure(.scriptsDiskCreationFailed(reason: output))
             }
         } catch {
             NSLog("[ScriptsUSB] ERROR running hdiutil create: \(error)")
-            return nil
+            return .failure(.scriptsDiskCreationFailed(reason: error.localizedDescription))
         }
 
         NSLog("[ScriptsUSB] Disk image created, mounting to copy scripts...")
@@ -197,11 +197,11 @@ class ScriptsUSBManager {
             if mountProcess.terminationStatus != 0 {
                 let output = String(data: mountPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 NSLog("[ScriptsUSB] ERROR mounting disk image: \(output)")
-                return nil
+                return .failure(.scriptsDiskCreationFailed(reason: "Mount failed: \(output)"))
             }
         } catch {
             NSLog("[ScriptsUSB] ERROR running hdiutil attach: \(error)")
-            return nil
+            return .failure(.scriptsDiskCreationFailed(reason: "Mount failed: \(error.localizedDescription)"))
         }
 
         NSLog("[ScriptsUSB] Disk mounted, copying scripts...")
@@ -265,7 +265,7 @@ class ScriptsUSBManager {
             detachProcess.arguments = ["detach", scriptsMountPath, "-force"]
             try? detachProcess.run()
             detachProcess.waitUntilExit()
-            return nil
+            return .failure(.scriptsCopyFailed(underlying: error))
         }
 
         // Unmount the disk image
@@ -299,28 +299,28 @@ class ScriptsUSBManager {
         try? FileManager.default.removeItem(atPath: scriptsMountPath)
 
         NSLog("[ScriptsUSB] Successfully created writable scripts disk: \(scriptsDiskPath)")
-        return URL(fileURLWithPath: scriptsDiskPath)
+        return .success(URL(fileURLWithPath: scriptsDiskPath))
     }
 
     /// Create or update the scripts ISO (for macOS VMs - read-only is fine)
-    /// Returns the URL of the created ISO, or nil on failure
-    func createScriptsISO(from scriptsDirectory: String? = nil) -> URL? {
+    /// Returns Result with the URL of the created ISO, or typed error on failure
+    func createScriptsISO(from scriptsDirectory: String? = nil) -> Result<URL, SecVFError> {
         let rawSourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
 
         guard let rawSourceDir = rawSourceDir else {
             NSLog("[ScriptsUSB] ERROR: Could not find scripts source directory")
-            return nil
+            return .failure(.scriptsSourceNotFound)
         }
 
         // SECURITY: Sanitize and validate the source directory path
         guard let sourceDir = sanitizePath(rawSourceDir) else {
             NSLog("[ScriptsUSB] SECURITY: Source directory path failed sanitization: %@", rawSourceDir)
-            return nil
+            return .failure(.scriptsPathSanitizationFailed(path: rawSourceDir))
         }
 
         guard isPathWithinAllowedDirectories(sourceDir) else {
             NSLog("[ScriptsUSB] SECURITY: Source directory outside allowed paths: %@", sourceDir)
-            return nil
+            return .failure(.scriptsPathOutsideAllowed(path: sourceDir))
         }
 
         NSLog("[ScriptsUSB] Creating scripts ISO from: \(sourceDir)")
@@ -388,7 +388,7 @@ class ScriptsUSBManager {
 
         } catch {
             NSLog("[ScriptsUSB] ERROR creating staging directory: \(error)")
-            return nil
+            return .failure(.scriptsCopyFailed(underlying: error))
         }
 
         // Remove old ISO if exists
@@ -422,15 +422,15 @@ class ScriptsUSBManager {
                 // Clean up staging directory
                 try? FileManager.default.removeItem(atPath: scriptsStagingPath)
 
-                return URL(fileURLWithPath: scriptsISOPath)
+                return .success(URL(fileURLWithPath: scriptsISOPath))
             } else {
                 let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
                 NSLog("[ScriptsUSB] ERROR creating ISO: \(output)")
-                return nil
+                return .failure(.scriptsISOCreationFailed(reason: output))
             }
         } catch {
             NSLog("[ScriptsUSB] ERROR running hdiutil: \(error)")
-            return nil
+            return .failure(.scriptsISOCreationFailed(reason: error.localizedDescription))
         }
     }
 

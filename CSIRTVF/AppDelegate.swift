@@ -8,6 +8,7 @@ The app delegate that sets up and starts the virtual machine.
 import Virtualization
 
 @main
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
 
     // Multi-VM architecture - manage separate windows for each running VM
@@ -1480,42 +1481,59 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     @objc private func rebuildScriptsISO() {
         // Try to find scripts directory automatically
         var results: [String] = []
-        var hadError = false
+        var errors: [SecVFError] = []
 
         // Create ISO for macOS VMs (read-only is fine)
-        if let isoURL = ScriptsUSBManager.shared.createScriptsISO() {
+        switch ScriptsUSBManager.shared.createScriptsISO() {
+        case .success(let isoURL):
             results.append("ISO: \(isoURL.lastPathComponent)")
-        } else {
-            hadError = true
+        case .failure(let error):
+            errors.append(error)
         }
 
         // Create writable disk image for Linux VMs
-        if let diskURL = ScriptsUSBManager.shared.createScriptsDisk() {
+        switch ScriptsUSBManager.shared.createScriptsDisk() {
+        case .success(let diskURL):
             results.append("Disk (writable): \(diskURL.lastPathComponent)")
-        } else {
-            hadError = true
+        case .failure(let error):
+            errors.append(error)
         }
 
         if !results.isEmpty {
             showAlert(title: "Scripts Created", message: "Successfully created:\n\(results.joined(separator: "\n"))")
-        } else if hadError {
-            // Prompt user to select scripts directory
-            ScriptsUSBManager.shared.promptForScriptsDirectory { [weak self] url in
-                guard let url = url else { return }
+        } else if !errors.isEmpty {
+            // Check if the first error is scriptsSourceNotFound - prompt user
+            if case .scriptsSourceNotFound = errors.first {
+                ScriptsUSBManager.shared.promptForScriptsDirectory { [weak self] url in
+                    guard let url = url else { return }
 
-                var results2: [String] = []
-                if let isoURL = ScriptsUSBManager.shared.createScriptsISO(from: url.path) {
-                    results2.append("ISO: \(isoURL.lastPathComponent)")
-                }
-                if let diskURL = ScriptsUSBManager.shared.createScriptsDisk(from: url.path) {
-                    results2.append("Disk (writable): \(diskURL.lastPathComponent)")
-                }
+                    var results2: [String] = []
+                    var errors2: [String] = []
 
-                if !results2.isEmpty {
-                    self?.showAlert(title: "Scripts Created", message: "Successfully created:\n\(results2.joined(separator: "\n"))")
-                } else {
-                    self?.showAlert(title: "Error", message: "Failed to create scripts. Check console for details.")
+                    switch ScriptsUSBManager.shared.createScriptsISO(from: url.path) {
+                    case .success(let isoURL):
+                        results2.append("ISO: \(isoURL.lastPathComponent)")
+                    case .failure(let error):
+                        errors2.append(error.localizedDescription)
+                    }
+
+                    switch ScriptsUSBManager.shared.createScriptsDisk(from: url.path) {
+                    case .success(let diskURL):
+                        results2.append("Disk (writable): \(diskURL.lastPathComponent)")
+                    case .failure(let error):
+                        errors2.append(error.localizedDescription)
+                    }
+
+                    if !results2.isEmpty {
+                        self?.showAlert(title: "Scripts Created", message: "Successfully created:\n\(results2.joined(separator: "\n"))")
+                    } else {
+                        self?.showAlert(title: "Error", message: "Failed to create scripts:\n\(errors2.joined(separator: "\n"))")
+                    }
                 }
+            } else {
+                // Show the actual errors
+                let errorMessages = errors.map { $0.localizedDescription }.joined(separator: "\n")
+                showAlert(title: "Error", message: "Failed to create scripts:\n\(errorMessages)")
             }
         }
     }
