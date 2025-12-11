@@ -8,6 +8,7 @@
 
 import Cocoa
 
+@MainActor
 class NetworkTrafficView: NSView {
     private var packets: [AnimatedPacket] = []
     private var displayLink: CVDisplayLink?

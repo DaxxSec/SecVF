@@ -32,12 +32,17 @@
 | ProtocolInfo | ✅ Added | Protocol metadata structure |
 | SecVFError | ✅ Added | Typed error handling |
 
+### Thread Safety
+
+| Item | Status | Notes |
+|------|--------|-------|
+| @MainActor annotations | ✅ Added | All UI window controllers and views |
+
 ### Remaining (Lower Priority)
 
 | Item | Priority | Notes |
 |------|----------|-------|
 | AppDelegate refactoring | P1 | 1724 lines, tightly coupled - needs careful planning |
-| @MainActor annotations | P3 | Would touch all UI code |
 | Timer → Combine migration | P3 | Combine publishers available, migration optional |
 
 ## Architecture Overview
@@ -134,10 +139,6 @@ ISO Download Request
    - Extract `MenuBarController` (menu setup/handlers)
    - Requires moving state and updating all references
 
-2. **@MainActor Annotations**:
-   - Add to all UI classes for thread safety
-   - LogViewerWindowController already has it
-
-3. **Timer → Combine Migration**:
+2. **Timer → Combine Migration** (optional):
    - VMLibraryWindowController stats timer
    - Combine publishers already available in PacketCaptureManager

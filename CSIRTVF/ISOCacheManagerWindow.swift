@@ -51,6 +51,7 @@ struct CachedImageEntry {
     }
 }
 
+@MainActor
 class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: - UI Components
