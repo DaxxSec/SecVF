@@ -734,7 +734,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
         let cell = NSTextField(labelWithString: "")
         cell.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
-        cell.textColor = colorForProtocol(packet.protocol)
+        cell.textColor = NetworkProtocolColors.color(for: packet.protocol)
         cell.lineBreakMode = .byTruncatingTail
 
         switch identifier {
@@ -761,19 +761,6 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     // MARK: - Helpers
-
-    private func colorForProtocol(_ proto: String) -> NSColor {
-        switch proto.uppercased() {
-        case "TCP": return NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0)
-        case "UDP": return NSColor(red: 0.6, green: 1.0, blue: 0.6, alpha: 1.0)
-        case "HTTP", "HTTPS": return NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)
-        case "DNS": return NSColor(red: 1.0, green: 1.0, blue: 0.4, alpha: 1.0)
-        case "ARP": return NSColor(red: 1.0, green: 0.6, blue: 0.4, alpha: 1.0)
-        case "ICMP": return NSColor(red: 1.0, green: 0.4, blue: 0.8, alpha: 1.0)
-        case "TLS", "SSL": return NSColor(red: 0.8, green: 0.6, blue: 1.0, alpha: 1.0)
-        default: return NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
-        }
-    }
 
     private func formatBytes(_ bytes: Int) -> String {
         if bytes >= 1_073_741_824 {
