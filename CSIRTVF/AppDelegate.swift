@@ -407,14 +407,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
     // MARK: Create device configuration objects for the virtual machine.
 
-    private func createBlockDeviceConfiguration(for vmId: UUID) -> VZVirtioBlockDeviceConfiguration {
-        guard let vmConfig = vmConfigs[vmId],
-              let mainDiskAttachment = try? VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: vmConfig.diskImagePath), readOnly: false) else {
-            fatalError("Failed to create main disk attachment.")
+    private func createBlockDeviceConfiguration(for vmId: UUID) throws -> VZVirtioBlockDeviceConfiguration {
+        guard let vmConfig = vmConfigs[vmId] else {
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
-        let mainDisk = VZVirtioBlockDeviceConfiguration(attachment: mainDiskAttachment)
-        return mainDisk
+        let mainDiskAttachment: VZDiskImageStorageDeviceAttachment
+        do {
+            mainDiskAttachment = try VZDiskImageStorageDeviceAttachment(
+                url: URL(fileURLWithPath: vmConfig.diskImagePath),
+                readOnly: false
+            )
+        } catch {
+            throw SecVFError.diskAttachmentFailed(path: vmConfig.diskImagePath, underlying: error)
+        }
+
+        return VZVirtioBlockDeviceConfiguration(attachment: mainDiskAttachment)
     }
 
     private func computeCPUCount(for vmId: UUID) -> Int {
@@ -455,38 +463,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
     }
 
-    private func createAndSaveMachineIdentifier(for vmId: UUID) -> VZGenericMachineIdentifier {
+    private func createAndSaveMachineIdentifier(for vmId: UUID) throws -> VZGenericMachineIdentifier {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let machineIdentifier = VZGenericMachineIdentifier()
 
         // Store the machine identifier to disk so you can retrieve it for subsequent boots.
-        try! machineIdentifier.dataRepresentation.write(to: URL(fileURLWithPath: vmConfig.machineIdentifierPath))
+        do {
+            try machineIdentifier.dataRepresentation.write(to: URL(fileURLWithPath: vmConfig.machineIdentifierPath))
+        } catch {
+            throw SecVFError.machineIdentifierCreationFailed
+        }
         return machineIdentifier
     }
 
-    private func retrieveMachineIdentifier(for vmId: UUID) -> VZGenericMachineIdentifier {
+    private func retrieveMachineIdentifier(for vmId: UUID) throws -> VZGenericMachineIdentifier {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         // Retrieve the machine identifier.
         guard let machineIdentifierData = try? Data(contentsOf: URL(fileURLWithPath: vmConfig.machineIdentifierPath)) else {
-            fatalError("Failed to retrieve the machine identifier data.")
+            throw SecVFError.machineIdentifierNotFound(path: vmConfig.machineIdentifierPath)
         }
 
         guard let machineIdentifier = VZGenericMachineIdentifier(dataRepresentation: machineIdentifierData) else {
-            fatalError("Failed to create the machine identifier.")
+            throw SecVFError.machineIdentifierDataInvalid
         }
 
         return machineIdentifier
     }
 
-    private func createEFIVariableStore(for vmId: UUID) -> VZEFIVariableStore {
+    private func createEFIVariableStore(for vmId: UUID) throws -> VZEFIVariableStore {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let nvramURL = URL(fileURLWithPath: vmConfig.nvramPath)
@@ -497,31 +509,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
 
         guard let efiVariableStore = try? VZEFIVariableStore(creatingVariableStoreAt: nvramURL) else {
-            fatalError("Failed to create the EFI variable store at: \(vmConfig.nvramPath)")
+            throw SecVFError.nvramCreationFailed(path: vmConfig.nvramPath)
         }
 
         return efiVariableStore
     }
 
-    private func retrieveEFIVariableStore(for vmId: UUID) -> VZEFIVariableStore {
+    private func retrieveEFIVariableStore(for vmId: UUID) throws -> VZEFIVariableStore {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         if !FileManager.default.fileExists(atPath: vmConfig.nvramPath) {
-            fatalError("EFI variable store does not exist.")
+            throw SecVFError.nvramNotFound(path: vmConfig.nvramPath)
         }
 
         return VZEFIVariableStore(url: URL(fileURLWithPath: vmConfig.nvramPath))
     }
 
-    private func createUSBMassStorageDeviceConfiguration(for vmId: UUID) -> VZUSBMassStorageDeviceConfiguration {
+    private func createUSBMassStorageDeviceConfiguration(for vmId: UUID) throws -> VZUSBMassStorageDeviceConfiguration {
         guard let installerISOPath = installerISOPaths[vmId] else {
-            fatalError("Installer ISO path not found for vmId: \(vmId)")
+            throw SecVFError.installerISONotFound(vmId: vmId)
         }
 
         guard let intallerDiskAttachment = try? VZDiskImageStorageDeviceAttachment(url: installerISOPath, readOnly: true) else {
-            fatalError("Failed to create installer's disk attachment.")
+            throw SecVFError.installerAttachmentFailed(path: installerISOPath.path)
         }
 
         return VZUSBMassStorageDeviceConfiguration(attachment: intallerDiskAttachment)
@@ -557,9 +569,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
     }
 
-    private func createNetworkDeviceConfiguration(for vmId: UUID) -> VZVirtioNetworkDeviceConfiguration {
+    private func createNetworkDeviceConfiguration(for vmId: UUID) throws -> VZVirtioNetworkDeviceConfiguration {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let networkDevice = VZVirtioNetworkDeviceConfiguration()
@@ -596,7 +608,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         return networkDevice
     }
 
-    private func createGraphicsDeviceConfiguration(isMacOS: Bool) -> VZGraphicsDeviceConfiguration {
+    private func createGraphicsDeviceConfiguration(isMacOS: Bool) throws -> VZGraphicsDeviceConfiguration {
         if isMacOS {
             #if arch(arm64)
             // macOS VMs require VZMacGraphicsDeviceConfiguration (Apple Silicon only)
@@ -607,10 +619,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 ]
                 return graphicsDevice
             } else {
-                fatalError("macOS guest VMs require macOS 12.0 or later")
+                throw SecVFError.macOSVersionTooOld(required: "12.0", current: ProcessInfo.processInfo.operatingSystemVersionString)
             }
             #else
-            fatalError("macOS guest VMs are only supported on Apple Silicon")
+            throw SecVFError.appleSiliconRequired
             #endif
         } else {
             // Linux VMs use VZVirtioGraphicsDeviceConfiguration
@@ -657,35 +669,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
     #if arch(arm64)
     @available(macOS 12.0, *)
-    private func createAndSaveMacMachineIdentifier(for vmId: UUID) -> VZMacMachineIdentifier {
+    private func createAndSaveMacMachineIdentifier(for vmId: UUID) throws -> VZMacMachineIdentifier {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let machineIdentifier = VZMacMachineIdentifier()
-        try! machineIdentifier.dataRepresentation.write(to: URL(fileURLWithPath: vmConfig.machineIdentifierPath))
+        do {
+            try machineIdentifier.dataRepresentation.write(to: URL(fileURLWithPath: vmConfig.machineIdentifierPath))
+        } catch {
+            throw SecVFError.machineIdentifierCreationFailed
+        }
         return machineIdentifier
     }
 
     @available(macOS 12.0, *)
-    private func retrieveMacMachineIdentifier(for vmId: UUID) -> VZMacMachineIdentifier {
+    private func retrieveMacMachineIdentifier(for vmId: UUID) throws -> VZMacMachineIdentifier {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         guard let machineIdentifierData = try? Data(contentsOf: URL(fileURLWithPath: vmConfig.machineIdentifierPath)) else {
-            fatalError("Failed to retrieve Mac machine identifier data.")
+            throw SecVFError.machineIdentifierNotFound(path: vmConfig.machineIdentifierPath)
         }
         guard let machineIdentifier = VZMacMachineIdentifier(dataRepresentation: machineIdentifierData) else {
-            fatalError("Failed to create Mac machine identifier.")
+            throw SecVFError.machineIdentifierDataInvalid
         }
         return machineIdentifier
     }
 
     @available(macOS 12.0, *)
-    private func createMacAuxiliaryStorage(for vmId: UUID, hardwareModel: VZMacHardwareModel) -> VZMacAuxiliaryStorage {
+    private func createMacAuxiliaryStorage(for vmId: UUID, hardwareModel: VZMacHardwareModel) throws -> VZMacAuxiliaryStorage {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let auxiliaryStoragePath = vmConfig.bundlePath + "AuxiliaryStorage"
@@ -698,15 +714,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
 
         guard let auxiliaryStorage = try? VZMacAuxiliaryStorage(creatingStorageAt: auxiliaryStorageURL, hardwareModel: hardwareModel) else {
-            fatalError("Failed to create Mac auxiliary storage.")
+            throw SecVFError.auxiliaryStorageFailed(path: auxiliaryStoragePath)
         }
         return auxiliaryStorage
     }
 
     @available(macOS 12.0, *)
-    private func retrieveMacAuxiliaryStorage(for vmId: UUID) -> VZMacAuxiliaryStorage {
+    private func retrieveMacAuxiliaryStorage(for vmId: UUID) throws -> VZMacAuxiliaryStorage {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let auxiliaryStoragePath = vmConfig.bundlePath + "AuxiliaryStorage"
@@ -714,14 +730,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     }
 
     @available(macOS 12.0, *)
-    private func createMacHardwareModel(for vmId: UUID) -> VZMacHardwareModel {
+    private func createMacHardwareModel(for vmId: UUID) throws -> VZMacHardwareModel {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         // Get hardware model from the IPSW restore image
         guard let restoreImageURL = installerISOPaths[vmId] else {
-            fatalError("No restore image path provided for macOS install")
+            throw SecVFError.restoreImageNotProvided
         }
 
         // Load the restore image to get the hardware model
@@ -741,28 +757,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         semaphore.wait()
 
         guard let model = hardwareModel else {
-            fatalError("Failed to get hardware model from restore image")
+            throw SecVFError.restoreImageHardwareModelFailed
         }
 
         // Save hardware model to disk
         let hardwareModelPath = vmConfig.bundlePath + "HardwareModel"
-        try! model.dataRepresentation.write(to: URL(fileURLWithPath: hardwareModelPath))
+        do {
+            try model.dataRepresentation.write(to: URL(fileURLWithPath: hardwareModelPath))
+        } catch {
+            throw SecVFError.hardwareModelCreationFailed
+        }
 
         return model
     }
 
     @available(macOS 12.0, *)
-    private func retrieveMacHardwareModel(for vmId: UUID) -> VZMacHardwareModel {
+    private func retrieveMacHardwareModel(for vmId: UUID) throws -> VZMacHardwareModel {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let hardwareModelPath = vmConfig.bundlePath + "HardwareModel"
         guard let hardwareModelData = try? Data(contentsOf: URL(fileURLWithPath: hardwareModelPath)) else {
-            fatalError("Failed to retrieve Mac hardware model data.")
+            throw SecVFError.hardwareModelNotFound
         }
         guard let hardwareModel = VZMacHardwareModel(dataRepresentation: hardwareModelData) else {
-            fatalError("Failed to create Mac hardware model.")
+            throw SecVFError.hardwareModelDataInvalid
         }
         return hardwareModel
     }
@@ -838,9 +858,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
     // MARK: Create the virtual machine configuration and instantiate the virtual machine.
 
-    func createVirtualMachine(for vmId: UUID) {
+    func createVirtualMachine(for vmId: UUID) throws {
         guard let vmConfig = vmConfigs[vmId] else {
-            fatalError("VM configuration not found for vmId: \(vmId)")
+            throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
         let virtualMachineConfiguration = VZVirtualMachineConfiguration()
@@ -864,25 +884,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 if needsInstall {
                     // Fresh macOS install from IPSW
                     // Create hardware model first, as it's needed for auxiliary storage
-                    let hardwareModel = createMacHardwareModel(for: vmId)
-                    platform.machineIdentifier = createAndSaveMacMachineIdentifier(for: vmId)
-                    platform.auxiliaryStorage = createMacAuxiliaryStorage(for: vmId, hardwareModel: hardwareModel)
+                    let hardwareModel = try createMacHardwareModel(for: vmId)
+                    platform.machineIdentifier = try createAndSaveMacMachineIdentifier(for: vmId)
+                    platform.auxiliaryStorage = try createMacAuxiliaryStorage(for: vmId, hardwareModel: hardwareModel)
                     platform.hardwareModel = hardwareModel
                     // Note: macOS IPSW is NOT attached as USB storage - installation handled by VZMacOSInstaller after VM creation
                 } else {
                     // Boot existing macOS install
-                    platform.machineIdentifier = retrieveMacMachineIdentifier(for: vmId)
-                    platform.hardwareModel = retrieveMacHardwareModel(for: vmId)
-                    platform.auxiliaryStorage = retrieveMacAuxiliaryStorage(for: vmId)
+                    platform.machineIdentifier = try retrieveMacMachineIdentifier(for: vmId)
+                    platform.hardwareModel = try retrieveMacHardwareModel(for: vmId)
+                    platform.auxiliaryStorage = try retrieveMacAuxiliaryStorage(for: vmId)
                 }
 
                 virtualMachineConfiguration.platform = platform
                 virtualMachineConfiguration.bootLoader = bootloader
             } else {
-                fatalError("macOS guest VMs require macOS 12.0 or later")
+                throw SecVFError.macOSVersionTooOld(required: "12.0", current: ProcessInfo.processInfo.operatingSystemVersionString)
             }
             #else
-            fatalError("macOS guest VMs are only supported on Apple Silicon")
+            throw SecVFError.appleSiliconRequired
             #endif
         } else {
             // Linux VM configuration
@@ -891,14 +911,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
             if needsInstall {
                 // Fresh Linux install from ISO
-                platform.machineIdentifier = createAndSaveMachineIdentifier(for: vmId)
-                bootloader.variableStore = createEFIVariableStore(for: vmId)
-                disksArray.add(createUSBMassStorageDeviceConfiguration(for: vmId))
+                platform.machineIdentifier = try createAndSaveMachineIdentifier(for: vmId)
+                bootloader.variableStore = try createEFIVariableStore(for: vmId)
+                disksArray.add(try createUSBMassStorageDeviceConfiguration(for: vmId))
             } else {
                 // Boot existing Linux install
                 NSLog("[Linux VM] Retrieving existing EFI variable store from: %@", vmConfig.nvramPath)
-                platform.machineIdentifier = retrieveMachineIdentifier(for: vmId)
-                bootloader.variableStore = retrieveEFIVariableStore(for: vmId)
+                platform.machineIdentifier = try retrieveMachineIdentifier(for: vmId)
+                bootloader.variableStore = try retrieveEFIVariableStore(for: vmId)
                 NSLog("[Linux VM] EFI variable store retrieved successfully")
             }
 
@@ -906,7 +926,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             virtualMachineConfiguration.bootLoader = bootloader
         }
 
-        disksArray.add(createBlockDeviceConfiguration(for: vmId))
+        disksArray.add(try createBlockDeviceConfiguration(for: vmId))
 
         // Check if scripts USB should be attached
         if attachScriptsUSBFlags[vmId] == true {
@@ -919,12 +939,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
 
         guard let disks = disksArray as? [VZStorageDeviceConfiguration] else {
-            fatalError("Invalid disksArray.")
+            throw SecVFError.invalidDiskConfiguration
         }
         virtualMachineConfiguration.storageDevices = disks
 
-        virtualMachineConfiguration.networkDevices = [createNetworkDeviceConfiguration(for: vmId)]
-        virtualMachineConfiguration.graphicsDevices = [createGraphicsDeviceConfiguration(isMacOS: isMacOS)]
+        virtualMachineConfiguration.networkDevices = [try createNetworkDeviceConfiguration(for: vmId)]
+        virtualMachineConfiguration.graphicsDevices = [try createGraphicsDeviceConfiguration(isMacOS: isMacOS)]
         virtualMachineConfiguration.audioDevices = [createInputAudioDeviceConfiguration(), createOutputAudioDeviceConfiguration()]
 
         virtualMachineConfiguration.keyboards = [VZUSBKeyboardConfiguration()]
@@ -947,7 +967,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             try virtualMachineConfiguration.validate()
             NSLog("[VM] Configuration validation successful")
         } catch {
-            // Log to both NSLog and a file so we can see it even if app crashes
+            // Log to both NSLog and a file
             let errorMsg = """
             [CRITICAL] VM configuration validation failed!
             Error: \(error.localizedDescription)
@@ -963,7 +983,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             let debugPath = logsDir + "secvf-crash-debug.txt"
             try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
 
-            fatalError("VM configuration validation failed: \(error)")
+            throw SecVFError.configurationValidationFailed(underlying: error)
         }
 
         let virtualMachine = VZVirtualMachine(configuration: virtualMachineConfiguration)
@@ -1002,12 +1022,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
             // Only create VM if it doesn't already exist (prevents disk re-attachment errors)
             if self.virtualMachines[vmId] == nil {
-                self.createVirtualMachine(for: vmId)
+                do {
+                    try self.createVirtualMachine(for: vmId)
+                } catch {
+                    VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
+                    let secvfError = (error as? SecVFError) ?? SecVFError.vmConfigInvalid(reason: error.localizedDescription)
+                    AlertPresenter.showVMErrorWithLogOption(secvfError, vmName: vmConfig.name)
+                    return
+                }
             }
 
             guard let virtualMachine = self.virtualMachines[vmId],
                   let virtualMachineView = self.vmViews[vmId] else {
                 NSLog("[VM] ERROR: VM or view not found for vmId: \(vmId)")
+                VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
                 return
             }
 
@@ -1033,7 +1061,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     return
                 }
                 #endif
-                fatalError("macOS guest VMs are only supported on Apple Silicon with macOS 12.0+")
+                // If we reach here on non-ARM or old macOS, show error
+                VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
+                AlertPresenter.showVMError(SecVFError.appleSiliconRequired, vmName: vmConfig.name)
+                return
             }
 
             NSLog("[VM] Starting virtual machine: %@", vmConfig.name)
@@ -1069,7 +1100,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     let debugPath = logsDir + "secvf-crash-debug.txt"
                     try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
 
-                    fatalError("Virtual machine failed to start with error: \(error)")
+                    // Show error to user instead of crashing
+                    let vmError = SecVFError.vmStartFailed(underlying: error)
+                    AlertPresenter.showVMErrorWithLogOption(vmError, vmName: vmConfig.name)
 
                 default:
                     print("Virtual machine successfully started.")

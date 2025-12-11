@@ -1,0 +1,183 @@
+//
+//  SecVFError.swift
+//  SecVF
+//
+//  Typed error definitions for graceful error handling
+//  Replaces fatalError() calls with recoverable errors
+//
+
+import Foundation
+
+/// Errors that can occur during VM operations
+enum SecVFError: LocalizedError {
+    // MARK: - VM Configuration Errors
+    case vmConfigNotFound(vmId: UUID)
+    case vmConfigInvalid(reason: String)
+
+    // MARK: - Disk Errors
+    case diskAttachmentFailed(path: String, underlying: Error?)
+    case diskImageNotFound(path: String)
+    case installerISONotFound(vmId: UUID)
+    case installerAttachmentFailed(path: String)
+    case invalidDiskConfiguration
+
+    // MARK: - Machine Identifier Errors
+    case machineIdentifierNotFound(path: String)
+    case machineIdentifierDataInvalid
+    case machineIdentifierCreationFailed
+
+    // MARK: - NVRAM/EFI Errors
+    case nvramNotFound(path: String)
+    case nvramCreationFailed(path: String)
+
+    // MARK: - macOS-Specific Errors
+    case macOSVersionTooOld(required: String, current: String)
+    case appleSiliconRequired
+    case hardwareModelNotFound
+    case hardwareModelDataInvalid
+    case hardwareModelCreationFailed
+    case auxiliaryStorageFailed(path: String)
+    case restoreImageNotProvided
+    case restoreImageHardwareModelFailed
+
+    // MARK: - VM Lifecycle Errors
+    case configurationValidationFailed(underlying: Error)
+    case vmStartFailed(underlying: Error)
+    case vmAlreadyRunning(vmId: UUID)
+    case vmNotRunning(vmId: UUID)
+
+    // MARK: - Network Errors
+    case networkConfigurationFailed(reason: String)
+    case virtualSwitchConnectionFailed
+
+    // MARK: - Graphics Errors
+    case graphicsConfigurationFailed
+
+    var errorDescription: String? {
+        switch self {
+        // VM Configuration
+        case .vmConfigNotFound(let vmId):
+            return "VM configuration not found for ID: \(vmId.uuidString)"
+        case .vmConfigInvalid(let reason):
+            return "VM configuration is invalid: \(reason)"
+
+        // Disk
+        case .diskAttachmentFailed(let path, let error):
+            let underlying = error?.localizedDescription ?? "unknown error"
+            return "Failed to create disk attachment at \(path): \(underlying)"
+        case .diskImageNotFound(let path):
+            return "Disk image not found at: \(path)"
+        case .installerISONotFound(let vmId):
+            return "Installer ISO not found for VM: \(vmId.uuidString)"
+        case .installerAttachmentFailed(let path):
+            return "Failed to create installer disk attachment at: \(path)"
+        case .invalidDiskConfiguration:
+            return "Invalid disk configuration provided"
+
+        // Machine Identifier
+        case .machineIdentifierNotFound(let path):
+            return "Machine identifier file not found at: \(path)"
+        case .machineIdentifierDataInvalid:
+            return "Machine identifier data is invalid or corrupted"
+        case .machineIdentifierCreationFailed:
+            return "Failed to create machine identifier from data"
+
+        // NVRAM/EFI
+        case .nvramNotFound(let path):
+            return "NVRAM/EFI variable store not found at: \(path)"
+        case .nvramCreationFailed(let path):
+            return "Failed to create NVRAM at: \(path)"
+
+        // macOS-Specific
+        case .macOSVersionTooOld(let required, let current):
+            return "macOS \(required) or later required (current: \(current))"
+        case .appleSiliconRequired:
+            return "macOS guest VMs are only supported on Apple Silicon"
+        case .hardwareModelNotFound:
+            return "Hardware model file not found"
+        case .hardwareModelDataInvalid:
+            return "Hardware model data is invalid or corrupted"
+        case .hardwareModelCreationFailed:
+            return "Failed to create hardware model from data"
+        case .auxiliaryStorageFailed(let path):
+            return "Failed to create auxiliary storage at: \(path)"
+        case .restoreImageNotProvided:
+            return "No restore image (IPSW) path provided for macOS installation"
+        case .restoreImageHardwareModelFailed:
+            return "Failed to extract hardware model from restore image"
+
+        // VM Lifecycle
+        case .configurationValidationFailed(let error):
+            return "VM configuration validation failed: \(error.localizedDescription)"
+        case .vmStartFailed(let error):
+            return "Failed to start virtual machine: \(error.localizedDescription)"
+        case .vmAlreadyRunning(let vmId):
+            return "VM is already running: \(vmId.uuidString)"
+        case .vmNotRunning(let vmId):
+            return "VM is not running: \(vmId.uuidString)"
+
+        // Network
+        case .networkConfigurationFailed(let reason):
+            return "Network configuration failed: \(reason)"
+        case .virtualSwitchConnectionFailed:
+            return "Failed to connect to virtual network switch"
+
+        // Graphics
+        case .graphicsConfigurationFailed:
+            return "Failed to configure graphics device"
+        }
+    }
+
+    var recoverySuggestion: String? {
+        switch self {
+        case .vmConfigNotFound:
+            return "The VM may have been deleted. Try refreshing the VM list."
+        case .diskImageNotFound, .diskAttachmentFailed:
+            return "Check that the VM's disk image exists and is not corrupted."
+        case .installerISONotFound:
+            return "Download the installer ISO again using the ISO Cache Manager."
+        case .macOSVersionTooOld:
+            return "Update your Mac to the latest version of macOS."
+        case .appleSiliconRequired:
+            return "macOS VMs can only run on Macs with Apple Silicon (M1/M2/M3)."
+        case .configurationValidationFailed:
+            return "Check the VM configuration for invalid settings."
+        case .vmStartFailed:
+            return "Try stopping any other running VMs and restart this one."
+        default:
+            return nil
+        }
+    }
+}
+
+// MARK: - Error Logging Extension
+
+extension SecVFError {
+    /// Log error to security audit log
+    func logToAudit() {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let logEntry = "[\(timestamp)] ERROR: \(self.localizedDescription)\n"
+
+        let logsDir = NSHomeDirectory() + "/.avf/logs/"
+        let logPath = logsDir + "error-audit.log"
+
+        // Ensure directory exists
+        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+
+        if let data = logEntry.data(using: .utf8) {
+            if FileManager.default.fileExists(atPath: logPath) {
+                if let handle = FileHandle(forWritingAtPath: logPath) {
+                    handle.seekToEndOfFile()
+                    handle.write(data)
+                    handle.closeFile()
+                }
+            } else {
+                try? data.write(to: URL(fileURLWithPath: logPath))
+            }
+        }
+
+        // Also log to system console
+        NSLog("[SecVF ERROR] %@", self.localizedDescription)
+    }
+}
