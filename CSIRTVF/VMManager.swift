@@ -276,8 +276,14 @@ class VMManager {
                   diskSize: UInt64,
                   osType: String = "Linux") throws -> VMConfiguration {
 
-        // Validate name
-        guard !name.isEmpty else {
+        // SECURITY: Validate name and prevent path traversal attacks
+        // Reject empty names, path separators, parent directory references, hidden files, and overly long names
+        guard !name.isEmpty,
+              !name.contains("/"),
+              !name.contains("\\"),
+              !name.contains(".."),
+              !name.hasPrefix("."),
+              name.utf8.count <= 255 else {
             throw VMError.invalidName
         }
 
@@ -369,7 +375,13 @@ class VMManager {
     }
 
     func renameVM(_ vmConfig: VMConfiguration, newName: String) throws {
-        guard !newName.isEmpty else {
+        // SECURITY: Validate name and prevent path traversal attacks
+        guard !newName.isEmpty,
+              !newName.contains("/"),
+              !newName.contains("\\"),
+              !newName.contains(".."),
+              !newName.hasPrefix("."),
+              newName.utf8.count <= 255 else {
             throw VMError.invalidName
         }
 
@@ -403,7 +415,13 @@ class VMManager {
     }
 
     func cloneVM(_ vmConfig: VMConfiguration, newName: String) throws -> VMConfiguration {
-        guard !newName.isEmpty else {
+        // SECURITY: Validate name and prevent path traversal attacks
+        guard !newName.isEmpty,
+              !newName.contains("/"),
+              !newName.contains("\\"),
+              !newName.contains(".."),
+              !newName.hasPrefix("."),
+              newName.utf8.count <= 255 else {
             throw VMError.invalidName
         }
 
