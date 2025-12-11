@@ -996,7 +996,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     private func startStatsUpdateTimer() {
-        statsUpdateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        // PERFORMANCE: 2.0s interval is sufficient for stats display - 0.5s was excessive
+        // Network stats don't change rapidly enough to warrant 2Hz updates
+        statsUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             self?.updateNetworkStats()
         }
     }
