@@ -593,14 +593,35 @@ class ISOCacheManager {
         return true
     }
 
-    // SECURITY: Verify SHA256 checksum
+    // SECURITY: Verify SHA256 checksum using streaming to avoid loading entire file into memory
+    // This is critical for large ISO files (4-8GB) that would otherwise cause memory pressure
     func verifySHA256(file: URL, expectedHash: String) -> Bool {
-        guard let fileData = try? Data(contentsOf: file) else {
-            print("SECURITY: Failed to read file for SHA256 verification")
+        guard let inputStream = InputStream(url: file) else {
+            print("SECURITY: Failed to open file stream for SHA256 verification")
             return false
         }
 
-        let digest = SHA256.hash(data: fileData)
+        inputStream.open()
+        defer { inputStream.close() }
+
+        // Use 1MB buffer for streaming hash - balances memory usage vs I/O efficiency
+        let bufferSize = 1024 * 1024  // 1MB chunks
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        var hasher = SHA256()
+
+        while inputStream.hasBytesAvailable {
+            let bytesRead = inputStream.read(&buffer, maxLength: bufferSize)
+            if bytesRead < 0 {
+                print("SECURITY: Error reading file during SHA256 verification: \(inputStream.streamError?.localizedDescription ?? "unknown error")")
+                return false
+            }
+            if bytesRead == 0 {
+                break
+            }
+            hasher.update(data: Data(buffer[0..<bytesRead]))
+        }
+
+        let digest = hasher.finalize()
         let calculatedHash = digest.compactMap { String(format: "%02x", $0) }.joined()
 
         let match = calculatedHash.lowercased() == expectedHash.lowercased()

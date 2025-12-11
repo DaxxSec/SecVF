@@ -27,6 +27,12 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     private var currentFilter: String = ""
     private var autoScroll: Bool = true
 
+    // PERFORMANCE: Batched packet updates to reduce UI redraws during high-traffic captures
+    private var packetBuffer: [CapturedPacket] = []
+    private var batchUpdateTimer: Timer?
+    private let batchInterval: TimeInterval = 0.25  // Flush buffer 4x per second
+    private let maxBufferSize: Int = 100  // Flush immediately if buffer exceeds this
+
     // MARK: - Initialization
 
     init() {
@@ -52,6 +58,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     deinit {
+        batchUpdateTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -386,12 +393,18 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
     @objc private func stopCapture(_ sender: Any) {
         PacketCaptureManager.shared.stopCapture()
+        // Flush any pending packets before showing stopped state
+        flushPacketBuffer()
         updateButtonStates()
         updateStatus()
     }
 
     @objc private func clearPackets(_ sender: Any) {
         PacketCaptureManager.shared.clearPackets()
+        // Clear buffer and stop batch timer
+        batchUpdateTimer?.invalidate()
+        batchUpdateTimer = nil
+        packetBuffer.removeAll()
         displayedPackets.removeAll()
         packetTableView.reloadData()
         detailTextView.string = ""
@@ -535,17 +548,46 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     // MARK: - Data Management
 
     private func addPacket(_ packet: CapturedPacket) {
-        // Apply filter
+        // PERFORMANCE: Buffer packets instead of updating UI for each one
+        // This dramatically reduces CPU usage during high-traffic captures
         if passesFilter(packet) {
-            displayedPackets.append(packet)
-            packetTableView.reloadData()
+            packetBuffer.append(packet)
 
-            if autoScroll {
-                packetTableView.scrollRowToVisible(displayedPackets.count - 1)
+            // Flush immediately if buffer is full (prevent unbounded memory growth)
+            if packetBuffer.count >= maxBufferSize {
+                flushPacketBuffer()
+            } else {
+                // Start coalescing timer if not already running
+                startBatchTimerIfNeeded()
             }
-
-            updateStatus()
         }
+    }
+
+    private func startBatchTimerIfNeeded() {
+        guard batchUpdateTimer == nil else { return }
+        batchUpdateTimer = Timer.scheduledTimer(withTimeInterval: batchInterval, repeats: false) { [weak self] _ in
+            self?.flushPacketBuffer()
+        }
+    }
+
+    private func flushPacketBuffer() {
+        batchUpdateTimer?.invalidate()
+        batchUpdateTimer = nil
+
+        guard !packetBuffer.isEmpty else { return }
+
+        // Batch append all buffered packets
+        displayedPackets.append(contentsOf: packetBuffer)
+        packetBuffer.removeAll(keepingCapacity: true)
+
+        // Single UI update for entire batch
+        packetTableView.reloadData()
+
+        if autoScroll {
+            packetTableView.scrollRowToVisible(displayedPackets.count - 1)
+        }
+
+        updateStatus()
     }
 
     private func reloadPackets() {
