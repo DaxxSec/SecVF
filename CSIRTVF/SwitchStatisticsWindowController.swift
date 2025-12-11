@@ -9,6 +9,7 @@
 
 import Cocoa
 
+@MainActor
 class SwitchStatisticsWindowController: NSWindowController {
 
     private var textView: NSTextView!

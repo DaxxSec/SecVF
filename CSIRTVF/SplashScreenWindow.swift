@@ -8,6 +8,7 @@
 
 import Cocoa
 
+@MainActor
 class SplashScreenWindow: NSWindow {
 
     private var logoImageView: NSImageView!
@@ -293,6 +294,7 @@ class SplashScreenWindow: NSWindow {
 }
 
 // Custom gradient view
+@MainActor
 class GradientView: NSView {
     var colors: [NSColor] = [] {
         didSet {
