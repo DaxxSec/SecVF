@@ -865,7 +865,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Create attributed string with protocol coloring
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 8, weight: .regular),
-            .foregroundColor: colorForProtocol(packet.protocol)
+            .foregroundColor: NetworkProtocolColors.color(for: packet.protocol)
         ]
 
         let attrStr = NSAttributedString(string: line, attributes: attrs)
@@ -882,19 +882,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         textView.scrollToEndOfDocument(nil)
     }
 
-    private func colorForProtocol(_ proto: String) -> NSColor {
-        switch proto.uppercased() {
-        case "TCP": return NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0)   // Light blue
-        case "UDP": return NSColor(red: 0.6, green: 1.0, blue: 0.6, alpha: 1.0)   // Light green
-        case "HTTP", "HTTPS": return NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)  // Neon green
-        case "DNS": return NSColor(red: 1.0, green: 1.0, blue: 0.4, alpha: 1.0)   // Yellow
-        case "ARP": return NSColor(red: 1.0, green: 0.6, blue: 0.4, alpha: 1.0)   // Orange
-        case "ICMP": return NSColor(red: 1.0, green: 0.4, blue: 0.8, alpha: 1.0)  // Pink
-        case "TLS", "SSL": return NSColor(red: 0.8, green: 0.6, blue: 1.0, alpha: 1.0)  // Purple
-        default: return NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)      // Default cyan
-        }
-    }
-
     private func updateProtocolStatsDisplay() {
         guard let container = protocolStatsContainer else { return }
 
@@ -909,7 +896,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let label = NSTextField(labelWithString: "\(stat.protocol): \(stat.count)")
             label.frame = NSRect(x: 5, y: yOffset, width: container.bounds.width - 10, height: 16)
             label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-            label.textColor = colorForProtocol(stat.protocol)
+            label.textColor = NetworkProtocolColors.color(for: stat.protocol)
             label.isBordered = false
             label.drawsBackground = false
             container.addSubview(label)
