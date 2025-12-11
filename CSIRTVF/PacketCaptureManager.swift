@@ -7,6 +7,7 @@
 
 import Foundation
 import os
+import Combine
 
 // MARK: - Data Structures
 
@@ -56,8 +57,32 @@ class PacketCaptureManager {
     private let captureQueue = DispatchQueue(label: "com.secvf.packetcapture", qos: .userInitiated)
     private let parseQueue = DispatchQueue(label: "com.secvf.packetparse", qos: .utility)
 
+    // MARK: - Combine Publishers (reactive updates)
+
+    /// Publisher that emits each captured packet as it arrives
+    private let packetSubject = PassthroughSubject<CapturedPacket, Never>()
+    var packetsPublisher: AnyPublisher<CapturedPacket, Never> {
+        packetSubject.eraseToAnyPublisher()
+    }
+
+    /// Publisher that emits protocol statistics updates
+    private let statsSubject = PassthroughSubject<[ProtocolCount], Never>()
+    var protocolStatsPublisher: AnyPublisher<[ProtocolCount], Never> {
+        statsSubject.eraseToAnyPublisher()
+    }
+
+    /// Publisher that emits capture state changes (true = capturing, false = stopped)
+    private let captureStateSubject = CurrentValueSubject<Bool, Never>(false)
+    var captureStatePublisher: AnyPublisher<Bool, Never> {
+        captureStateSubject.eraseToAnyPublisher()
+    }
+
     // Capture state
-    private(set) var isCapturing = false
+    private(set) var isCapturing = false {
+        didSet {
+            captureStateSubject.send(isCapturing)
+        }
+    }
     private var tsharkProcess: Process?
     private var fifoPath: String?
     private var fifoWriteHandle: FileHandle?
@@ -596,7 +621,11 @@ class PacketCaptureManager {
         }
 
         // Notify observers on main thread for reliable UI updates
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            // Publish via Combine
+            self?.packetSubject.send(packet)
+
+            // Also post notification for backwards compatibility
             NotificationCenter.default.post(
                 name: .packetCaptured,
                 object: nil,
@@ -614,8 +643,14 @@ class PacketCaptureManager {
             protocolCounts[proto] = ProtocolCount(protocol: proto, count: 1, bytes: bytes)
         }
 
+        let currentStats = Array(protocolCounts.values).sorted { $0.count > $1.count }
+
         // Notify on main thread for reliable UI updates
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            // Publish via Combine
+            self?.statsSubject.send(currentStats)
+
+            // Also post notification for backwards compatibility
             NotificationCenter.default.post(name: .protocolStatsUpdated, object: nil)
         }
     }
