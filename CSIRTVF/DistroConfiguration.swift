@@ -91,11 +91,25 @@ class DistroConfigurationManager {
 
     /// Load configuration, preferring user override over bundle default
     private func loadConfiguration() {
-        // Try user override first
+        // First, load bundle config to get the authoritative approved domains list
+        var bundleApprovedDomains: Set<String> = []
+        if let bundlePath = Bundle.main.path(forResource: "distros", ofType: "json"),
+           let bundleConfig = loadConfigFromPath(bundlePath) {
+            bundleApprovedDomains = Set(bundleConfig.approvedDomains)
+        }
+
+        // Try user override first (but validate against bundle's approved domains)
         if FileManager.default.fileExists(atPath: userConfigPath) {
-            if loadFromPath(userConfigPath) {
-                NSLog("DistroConfigurationManager: Loaded user config from \(userConfigPath)")
-                return
+            if let userConfig = loadConfigFromPath(userConfigPath) {
+                // SECURITY: Validate that user config only uses approved domains from bundle
+                if validateUserConfig(userConfig, approvedDomains: bundleApprovedDomains) {
+                    configFile = userConfig
+                    buildIndex()
+                    NSLog("DistroConfigurationManager: Loaded user config from \(userConfigPath)")
+                    return
+                } else {
+                    NSLog("DistroConfigurationManager: SECURITY - User config rejected (unapproved domains)")
+                }
             }
             NSLog("DistroConfigurationManager: Failed to load user config, falling back to bundle")
         }
@@ -111,6 +125,43 @@ class DistroConfigurationManager {
         // If all else fails, use hardcoded defaults
         NSLog("DistroConfigurationManager: No config found, using hardcoded defaults")
         loadHardcodedDefaults()
+    }
+
+    /// SECURITY: Validate user config against bundle's approved domains
+    /// This prevents users from accidentally or maliciously adding untrusted download sources
+    private func validateUserConfig(_ config: DistroConfigurationFile, approvedDomains: Set<String>) -> Bool {
+        // If bundle has no approved domains, fall back to config's own domains (less secure)
+        let domainsToCheck = approvedDomains.isEmpty ? Set(config.approvedDomains) : approvedDomains
+
+        for distro in config.distributions {
+            guard let url = URL(string: distro.downloadURL),
+                  url.scheme == "https",
+                  let host = url.host?.lowercased(),
+                  domainsToCheck.contains(host) else {
+                NSLog("DistroConfigurationManager: SECURITY ALERT - Rejected URL from unapproved domain: \(distro.downloadURL)")
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Load and parse config from path without setting it as active
+    private func loadConfigFromPath(_ path: String) -> DistroConfigurationFile? {
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            return try JSONDecoder().decode(DistroConfigurationFile.self, from: data)
+        } catch {
+            NSLog("DistroConfigurationManager: Error parsing \(path): \(error)")
+            return nil
+        }
+    }
+
+    /// Build the distrosByID index from current configFile
+    private func buildIndex() {
+        distrosByID = [:]
+        for distro in configFile?.distributions ?? [] {
+            distrosByID[distro.id] = distro
+        }
     }
 
     /// Load configuration from a specific file path
