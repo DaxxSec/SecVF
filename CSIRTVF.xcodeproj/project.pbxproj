@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ALERT001ALERT001ALERT001 /* AlertPresenter.swift */; };
 		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
+		DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */; };
+		DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */ = {isa = PBXBuildFile; fileRef = DSTJ001DSTJ001DSTJ001001 /* distros.json */; };
 		CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSERR001CSERR001CSERR001 /* SecVFError.swift */; };
 		LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */; };
 		NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */; };
@@ -95,6 +97,8 @@
 		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
 		NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSwitchProtocol.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
+		DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroConfiguration.swift; sourceTree = "<group>"; };
+		DSTJ001DSTJ001DSTJ001001 /* distros.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = distros.json; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -150,9 +154,11 @@
 			isa = PBXGroup;
 			children = (
 				PROT000PROT000PROT000000 /* Protocols */,
+				RSRC000RSRC000RSRC000000 /* Resources */,
 				ALERT001ALERT001ALERT001 /* AlertPresenter.swift */,
 				APPCO001APPCO001APPCO001 /* AppColors.swift */,
 				CSERR001CSERR001CSERR001 /* SecVFError.swift */,
+				DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */,
 				LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */,
 				NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
@@ -218,6 +224,14 @@
 				PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */,
 			);
 			path = Protocols;
+			sourceTree = "<group>";
+		};
+		RSRC000RSRC000RSRC000000 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				DSTJ001DSTJ001DSTJ001001 /* distros.json */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -306,6 +320,7 @@
 				8FF8299227500C070037FA83 /* MainMenu.xib in Resources */,
 				AA5555AA55555555AA555AA5 /* VMLibraryWindow.xib in Resources */,
 				8CF202812EC84FE400AABC0F /* build-release.sh in Resources */,
+				DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -326,6 +341,7 @@
 				ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */,
 				APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */,
 				CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */,
+				DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */,
 				LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */,
 				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
