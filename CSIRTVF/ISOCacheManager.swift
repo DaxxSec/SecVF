@@ -33,10 +33,25 @@ enum LinuxDistro: String, Codable {
     case arch = "Arch"
     case manjaro = "Manjaro"
 
+    // MARK: - JSON Configuration Delegation
+    // These properties delegate to DistroConfigurationManager when available,
+    // falling back to hardcoded defaults if the JSON config isn't loaded.
+
+    /// Get configuration from JSON manager
+    private var jsonConfig: DistroConfiguration? {
+        return DistroConfigurationManager.shared.configuration(for: self)
+    }
+
     // Release date of the current version
-    // Uses safe date initialization with fallback to avoid force unwraps
     var releaseDate: Date {
-        // Static formatter for consistent date parsing
+        if let config = jsonConfig {
+            return config.releaseDateParsed
+        }
+        return releaseDateFallback
+    }
+
+    // Fallback release date (hardcoded)
+    private var releaseDateFallback: Date {
         let formatter: DateFormatter = {
             let f = DateFormatter()
             f.dateFormat = "yyyy-MM-dd"
@@ -46,46 +61,50 @@ enum LinuxDistro: String, Codable {
 
         let dateString: String
         switch self {
-        case .ubuntu:       dateString = "2024-04-25"  // Ubuntu 24.04 LTS Desktop
-        case .ubuntuServer: dateString = "2024-04-25"  // Ubuntu 24.04 LTS Server
-        case .debian:       dateString = "2023-06-10"  // Debian 12
-        case .fedora:       dateString = "2023-11-07"  // Fedora 39
-        case .kali:         dateString = "2024-03-11"  // Kali 2024.1
-        case .parrot:       dateString = "2024-01-15"  // Parrot 6.0
-        case .arch:         dateString = "2024-11-01"  // Rolling release - approximate
-        case .manjaro:      dateString = "2024-01-28"  // Manjaro 23.1.3
+        case .ubuntu:       dateString = "2024-04-25"
+        case .ubuntuServer: dateString = "2024-04-25"
+        case .debian:       dateString = "2023-06-10"
+        case .fedora:       dateString = "2023-11-07"
+        case .kali:         dateString = "2024-03-11"
+        case .parrot:       dateString = "2024-01-15"
+        case .arch:         dateString = "2024-11-01"
+        case .manjaro:      dateString = "2024-01-28"
         }
-
-        // Safe fallback: if parsing fails (should never happen with hardcoded dates),
-        // return a distant past date rather than crashing
         return formatter.date(from: dateString) ?? Date.distantPast
     }
 
     // Version string
     var version: String {
+        if let config = jsonConfig {
+            return config.version
+        }
+        return versionFallback
+    }
+
+    // Fallback version (hardcoded)
+    private var versionFallback: String {
         switch self {
-        case .ubuntu:
-            return "24.04"
-        case .ubuntuServer:
-            return "24.04"
-        case .debian:
-            return "12.0"
-        case .fedora:
-            return "39"
-        case .kali:
-            return "2025.3"
-        case .parrot:
-            return "6.0"
-        case .arch:
-            return "Latest"
-        case .manjaro:
-            return "23.1.3"
+        case .ubuntu:       return "24.04"
+        case .ubuntuServer: return "24.04"
+        case .debian:       return "12.0"
+        case .fedora:       return "39"
+        case .kali:         return "2025.3"
+        case .parrot:       return "6.0"
+        case .arch:         return "Latest"
+        case .manjaro:      return "23.1.3"
         }
     }
 
-    // SECURITY: Hardcoded official CDN URLs only
-    // Only distros with dedicated official CDNs are supported
+    // SECURITY: Official CDN URLs - delegates to JSON config
     var downloadURL: String {
+        if let config = jsonConfig {
+            return config.downloadURL
+        }
+        return downloadURLFallback
+    }
+
+    // Fallback download URL (hardcoded)
+    private var downloadURLFallback: String {
         switch self {
         case .ubuntu:
             return "https://cdimage.ubuntu.com/releases/24.04/release/ubuntu-24.04-desktop-arm64.iso"
@@ -106,61 +125,64 @@ enum LinuxDistro: String, Codable {
         }
     }
 
-    // SECURITY: SHA256 checksums from official sources for integrity verification
-    // TODO: Update these with actual checksums from each distro's official site
+    // SECURITY: SHA256 checksums - delegates to JSON config
     var sha256Checksum: String {
+        if let config = jsonConfig {
+            return config.sha256Checksum
+        }
+        return sha256ChecksumFallback
+    }
+
+    // Fallback checksum (hardcoded)
+    private var sha256ChecksumFallback: String {
         switch self {
-        case .ubuntu:
-            return "PLACEHOLDER_UPDATE_FROM_UBUNTU_DESKTOP_CHECKSUMS"
-        case .ubuntuServer:
-            return "PLACEHOLDER_UPDATE_FROM_UBUNTU_SERVER_CHECKSUMS"
-        case .debian:
-            return "PLACEHOLDER_UPDATE_FROM_DEBIAN_CHECKSUMS"
-        case .fedora:
-            return "PLACEHOLDER_UPDATE_FROM_FEDORA_CHECKSUMS"
-        case .kali:
-            return "7a5ce065113af70d9c2924ff3019a986f4df784c5bc0929b10cc2d05892e9445"
-        case .parrot:
-            return "PLACEHOLDER_UPDATE_FROM_PARROT_CHECKSUMS"
-        case .arch:
-            return "PLACEHOLDER_UPDATE_FROM_ARCH_CHECKSUMS"
-        case .manjaro:
-            return "PLACEHOLDER_UPDATE_FROM_MANJARO_CHECKSUMS"
+        case .ubuntu:       return "PLACEHOLDER_UPDATE_FROM_UBUNTU_DESKTOP_CHECKSUMS"
+        case .ubuntuServer: return "PLACEHOLDER_UPDATE_FROM_UBUNTU_SERVER_CHECKSUMS"
+        case .debian:       return "PLACEHOLDER_UPDATE_FROM_DEBIAN_CHECKSUMS"
+        case .fedora:       return "PLACEHOLDER_UPDATE_FROM_FEDORA_CHECKSUMS"
+        case .kali:         return "7a5ce065113af70d9c2924ff3019a986f4df784c5bc0929b10cc2d05892e9445"
+        case .parrot:       return "PLACEHOLDER_UPDATE_FROM_PARROT_CHECKSUMS"
+        case .arch:         return "PLACEHOLDER_UPDATE_FROM_ARCH_CHECKSUMS"
+        case .manjaro:      return "PLACEHOLDER_UPDATE_FROM_MANJARO_CHECKSUMS"
         }
     }
 
-    // SECURITY: Per-distro size limits (more restrictive than blanket 20GB)
-    // Prevents malicious mirrors from serving oversized files that fill disk
+    // SECURITY: Per-distro size limits - delegates to JSON config
     var expectedMaxSizeGB: Double {
+        if let config = jsonConfig {
+            return config.expectedMaxSizeGB
+        }
+        return expectedMaxSizeGBFallback
+    }
+
+    // Fallback size limit (hardcoded)
+    private var expectedMaxSizeGBFallback: Double {
         switch self {
-        case .ubuntu:
-            return 6.0      // Ubuntu Desktop ~5.5GB
-        case .ubuntuServer:
-            return 3.0      // Ubuntu Server ~2.5GB
-        case .debian:
-            return 4.0      // Debian netinst ~600MB, full ~4GB
-        case .fedora:
-            return 7.0      // Fedora Server DVD ~6.5GB
-        case .kali:
-            return 8.0      // Kali installer ~4GB, full ~8GB
-        case .parrot:
-            return 6.0      // Parrot Security ~5GB
-        case .arch:
-            return 2.0      // Arch minimal ~800MB
-        case .manjaro:
-            return 5.0      // Manjaro minimal ~4GB
+        case .ubuntu:       return 6.0
+        case .ubuntuServer: return 3.0
+        case .debian:       return 4.0
+        case .fedora:       return 7.0
+        case .kali:         return 8.0
+        case .parrot:       return 6.0
+        case .arch:         return 2.0
+        case .manjaro:      return 5.0
         }
     }
 
-    // SECURITY: Whitelist of approved download domains (official CDNs only)
+    // SECURITY: Whitelist of approved download domains - delegates to JSON config
     static var approvedDomains: Set<String> {
+        let jsonDomains = DistroConfigurationManager.shared.approvedDomains
+        if !jsonDomains.isEmpty {
+            return jsonDomains
+        }
+        // Fallback hardcoded domains
         return [
             "cdimage.ubuntu.com",
             "cdimage.debian.org",
             "download.fedoraproject.org",
             "cdimage.kali.org",
             "download.parrot.sh",
-            "geo.mirror.pkgbuild.com",  // Official Arch mirror redirector
+            "geo.mirror.pkgbuild.com",
             "download.manjaro.org"
         ]
     }
