@@ -14,6 +14,55 @@ import Foundation
 
 // MARK: - Data Model
 
+/// Strategy for parsing version directories
+enum VersionDiscoveryStrategy: String, Codable {
+    case ubuntuReleases      // /releases/{version}/release/
+    case debianCurrent       // /debian-cd/current/ with version in filename
+    case kaliReleases        // /kali-{version}/
+    case fedoraReleases      // /pub/fedora/linux/releases/{version}/
+    case archMonthly         // /iso/{YYYY.MM.DD}/
+    case manjaroReleases     // /{edition}/{version}/
+    case genericDirectory    // Simple directory listing
+}
+
+/// Represents a discovered distro version with download info
+struct DiscoveredVersion: Identifiable, Hashable {
+    let id = UUID()
+    let version: String
+    let displayName: String
+    let downloadURL: String
+    let checksumURL: String?
+    let releaseDate: Date?
+    let fileSize: Int64?
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(version)
+        hasher.combine(downloadURL)
+    }
+
+    static func == (lhs: DiscoveredVersion, rhs: DiscoveredVersion) -> Bool {
+        lhs.version == rhs.version && lhs.downloadURL == rhs.downloadURL
+    }
+}
+
+/// Version discovery configuration for dynamic version detection
+struct VersionDiscoveryConfig: Codable {
+    /// Whether version discovery is enabled for this distro
+    let enabled: Bool
+
+    /// Base URL for version discovery (e.g., "https://cdimage.ubuntu.com/releases/")
+    let baseURL: String
+
+    /// Strategy for parsing the directory listing
+    let strategy: VersionDiscoveryStrategy
+
+    /// Filename pattern to match (e.g., "ubuntu-*-desktop-arm64.iso")
+    let filenamePattern: String
+
+    /// Target architecture (e.g., "arm64", "aarch64", "x86_64")
+    let architecture: String
+}
+
 /// Configuration for a single Linux distribution
 struct DistroConfiguration: Codable, Identifiable {
     /// Unique identifier matching LinuxDistro raw value (e.g., "Ubuntu Desktop", "Kali")
@@ -44,10 +93,14 @@ struct DistroConfiguration: Codable, Identifiable {
     /// Format of the checksum file (defaults to sha256sums if not specified)
     let checksumFormat: ChecksumFileFormat?
 
+    /// Version discovery configuration for dynamic version detection
+    let versionDiscovery: VersionDiscoveryConfig?
+
     /// Coding keys to handle optional fields with defaults
     enum CodingKeys: String, CodingKey {
         case id, displayName, version, releaseDate, downloadURL
         case sha256Checksum, expectedMaxSizeGB, checksumURL, checksumFormat
+        case versionDiscovery
     }
 
     /// Custom decoder to handle optional fields
@@ -62,12 +115,14 @@ struct DistroConfiguration: Codable, Identifiable {
         expectedMaxSizeGB = try container.decode(Double.self, forKey: .expectedMaxSizeGB)
         checksumURL = try container.decodeIfPresent(String.self, forKey: .checksumURL)
         checksumFormat = try container.decodeIfPresent(ChecksumFileFormat.self, forKey: .checksumFormat)
+        versionDiscovery = try container.decodeIfPresent(VersionDiscoveryConfig.self, forKey: .versionDiscovery)
     }
 
     /// Manual initializer for hardcoded defaults
     init(id: String, displayName: String, version: String, releaseDate: String,
          downloadURL: String, sha256Checksum: String, expectedMaxSizeGB: Double,
-         checksumURL: String? = nil, checksumFormat: ChecksumFileFormat? = nil) {
+         checksumURL: String? = nil, checksumFormat: ChecksumFileFormat? = nil,
+         versionDiscovery: VersionDiscoveryConfig? = nil) {
         self.id = id
         self.displayName = displayName
         self.version = version
@@ -77,6 +132,7 @@ struct DistroConfiguration: Codable, Identifiable {
         self.expectedMaxSizeGB = expectedMaxSizeGB
         self.checksumURL = checksumURL
         self.checksumFormat = checksumFormat
+        self.versionDiscovery = versionDiscovery
     }
 
     /// Parsed release date

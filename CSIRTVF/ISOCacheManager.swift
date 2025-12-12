@@ -315,6 +315,8 @@ class ISOCacheManager {
     /// Download image if not cached, return path when complete
     func downloadImage(
         for imageType: VMImageType,
+        customDownloadURL: String? = nil,
+        customChecksumURL: String? = nil,
         progressHandler: @escaping (Double, String) -> Void,
         completionHandler: @escaping (Result<URL, Error>) -> Void
     ) {
@@ -375,7 +377,7 @@ class ISOCacheManager {
             }
             NSLog("[ISOCacheManager] Case is Linux, no cache found")
             auditLog("Download requested: \(distro.rawValue) \(version) (router: \(isSecurityRouter))")
-            downloadLinuxISO(distro: distro, version: version, progressHandler: progressHandler, completionHandler: completionHandler)
+            downloadLinuxISO(distro: distro, version: version, customDownloadURL: customDownloadURL, customChecksumURL: customChecksumURL, progressHandler: progressHandler, completionHandler: completionHandler)
         }
         NSLog("[ISOCacheManager] downloadImage() switch completed")
     }
@@ -506,6 +508,8 @@ class ISOCacheManager {
     private func downloadLinuxISO(
         distro: LinuxDistro,
         version: String,
+        customDownloadURL: String? = nil,
+        customChecksumURL: String? = nil,
         progressHandler: @escaping (Double, String) -> Void,
         completionHandler: @escaping (Result<URL, Error>) -> Void
     ) {
@@ -514,7 +518,14 @@ class ISOCacheManager {
         // Create directory
         try? FileManager.default.createDirectory(atPath: imagePath, withIntermediateDirectories: true)
 
-        guard let url = URL(string: distro.downloadURL) else {
+        // Use custom URL if provided, otherwise fall back to distro default
+        let downloadURLString = customDownloadURL ?? distro.downloadURL
+        NSLog("[ISOCacheManager] Download URL: %@", downloadURLString)
+        if customDownloadURL != nil {
+            NSLog("[ISOCacheManager] Using custom version URL (not distro default)")
+        }
+
+        guard let url = URL(string: downloadURLString) else {
             let error = NSError(domain: "ISOCacheManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid download URL"])
             completionHandler(.failure(error))
             return

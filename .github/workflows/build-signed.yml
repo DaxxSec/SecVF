@@ -1,0 +1,141 @@
+name: Build Signed SecVF
+
+# This workflow builds and signs the app with Developer ID
+# Requires the following secrets:
+#   APPLE_CERTIFICATE_P12: Base64-encoded Developer ID certificate
+#   APPLE_CERTIFICATE_PASSWORD: Certificate password
+#   APPLE_ID: Apple ID email for notarization
+#   APPLE_APP_PASSWORD: App-specific password for notarization
+#   APPLE_TEAM_ID: Apple Developer Team ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: 'Notarize the app with Apple'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  SCHEME: SecVF
+  CONFIGURATION: Release
+  DESTINATION: 'platform=macOS,arch=arm64'
+
+jobs:
+  build-signed:
+    runs-on: macos-14
+    # Only run if signing secrets are available
+    if: ${{ vars.SIGNING_ENABLED == 'true' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select Xcode version
+      run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+    - name: Install certificate
+      env:
+        CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+        CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      run: |
+        # Create temporary keychain
+        KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+        # Create keychain
+        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+        # Import certificate
+        echo "$CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
+        security import $RUNNER_TEMP/certificate.p12 \
+          -P "$CERTIFICATE_PASSWORD" \
+          -A -t cert -f pkcs12 \
+          -k "$KEYCHAIN_PATH"
+
+        # Add keychain to search list
+        security list-keychain -d user -s "$KEYCHAIN_PATH"
+
+        # Allow codesign to access keychain
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+        echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+
+    - name: Build application (signed)
+      run: |
+        xcodebuild \
+          -scheme "$SCHEME" \
+          -configuration "$CONFIGURATION" \
+          -destination "$DESTINATION" \
+          -derivedDataPath build \
+          CODE_SIGN_STYLE=Manual \
+          CODE_SIGN_IDENTITY="Developer ID Application" \
+          OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
+          build
+
+    - name: Verify signature
+      run: |
+        APP_PATH="build/Build/Products/Release/SecVF.app"
+        codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+        spctl --assess --type execute --verbose "$APP_PATH" || true
+
+    - name: Notarize app
+      if: ${{ github.event.inputs.notarize == 'true' }}
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      run: |
+        APP_PATH="build/Build/Products/Release/SecVF.app"
+
+        # Create ZIP for notarization
+        ditto -c -k --keepParent "$APP_PATH" SecVF-notarize.zip
+
+        # Submit for notarization
+        xcrun notarytool submit SecVF-notarize.zip \
+          --apple-id "$APPLE_ID" \
+          --password "$APPLE_APP_PASSWORD" \
+          --team-id "$APPLE_TEAM_ID" \
+          --wait
+
+        # Staple the notarization ticket
+        xcrun stapler staple "$APP_PATH"
+
+        echo "App notarized and stapled successfully"
+
+    - name: Create DMG
+      run: |
+        APP_PATH="build/Build/Products/Release/SecVF.app"
+        DMG_NAME="SecVF.dmg"
+
+        mkdir -p dmg_contents
+        cp -R "$APP_PATH" dmg_contents/
+        ln -s /Applications dmg_contents/Applications
+
+        hdiutil create -volname "SecVF" \
+          -srcfolder dmg_contents \
+          -ov -format UDZO \
+          "$DMG_NAME"
+
+        # Sign the DMG
+        codesign --force --sign "Developer ID Application" "$DMG_NAME"
+
+        echo "Signed DMG created: $DMG_NAME"
+
+    - name: Upload signed DMG
+      uses: actions/upload-artifact@v4
+      with:
+        name: SecVF-Signed-DMG
+        path: SecVF.dmg
+        retention-days: 30
+
+    - name: Cleanup keychain
+      if: always()
+      run: |
+        if [ -f "$KEYCHAIN_PATH" ]; then
+          security delete-keychain "$KEYCHAIN_PATH"
+        fi

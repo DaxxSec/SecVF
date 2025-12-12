@@ -216,6 +216,7 @@ final class ProtocolAbstractionTests: XCTestCase {
 
 // MARK: - Network Traffic View Tests
 
+@MainActor
 final class NetworkTrafficViewTests: XCTestCase {
 
     func testNetworkTrafficViewInitialization() {

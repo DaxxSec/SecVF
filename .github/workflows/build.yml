@@ -1,0 +1,165 @@
+name: Build SecVF
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      create_release:
+        description: 'Create a GitHub release'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  SCHEME: SecVF
+  CONFIGURATION: Release
+  DESTINATION: 'platform=macOS,arch=arm64'
+
+jobs:
+  build:
+    runs-on: macos-14  # macOS Sonoma with Xcode 15+
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select Xcode version
+      run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+    - name: Show Xcode version
+      run: xcodebuild -version
+
+    - name: Build application
+      run: |
+        xcodebuild \
+          -scheme "$SCHEME" \
+          -configuration "$CONFIGURATION" \
+          -destination "$DESTINATION" \
+          -derivedDataPath build \
+          CODE_SIGN_IDENTITY="-" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO \
+          build
+
+    - name: Prepare app bundle
+      run: |
+        APP_PATH="build/Build/Products/Release/SecVF.app"
+
+        # Verify app exists
+        if [ ! -d "$APP_PATH" ]; then
+          echo "Error: App bundle not found at $APP_PATH"
+          find build -name "*.app" -type d
+          exit 1
+        fi
+
+        echo "App bundle found at: $APP_PATH"
+        ls -la "$APP_PATH"
+
+    - name: Create DMG
+      run: |
+        APP_PATH="build/Build/Products/Release/SecVF.app"
+        DMG_NAME="SecVF-unsigned.dmg"
+
+        # Create temporary directory for DMG contents
+        mkdir -p dmg_contents
+        cp -R "$APP_PATH" dmg_contents/
+
+        # Create symlink to Applications
+        ln -s /Applications dmg_contents/Applications
+
+        # Create DMG
+        hdiutil create -volname "SecVF" \
+          -srcfolder dmg_contents \
+          -ov -format UDZO \
+          "$DMG_NAME"
+
+        echo "DMG created: $DMG_NAME"
+        ls -la "$DMG_NAME"
+
+    - name: Create ZIP archive
+      run: |
+        APP_PATH="build/Build/Products/Release/SecVF.app"
+        ZIP_NAME="SecVF-unsigned.zip"
+
+        cd "$(dirname "$APP_PATH")"
+        zip -r -y "$GITHUB_WORKSPACE/$ZIP_NAME" "$(basename "$APP_PATH")"
+
+        echo "ZIP created: $ZIP_NAME"
+        ls -la "$GITHUB_WORKSPACE/$ZIP_NAME"
+
+    - name: Upload DMG artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SecVF-DMG
+        path: SecVF-unsigned.dmg
+        retention-days: 30
+
+    - name: Upload ZIP artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SecVF-ZIP
+        path: SecVF-unsigned.zip
+        retention-days: 30
+
+  # Create release when triggered by tag or manual input
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download DMG artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: SecVF-DMG
+
+    - name: Download ZIP artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: SecVF-ZIP
+
+    - name: Get version from tag
+      id: version
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        else
+          echo "version=manual-$(date +%Y%m%d-%H%M%S)" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: SecVF ${{ steps.version.outputs.version }}
+        draft: true
+        prerelease: false
+        body: |
+          ## SecVF ${{ steps.version.outputs.version }}
+
+          Computer Security Incident Response Team Virtualization Framework
+
+          ### Installation
+
+          1. Download `SecVF-unsigned.dmg` or `SecVF-unsigned.zip`
+          2. Extract and move `SecVF.app` to your Applications folder
+          3. **First launch**: Right-click the app → Open → Open (to bypass Gatekeeper)
+
+          ### Requirements
+
+          - macOS 14.0 (Sonoma) or later
+          - Apple Silicon (M1/M2/M3) Mac
+          - Optional: tshark (`brew install wireshark`) for packet capture
+
+          ### Note
+
+          This is an unsigned build. macOS will show a security warning on first launch.
+          Use "Right-click → Open" to bypass Gatekeeper.
+        files: |
+          SecVF-unsigned.dmg
+          SecVF-unsigned.zip
