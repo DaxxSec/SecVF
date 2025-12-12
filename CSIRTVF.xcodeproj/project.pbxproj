@@ -48,6 +48,7 @@
 		NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTNM001NTNM001NTNM001001 /* NotificationNames.swift */; };
 		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
 		CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */; };
+		DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +68,7 @@
 		APPCO001APPCO001APPCO001 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
 		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
 		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
+		DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroVersionFetcher.swift; sourceTree = "<group>"; };
 		LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
 		NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProtocolColors.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
@@ -170,6 +172,7 @@
 				CSERR001CSERR001CSERR001 /* SecVFError.swift */,
 				CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */,
 				DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */,
+				DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */,
 				LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */,
 				NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */,
 				NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */,
@@ -358,6 +361,7 @@
 				CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */,
 				CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */,
 				DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */,
+				DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */,
 				LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */,
 				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
 				NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */,

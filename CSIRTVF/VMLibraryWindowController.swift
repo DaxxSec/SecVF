@@ -1684,12 +1684,20 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     // MARK: - Linux VM Download
 
-    private func downloadAndPrepareLinuxVM(_ vmConfig: VMConfiguration, distro: LinuxDistro, isRouter: Bool) {
+    private func downloadAndPrepareLinuxVM(_ vmConfig: VMConfiguration, distro: LinuxDistro, isRouter: Bool, customVersion: DiscoveredVersion? = nil) {
         NSLog("[VMLibrary] === downloadAndPrepareLinuxVM() ENTERED ===")
         NSLog("[VMLibrary] VM config: %@, distro: %@, isRouter: %d", vmConfig.name, distro.rawValue, isRouter)
+        if let version = customVersion {
+            NSLog("[VMLibrary] Using custom version: %@ from %@", version.version, version.downloadURL)
+        }
+
+        // Use custom version info if provided, otherwise fall back to distro defaults
+        let versionString = customVersion?.version ?? distro.version
+        let downloadURL = customVersion?.downloadURL ?? distro.downloadURL
+        let checksumURL = customVersion?.checksumURL
 
         // Check if ISO is already cached
-        let imageType = VMImageType.linux(distro: distro, version: distro.version, isSecurityRouter: isRouter)
+        let imageType = VMImageType.linux(distro: distro, version: versionString, isSecurityRouter: isRouter)
         if let cachedISO = ISOCacheManager.shared.getCachedImage(for: imageType) {
             NSLog("[VMLibrary] ISO already cached at: %@", cachedISO.path)
             // Start VM immediately with cached ISO
@@ -1699,11 +1707,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             return
         }
 
-        NSLog("[VMLibrary] ISO not cached, will download")
+        NSLog("[VMLibrary] ISO not cached, will download from: %@", downloadURL)
 
         // Create progress alert
         let progressAlert = NSAlert()
-        progressAlert.messageText = "Downloading \(distro.rawValue) ISO"
+        progressAlert.messageText = "Downloading \(distro.rawValue) \(versionString) ISO"
         progressAlert.informativeText = "Initializing..."
         progressAlert.alertStyle = .informational
         progressAlert.addButton(withTitle: "Cancel")
@@ -1712,7 +1720,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 75))
 
         // Add source URL label at top for security transparency
-        let urlLabel = NSTextField(labelWithString: "Source: \(distro.downloadURL)")
+        let urlLabel = NSTextField(labelWithString: "Source: \(downloadURL)")
         urlLabel.frame = NSRect(x: 0, y: 55, width: 400, height: 20)
         urlLabel.alignment = .center
         urlLabel.font = NSFont.systemFont(ofSize: 9)
@@ -1756,8 +1764,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         NSLog("[VMLibrary] Created VMImageType: %@", imageType.description)
 
+        // Pass custom URL if using a discovered version, otherwise nil to use distro defaults
+        let customURLToUse: String? = customVersion != nil ? downloadURL : nil
+        let customChecksumToUse: String? = checksumURL
+
         cacheManager.downloadImage(
             for: imageType,
+            customDownloadURL: customURLToUse,
+            customChecksumURL: customChecksumToUse,
             progressHandler: { progress, message in
                 // Use performSelector for modal dialog compatibility
                 RunLoop.main.perform(inModes: [.common], block: {
@@ -1883,10 +1897,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Linux Distribution dropdown (only visible for Linux VMs)
         let distroLabel = NSTextField(labelWithString: "Distribution:")
-        distroLabel.frame = NSRect(x: 0, y: 250, width: 100, height: 20)
+        distroLabel.frame = NSRect(x: 0, y: 270, width: 100, height: 20)
         view.addSubview(distroLabel)
 
-        let distroPopup = NSPopUpButton(frame: NSRect(x: 110, y: 245, width: 200, height: 26), pullsDown: false)
+        let distroPopup = NSPopUpButton(frame: NSRect(x: 110, y: 265, width: 200, height: 26), pullsDown: false)
         distroPopup.addItem(withTitle: "Kali")
         distroPopup.addItem(withTitle: "Ubuntu Desktop")
         distroPopup.addItem(withTitle: "Ubuntu Server")
@@ -1898,9 +1912,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         distroPopup.selectItem(at: 0) // Default to Kali
         view.addSubview(distroPopup)
 
-        // ISO Cache Status Label (below distro dropdown)
+        // Version dropdown (dynamic based on distro selection)
+        let versionLabel = NSTextField(labelWithString: "Version:")
+        versionLabel.frame = NSRect(x: 0, y: 235, width: 100, height: 20)
+        view.addSubview(versionLabel)
+
+        let versionPopup = NSPopUpButton(frame: NSRect(x: 110, y: 230, width: 200, height: 26), pullsDown: false)
+        versionPopup.addItem(withTitle: "Default")
+        view.addSubview(versionPopup)
+
+        // Version loading indicator
+        let versionSpinner = NSProgressIndicator(frame: NSRect(x: 320, y: 233, width: 20, height: 20))
+        versionSpinner.style = .spinning
+        versionSpinner.controlSize = .small
+        versionSpinner.isHidden = true
+        view.addSubview(versionSpinner)
+
+        // ISO Cache Status Label (below version dropdown)
         let isoCacheStatusLabel = NSTextField(labelWithString: "")
-        isoCacheStatusLabel.frame = NSRect(x: 110, y: 220, width: 280, height: 20)
+        isoCacheStatusLabel.frame = NSRect(x: 110, y: 200, width: 280, height: 20)
         isoCacheStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         isoCacheStatusLabel.isEditable = false
         isoCacheStatusLabel.isBordered = false
@@ -1919,8 +1949,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             weak var osPopup: NSPopUpButton?
             weak var distroPopup: NSPopUpButton?
             weak var distroLabel: NSTextField?
+            weak var versionPopup: NSPopUpButton?
+            weak var versionLabel: NSTextField?
+            weak var versionSpinner: NSProgressIndicator?
             weak var isoCacheStatusLabel: NSTextField?
             weak var vmManager: VMManager?
+
+            // Track discovered versions per distro
+            var discoveredVersions: [String: [DiscoveredVersion]] = [:]
+            var selectedVersion: DiscoveredVersion?
 
             @objc func osTypeChanged(_ sender: NSPopUpButton) {
                 let isMacOS = sender.titleOfSelectedItem == "macOS"
@@ -1930,10 +1967,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 // Show/hide Linux-specific controls
                 distroPopup?.isHidden = isMacOS
                 distroLabel?.isHidden = isMacOS
+                versionPopup?.isHidden = isMacOS
+                versionLabel?.isHidden = isMacOS
+                versionSpinner?.isHidden = true
 
                 // Update ISO cache status when showing Linux controls
                 if !isMacOS {
                     updateISOCacheStatus()
+                    fetchVersionsForSelectedDistro()
                 } else {
                     isoCacheStatusLabel?.stringValue = ""
                 }
@@ -1962,6 +2003,118 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
             @objc func distroChanged(_ sender: NSPopUpButton) {
                 updateISOCacheStatus()
+                fetchVersionsForSelectedDistro()
+            }
+
+            @objc func versionChanged(_ sender: NSPopUpButton) {
+                guard let selectedTitle = sender.titleOfSelectedItem,
+                      let distroName = distroPopup?.titleOfSelectedItem,
+                      let versions = discoveredVersions[distroName] else {
+                    selectedVersion = nil
+                    return
+                }
+
+                // Find the selected version
+                if selectedTitle == "Default" || selectedTitle.hasPrefix("Fetching") {
+                    selectedVersion = nil
+                } else {
+                    selectedVersion = versions.first { $0.displayName == selectedTitle || $0.version == selectedTitle }
+                }
+            }
+
+            func fetchVersionsForSelectedDistro() {
+                guard let distroName = distroPopup?.titleOfSelectedItem else { return }
+
+                // Check if we already have versions cached
+                if let cached = discoveredVersions[distroName], !cached.isEmpty {
+                    populateVersionPopup(with: cached)
+                    return
+                }
+
+                // Get the distro config
+                let distroID = mapDistroNameToID(distroName)
+                guard let config = DistroConfigurationManager.shared.configuration(for: distroID),
+                      let versionConfig = config.versionDiscovery,
+                      versionConfig.enabled else {
+                    // Version discovery not enabled - show default only
+                    versionPopup?.removeAllItems()
+                    versionPopup?.addItem(withTitle: "Default (\(DistroConfigurationManager.shared.configuration(for: distroID)?.version ?? "latest"))")
+                    return
+                }
+
+                // Show spinner and start fetching
+                versionPopup?.removeAllItems()
+                versionPopup?.addItem(withTitle: "Fetching versions...")
+                versionPopup?.isEnabled = false
+                versionSpinner?.isHidden = false
+                versionSpinner?.startAnimation(nil)
+
+                // Capture config values before entering Task
+                let configID = config.id
+                let configBaseURL = versionConfig.baseURL
+                let configStrategy = versionConfig.strategy
+                let configFilenamePattern = versionConfig.filenamePattern
+                let configArchitecture = versionConfig.architecture
+
+                Task { @MainActor [weak self] in
+                    DistroVersionFetcher.shared.fetchVersions(
+                        for: configID,
+                        baseURL: configBaseURL,
+                        strategy: configStrategy,
+                        filenamePattern: configFilenamePattern,
+                        architecture: configArchitecture
+                    ) { result in
+                        DispatchQueue.main.async { [weak self] in
+                            self?.versionSpinner?.stopAnimation(nil)
+                            self?.versionSpinner?.isHidden = true
+                            self?.versionPopup?.isEnabled = true
+
+                            switch result {
+                            case .success(let versions):
+                                self?.discoveredVersions[distroName] = versions
+                                self?.populateVersionPopup(with: versions)
+                            case .noVersionsFound(let reason):
+                                NSLog("[VersionFetch] No versions found for \(distroName): \(reason)")
+                                self?.versionPopup?.removeAllItems()
+                                self?.versionPopup?.addItem(withTitle: "Default")
+                            case .networkError(let error):
+                                NSLog("[VersionFetch] Network error for \(distroName): \(error)")
+                                self?.versionPopup?.removeAllItems()
+                                self?.versionPopup?.addItem(withTitle: "Default (offline)")
+                            case .parseError(let error):
+                                NSLog("[VersionFetch] Parse error for \(distroName): \(error)")
+                                self?.versionPopup?.removeAllItems()
+                                self?.versionPopup?.addItem(withTitle: "Default")
+                            }
+                        }
+                    }
+                }
+            }
+
+            private func populateVersionPopup(with versions: [DiscoveredVersion]) {
+                versionPopup?.removeAllItems()
+                versionPopup?.addItem(withTitle: "Latest")
+
+                for version in versions.prefix(5) {
+                    versionPopup?.addItem(withTitle: version.displayName)
+                }
+
+                versionPopup?.selectItem(at: 0)
+                selectedVersion = nil
+            }
+
+            private func mapDistroNameToID(_ name: String) -> LinuxDistro {
+                switch name {
+                case "Kali": return .kali
+                case "Ubuntu Desktop": return .ubuntu
+                case "Ubuntu Server": return .ubuntuServer
+                case "Debian": return .debian
+                case "Fedora": return .fedora
+                case "ParrotOS": return .parrot
+                case "Arch": return .arch
+                case "Manjaro": return .manjaro
+                default: return .kali
+                }
             }
 
             func updateISOCacheStatus() {
@@ -2154,11 +2307,17 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         configDelegate.osPopup = osPopup
         configDelegate.distroPopup = distroPopup
         configDelegate.distroLabel = distroLabel
+        configDelegate.versionPopup = versionPopup
+        configDelegate.versionLabel = versionLabel
+        configDelegate.versionSpinner = versionSpinner
         configDelegate.isoCacheStatusLabel = isoCacheStatusLabel
 
         // Set up delegate actions
         osPopup.target = configDelegate
         osPopup.action = #selector(VMConfigDelegate.osTypeChanged(_:))
+
+        versionPopup.target = configDelegate
+        versionPopup.action = #selector(VMConfigDelegate.versionChanged(_:))
         networkPopup.target = configDelegate
         networkPopup.action = #selector(VMConfigDelegate.networkModeChanged(_:))
         linuxRouterCheckbox.target = configDelegate
@@ -2183,6 +2342,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let isLinuxRouter = routerCheckbox.state == .on || linuxRouterCheckbox.state == .on
             let selectedRouterName = routerPopup.titleOfSelectedItem
             let selectedDistro = distroPopup.titleOfSelectedItem ?? "Kali"
+            let selectedVersion = configDelegate.selectedVersion  // User-selected version from popup
 
             let memorySize = memoryGB * 1024 * 1024 * 1024
             let diskSize = diskGB * 1024 * 1024 * 1024
@@ -2199,9 +2359,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 // Store Linux distribution info in VM config
                 if osType == "Linux" {
                     newVM.linuxDistribution = selectedDistro
-                    // Map distro name to version
-                    let distroEnum = mapDistroNameToEnum(selectedDistro)
-                    newVM.linuxVersion = distroEnum.version
+                    // Use selected version if available, otherwise fall back to distro default
+                    if let version = selectedVersion {
+                        newVM.linuxVersion = version.version
+                    } else {
+                        let distroEnum = mapDistroNameToEnum(selectedDistro)
+                        newVM.linuxVersion = distroEnum.version
+                    }
                 }
 
                 // Configure network settings
@@ -2255,7 +2419,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                     // For Linux, auto-download ISO via ISOCacheManager
                     let distroEnum = mapDistroNameToEnum(selectedDistro)
                     NSLog("[VMLibrary] %@ selected, checking cache/downloading ISO...", selectedDistro)
-                    downloadAndPrepareLinuxVM(newVM, distro: distroEnum, isRouter: isLinuxRouter)
+                    downloadAndPrepareLinuxVM(newVM, distro: distroEnum, isRouter: isLinuxRouter, customVersion: selectedVersion)
                 }
             } catch {
                 showAlert(message: "Failed to create VM: \(error.localizedDescription)")

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 2,
-  "lastUpdated": "2024-12-10",
+  "schemaVersion": 3,
+  "lastUpdated": "2025-12-12",
   "approvedDomains": [
     "cdimage.ubuntu.com",
     "cdimage.debian.org",
@@ -14,24 +14,38 @@
     {
       "id": "Ubuntu Desktop",
       "displayName": "Ubuntu Desktop",
-      "version": "24.04.1",
-      "releaseDate": "2024-08-29",
-      "downloadURL": "https://cdimage.ubuntu.com/releases/24.04.1/release/ubuntu-24.04.1-desktop-arm64.iso",
+      "version": "24.04.3",
+      "releaseDate": "2025-08-06",
+      "downloadURL": "https://cdimage.ubuntu.com/releases/24.04.1/release/ubuntu-24.04.3-desktop-arm64.iso",
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 6.0,
       "checksumURL": "https://cdimage.ubuntu.com/releases/24.04.1/release/SHA256SUMS",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://cdimage.ubuntu.com/releases/",
+        "strategy": "ubuntuReleases",
+        "filenamePattern": "ubuntu-*-desktop-arm64.iso",
+        "architecture": "arm64"
+      }
     },
     {
       "id": "Ubuntu Server",
       "displayName": "Ubuntu Server",
-      "version": "24.04.1",
-      "releaseDate": "2024-08-29",
-      "downloadURL": "https://cdimage.ubuntu.com/releases/24.04.1/release/ubuntu-24.04.1-live-server-arm64.iso",
+      "version": "24.04.3",
+      "releaseDate": "2025-08-06",
+      "downloadURL": "https://cdimage.ubuntu.com/releases/24.04.1/release/ubuntu-24.04.3-live-server-arm64.iso",
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 3.0,
       "checksumURL": "https://cdimage.ubuntu.com/releases/24.04.1/release/SHA256SUMS",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://cdimage.ubuntu.com/releases/",
+        "strategy": "ubuntuReleases",
+        "filenamePattern": "ubuntu-*-live-server-arm64.iso",
+        "architecture": "arm64"
+      }
     },
     {
       "id": "Debian",
@@ -42,7 +56,14 @@
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 1.0,
       "checksumURL": "https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/SHA256SUMS",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/",
+        "strategy": "debianCurrent",
+        "filenamePattern": "debian-*-arm64-netinst.iso",
+        "architecture": "arm64"
+      }
     },
     {
       "id": "Fedora",
@@ -53,7 +74,14 @@
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 3.0,
       "checksumURL": "https://download.fedoraproject.org/pub/fedora/linux/releases/41/Server/aarch64/iso/Fedora-Server-41-1.4-aarch64-CHECKSUM",
-      "checksumFormat": "fedora"
+      "checksumFormat": "fedora",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://download.fedoraproject.org/pub/fedora/linux/releases/",
+        "strategy": "fedoraReleases",
+        "filenamePattern": "Fedora-Server-dvd-aarch64-*.iso",
+        "architecture": "aarch64"
+      }
     },
     {
       "id": "Kali",
@@ -64,7 +92,14 @@
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 4.0,
       "checksumURL": "https://cdimage.kali.org/kali-2024.4/SHA256SUMS",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://cdimage.kali.org/",
+        "strategy": "kaliReleases",
+        "filenamePattern": "kali-linux-*-installer-arm64.iso",
+        "architecture": "arm64"
+      }
     },
     {
       "id": "ParrotOS",
@@ -75,7 +110,14 @@
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 6.0,
       "checksumURL": "https://download.parrot.sh/parrot/iso/6.2/signed-hashes.txt",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": false,
+        "baseURL": "https://download.parrot.sh/parrot/iso/",
+        "strategy": "genericDirectory",
+        "filenamePattern": "Parrot-security-*_amd64.iso",
+        "architecture": "amd64"
+      }
     },
     {
       "id": "Arch",
@@ -86,7 +128,14 @@
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 1.5,
       "checksumURL": "https://geo.mirror.pkgbuild.com/iso/2024.12.01/sha256sums.txt",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://geo.mirror.pkgbuild.com/iso/",
+        "strategy": "archMonthly",
+        "filenamePattern": "archlinux-*-x86_64.iso",
+        "architecture": "x86_64"
+      }
     },
     {
       "id": "Manjaro",
@@ -97,7 +146,14 @@
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
       "expectedMaxSizeGB": 4.0,
       "checksumURL": "https://download.manjaro.org/gnome/24.2.0/manjaro-gnome-24.2.0-241209-linux612.iso.sha256",
-      "checksumFormat": "sha256sums"
+      "checksumFormat": "sha256sums",
+      "versionDiscovery": {
+        "enabled": true,
+        "baseURL": "https://download.manjaro.org/gnome/",
+        "strategy": "manjaroReleases",
+        "filenamePattern": "manjaro-gnome-*.iso",
+        "architecture": "x86_64"
+      }
     }
   ]
 }

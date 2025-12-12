@@ -70,3 +70,17 @@ build/
 
 # Documentation archive (implementation notes, not for version control)
 docs/archive/
+
+# Local release builds
+*.dmg
+*.pkg
+SecVF.app/
+
+# Xcode DerivedData (usually outside project, but just in case)
+DerivedData/
+
+# Code signing artifacts (never commit these!)
+*.p12
+*.mobileprovision
+*.provisionprofile
+ExportOptions.plist
