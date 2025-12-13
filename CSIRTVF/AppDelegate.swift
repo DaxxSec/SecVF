@@ -77,6 +77,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             name: .pauseVM,
             object: nil
         )
+
+        // Register for CLI distributed notifications (cross-process)
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleCLIStartVM(_:)),
+            name: NSNotification.Name("com.secvf.cli.start"),
+            object: nil
+        )
+
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleCLIStopVM(_:)),
+            name: NSNotification.Name("com.secvf.cli.stop"),
+            object: nil
+        )
+
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleCLIForceStopVM(_:)),
+            name: NSNotification.Name("com.secvf.cli.force-stop"),
+            object: nil
+        )
     }
 
     // MARK: - Notification Handlers
@@ -374,6 +396,84 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         } else {
             NSLog("[AppDelegate] Cannot pause/resume VM \(vm.name) in state: \(virtualMachine.state.rawValue)")
         }
+    }
+
+    // MARK: - CLI Notification Handlers (Distributed Notifications)
+
+    @objc private func handleCLIStartVM(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let vmName = userInfo["vmName"] as? String else {
+            NSLog("[CLI] Start VM notification missing vmName")
+            return
+        }
+
+        NSLog("[CLI] Start VM requested: \(vmName)")
+
+        // Find VM by name from VMManager
+        let allVMs = VMManager.shared.virtualMachines
+
+        guard let vm = allVMs.first(where: { $0.name == vmName }) else {
+            NSLog("[CLI] VM not found: \(vmName)")
+            return
+        }
+
+        // Dispatch to main thread and start VM using existing mechanism
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .startVM, object: vm)
+        }
+    }
+
+    @objc private func handleCLIStopVM(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let vmName = userInfo["vmName"] as? String else {
+            NSLog("[CLI] Stop VM notification missing vmName")
+            return
+        }
+
+        NSLog("[CLI] Stop VM requested: \(vmName)")
+
+        // Find VM by name from VMManager
+        let allVMs = VMManager.shared.virtualMachines
+
+        guard let vm = allVMs.first(where: { $0.name == vmName }) else {
+            NSLog("[CLI] VM not found: \(vmName)")
+            return
+        }
+
+        // Dispatch to main thread and stop VM using existing mechanism
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .stopVM, object: vm)
+        }
+    }
+
+    @objc private func handleCLIForceStopVM(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let vmName = userInfo["vmName"] as? String else {
+            NSLog("[CLI] Force-stop VM notification missing vmName")
+            return
+        }
+
+        NSLog("[CLI] Force-stop VM requested: \(vmName)")
+
+        // Find the running VM by name and force stop it
+        for (vmId, vm) in vmConfigs {
+            if vm.name == vmName {
+                if let virtualMachine = virtualMachines[vmId] {
+                    NSLog("[CLI] Force stopping VM: \(vmName)")
+                    Task { @MainActor in
+                        do {
+                            try await virtualMachine.stop()
+                            NSLog("[CLI] VM force stopped: \(vmName)")
+                            NotificationCenter.default.post(name: .vmStatusChanged, object: nil)
+                        } catch {
+                            NSLog("[CLI] Error force stopping VM: \(error)")
+                        }
+                    }
+                }
+                return
+            }
+        }
+        NSLog("[CLI] VM not running or not found: \(vmName)")
     }
 
     private func showMainWindowAndStartVM(for vmId: UUID) {
@@ -1255,6 +1355,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     private func setupToolsMenu(mainMenu: NSMenu) {
         let toolsMenu = NSMenu(title: "Tools")
 
+        // Install CLI
+        let installCLIItem = NSMenuItem(
+            title: "Install CLI Tool...",
+            action: #selector(installCLITool),
+            keyEquivalent: "i"
+        )
+        installCLIItem.keyEquivalentModifierMask = [.command, .shift]
+        installCLIItem.target = self
+        toolsMenu.addItem(installCLIItem)
+
+        toolsMenu.addItem(NSMenuItem.separator())
+
         // Mount Scripts USB to VM
         let scriptsUSBItem = NSMenuItem(
             title: "Mount Scripts USB to VM...",
@@ -1345,6 +1457,143 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     }
 
     // MARK: - Tools Menu Handlers
+
+    @objc private func installCLITool() {
+        // Find the CLI binary - check app bundle first, then build directory
+        let fm = FileManager.default
+        var cliSourcePath: String?
+
+        // Check app bundle Resources
+        if let bundleCLI = Bundle.main.path(forResource: "secvf-cli", ofType: nil) {
+            cliSourcePath = bundleCLI
+            NSLog("[CLI Install] Found CLI in app bundle: \(bundleCLI)")
+        }
+
+        // Check build directory (for development)
+        if cliSourcePath == nil {
+            let projectDir = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            let devCLI = projectDir.appendingPathComponent("secvf-cli/.build/debug/secvf-cli").path
+            if fm.fileExists(atPath: devCLI) {
+                cliSourcePath = devCLI
+                NSLog("[CLI Install] Found CLI in build directory: \(devCLI)")
+            }
+        }
+
+        // Check common development locations
+        if cliSourcePath == nil {
+            let commonPaths = [
+                NSHomeDirectory() + "/Code/Sandboxes/SecVF/secvf-cli/.build/debug/secvf-cli",
+                NSHomeDirectory() + "/Developer/SecVF/secvf-cli/.build/debug/secvf-cli",
+            ]
+            for path in commonPaths {
+                if fm.fileExists(atPath: path) {
+                    cliSourcePath = path
+                    NSLog("[CLI Install] Found CLI at: \(path)")
+                    break
+                }
+            }
+        }
+
+        guard let sourcePath = cliSourcePath else {
+            showAlert(title: "CLI Not Found",
+                      message: "The CLI binary was not found.\n\nBuild it first with:\ncd secvf-cli && swift build")
+            return
+        }
+
+        // Destination path
+        let destPath = "/usr/local/bin/secvf"
+
+        // Check if already installed and same version
+        if fm.fileExists(atPath: destPath) {
+            let alert = NSAlert()
+            alert.messageText = "CLI Already Installed"
+            alert.informativeText = "The CLI tool is already installed at \(destPath).\n\nWould you like to reinstall/update it?"
+            alert.addButton(withTitle: "Reinstall")
+            alert.addButton(withTitle: "Cancel")
+
+            if alert.runModal() != .alertFirstButtonReturn {
+                return
+            }
+        }
+
+        // Find entitlements file
+        var entitlementsPath: String?
+        let projectDir = URL(fileURLWithPath: sourcePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let entitlementsFile = projectDir.appendingPathComponent("secvf-cli.entitlements").path
+
+        if fm.fileExists(atPath: entitlementsFile) {
+            entitlementsPath = entitlementsFile
+            NSLog("[CLI Install] Found entitlements: \(entitlementsFile)")
+        }
+
+        // Create temporary copy with entitlements signed
+        let tempDir = NSTemporaryDirectory()
+        let tempCLI = tempDir + "secvf-cli-signed"
+
+        do {
+            // Remove any existing temp file
+            try? fm.removeItem(atPath: tempCLI)
+
+            // Copy to temp
+            try fm.copyItem(atPath: sourcePath, toPath: tempCLI)
+
+            // Sign with entitlements if available
+            let signProcess = Process()
+            signProcess.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+            if let entPath = entitlementsPath {
+                signProcess.arguments = ["--sign", "-", "--entitlements", entPath, "--force", tempCLI]
+            } else {
+                signProcess.arguments = ["--sign", "-", "--force", tempCLI]
+            }
+
+            let pipe = Pipe()
+            signProcess.standardError = pipe
+            try signProcess.run()
+            signProcess.waitUntilExit()
+
+            if signProcess.terminationStatus != 0 {
+                let errorData = pipe.fileHandleForReading.readDataToEndOfFile()
+                let errorMsg = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                NSLog("[CLI Install] Signing failed: \(errorMsg)")
+                // Continue anyway - signing isn't strictly required for basic operation
+            } else {
+                NSLog("[CLI Install] Signed CLI with entitlements")
+            }
+        } catch {
+            showAlert(title: "Error", message: "Failed to prepare CLI binary: \(error.localizedDescription)")
+            return
+        }
+
+        // Use osascript to get admin privileges and copy
+        let script = """
+        do shell script "mkdir -p /usr/local/bin && cp '\(tempCLI)' '\(destPath)' && chmod 755 '\(destPath)'" with administrator privileges
+        """
+
+        let appleScript = NSAppleScript(source: script)
+        var errorDict: NSDictionary?
+
+        NSLog("[CLI Install] Requesting admin privileges to install to \(destPath)")
+
+        let result = appleScript?.executeAndReturnError(&errorDict)
+
+        // Clean up temp file
+        try? fm.removeItem(atPath: tempCLI)
+
+        if result != nil && errorDict == nil {
+            NSLog("[CLI Install] Successfully installed CLI to \(destPath)")
+            showAlert(title: "CLI Installed",
+                      message: "The SecVF CLI has been installed successfully!\n\nYou can now use it from any terminal:\n\n  secvf vm list\n  secvf vm start <name>\n  secvf --help")
+        } else {
+            let errorMsg = errorDict?[NSAppleScript.errorMessage] as? String ?? "Unknown error"
+            if errorMsg.contains("User canceled") || errorMsg.contains("cancelled") {
+                NSLog("[CLI Install] User cancelled installation")
+            } else {
+                NSLog("[CLI Install] Installation failed: \(errorMsg)")
+                showAlert(title: "Installation Failed",
+                          message: "Failed to install CLI: \(errorMsg)")
+            }
+        }
+    }
 
     @objc private func showMountScriptsDialog() {
         // Get list of VMs from VMManager
