@@ -66,7 +66,7 @@ class SecVFController:
             return cli
 
         raise FileNotFoundError(
-            "secvf-cli not found. Build it with: cd secvf-cli && swift build"
+            "secvf-cli not found. Build it with: cd SecVF/cli && swift build"
         )
 
     def _run_cli(self, *args: str, timeout: float = 30.0) -> Dict[str, Any]:

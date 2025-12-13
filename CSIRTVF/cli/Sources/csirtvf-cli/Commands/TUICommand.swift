@@ -146,10 +146,10 @@ struct TUICommand: ParsableCommand {
         // Search paths relative to CLI binary
         var searchPaths: [URL] = []
 
-        // Development: CLI at secvf-cli/.build/debug/secvf-cli
-        // TUI at secvf-cli/tui/
+        // Development: CLI at SecVF/cli/.build/debug/secvf-cli
+        // TUI at SecVF/cli/tui/
         let buildDir = executableDir  // .build/debug/
-        let cliRoot = buildDir.deletingLastPathComponent().deletingLastPathComponent()  // secvf-cli/
+        let cliRoot = buildDir.deletingLastPathComponent().deletingLastPathComponent()  // SecVF/cli/
         searchPaths.append(cliRoot.appendingPathComponent("tui"))
 
         // Installed alongside CLI
@@ -157,9 +157,9 @@ struct TUICommand: ParsableCommand {
 
         // Common development locations
         searchPaths.append(URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Code/Sandboxes/SecVF/secvf-cli/tui"))
+            .appendingPathComponent("Code/Sandboxes/SecVF/SecVF/cli/tui"))
         searchPaths.append(URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Developer/SecVF/secvf-cli/tui"))
+            .appendingPathComponent("Developer/SecVF/SecVF/cli/tui"))
 
         for path in searchPaths {
             let tuiApp = path.appendingPathComponent("secvf_tui/app.py")

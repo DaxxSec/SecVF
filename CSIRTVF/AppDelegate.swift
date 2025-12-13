@@ -1472,7 +1472,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         // Check build directory (for development)
         if cliSourcePath == nil {
             let projectDir = Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            let devCLI = projectDir.appendingPathComponent("secvf-cli/.build/debug/secvf-cli").path
+            let devCLI = projectDir.appendingPathComponent("SecVF/cli/.build/debug/secvf-cli").path
             if fm.fileExists(atPath: devCLI) {
                 cliSourcePath = devCLI
                 NSLog("[CLI Install] Found CLI in build directory: \(devCLI)")
@@ -1482,8 +1482,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         // Check common development locations
         if cliSourcePath == nil {
             let commonPaths = [
-                NSHomeDirectory() + "/Code/Sandboxes/SecVF/secvf-cli/.build/debug/secvf-cli",
-                NSHomeDirectory() + "/Developer/SecVF/secvf-cli/.build/debug/secvf-cli",
+                NSHomeDirectory() + "/Code/Sandboxes/SecVF/SecVF/cli/.build/debug/secvf-cli",
+                NSHomeDirectory() + "/Developer/SecVF/SecVF/cli/.build/debug/secvf-cli",
             ]
             for path in commonPaths {
                 if fm.fileExists(atPath: path) {
@@ -1496,7 +1496,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         guard let sourcePath = cliSourcePath else {
             showAlert(title: "CLI Not Found",
-                      message: "The CLI binary was not found.\n\nBuild it first with:\ncd secvf-cli && swift build")
+                      message: "The CLI binary was not found.\n\nBuild it first with:\ncd SecVF/cli && swift build")
             return
         }
 
