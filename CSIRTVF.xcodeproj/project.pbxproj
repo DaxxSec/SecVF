@@ -74,7 +74,7 @@
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
 		8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptsUSBManager.swift; sourceTree = "<group>"; };
-		8CF202802EC84FE400AABC0F /* build-release.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; lineEnding = 0; path = "build-release.sh"; sourceTree = "<group>"; };
+		8CF202802EC84FE400AABC0F /* build-release.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; lineEnding = 0; name = "build-release.sh"; path = "scripts/build-release.sh"; sourceTree = SOURCE_ROOT; };
 		8F0313B127CB143B00360D7E /* Virtualization.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Virtualization.framework; path = System/Library/Frameworks/Virtualization.framework; sourceTree = SDKROOT; };
 		8FDC7765280E2517002AA4ED /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		8FF8298927500C060037FA83 /* SecVF.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SecVF.app; sourceTree = BUILT_PRODUCTS_DIR; };

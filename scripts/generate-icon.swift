@@ -178,9 +178,10 @@ func saveIconSet() {
         (512, 2, "icon_512x512@2x")
     ]
 
-    // Detect project directory dynamically
-    let currentDir = FileManager.default.currentDirectoryPath
-    let iconsetPath = "\(currentDir)/SecVF.iconset"
+    // Detect project directory dynamically (script is in scripts/, assets go to assets/)
+    let scriptDir = URL(fileURLWithPath: #file).deletingLastPathComponent().path
+    let projectDir = URL(fileURLWithPath: scriptDir).deletingLastPathComponent().path
+    let iconsetPath = "\(projectDir)/assets/SecVF.iconset"
 
     // Create iconset directory
     try? FileManager.default.removeItem(atPath: iconsetPath)
@@ -232,7 +233,7 @@ func saveIconSet() {
     // Convert iconset to icns
     let task = Process()
     task.launchPath = "/usr/bin/iconutil"
-    let icnsPath = "\(currentDir)/SecVF.icns"
+    let icnsPath = "\(projectDir)/assets/SecVF.icns"
     task.arguments = ["-c", "icns", iconsetPath, "-o", icnsPath]
     task.launch()
     task.waitUntilExit()
