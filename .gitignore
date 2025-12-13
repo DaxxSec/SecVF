@@ -84,3 +84,20 @@ DerivedData/
 *.mobileprovision
 *.provisionprofile
 ExportOptions.plist
+
+# AI conversation logs (auto-generated filenames)
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*.txt
+
+# Editor directories
+.vscode/
+.cursor/
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+dist/
+*.egg
