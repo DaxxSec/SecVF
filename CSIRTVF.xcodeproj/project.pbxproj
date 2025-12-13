@@ -231,7 +231,8 @@
 				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
 				DD6666DD66666666DD666DD6 /* IntegrationTests.swift */,
 			);
-			path = SecVFTests;
+			name = SecVFTests;
+			path = SecVF/Tests;
 			sourceTree = "<group>";
 		};
 		PROT000PROT000PROT000000 /* Protocols */ = {
