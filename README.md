@@ -71,8 +71,8 @@ brew install wireshark
 
 ### From Source
 ```bash
-git clone https://github.com/ebay/secvf.git
-cd secvf
+git clone https://github.com/ItzDaxxy/SecVF.git
+cd SecVF
 open SecVF.xcodeproj
 ```
 
