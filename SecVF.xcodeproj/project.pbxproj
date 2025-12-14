@@ -1,0 +1,688 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 55;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ALERT001ALERT001ALERT001 /* AlertPresenter.swift */; };
+		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
+		DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */; };
+		DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */ = {isa = PBXBuildFile; fileRef = DSTJ001DSTJ001DSTJ001001 /* distros.json */; };
+		CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSERR001CSERR001CSERR001 /* SecVFError.swift */; };
+		LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */; };
+		NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */; };
+		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
+		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
+		8C487CE62ED3D75C00A90BAF /* ScriptsUSBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */; };
+		AADDDDAADDDDDDDDAADDDDAA /* PacketCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */; };
+		AAEEEEAAEEEEEEEEAAEEEEAA /* PacketAnalysisWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */; };
+		8CF202812EC84FE400AABC0F /* build-release.sh in Resources */ = {isa = PBXBuildFile; fileRef = 8CF202802EC84FE400AABC0F /* build-release.sh */; };
+		8F0313B227CB143B00360D7E /* Virtualization.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F0313B127CB143B00360D7E /* Virtualization.framework */; };
+		8FF8298D27500C060037FA83 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF8298C27500C060037FA83 /* AppDelegate.swift */; };
+		8FF8298F27500C070037FA83 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FF8298E27500C070037FA83 /* Assets.xcassets */; };
+		8FF8299227500C070037FA83 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 8FF8299027500C070037FA83 /* MainMenu.xib */; };
+		AA1111AA11111111AA111AA1 /* VMConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1111BB11111111BB111BB1 /* VMConfiguration.swift */; };
+		AA2222AA22222222AA222AA2 /* VMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB2222BB22222222BB222BB2 /* VMManager.swift */; };
+		AA3333AA33333333AA333AA3 /* VMLibraryWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3333BB33333333BB333BB3 /* VMLibraryWindowController.swift */; };
+		AA4444AA44444444AA444AA4 /* RosettaAvailability.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB4444BB44444444BB444BB4 /* RosettaAvailability.swift */; };
+		AA5555AA55555555AA555AA5 /* VMLibraryWindow.xib in Resources */ = {isa = PBXBuildFile; fileRef = BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */; };
+		AA6666AA66666666AA666AA6 /* MacOSVMInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB6666BB66666666BB666BB6 /* MacOSVMInstaller.swift */; };
+		AA7777AA77777777AA777AA7 /* VMSecurityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB7777BB77777777BB777BB7 /* VMSecurityMonitor.swift */; };
+		AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */; };
+		AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */; };
+		AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */; };
+		AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */; };
+		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
+		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
+		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
+		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
+		CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */; };
+		CC6666CC66666666CC666CC6 /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6666DD66666666DD666DD6 /* IntegrationTests.swift */; };
+		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
+		NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */; };
+		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
+		NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */; };
+		NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTNM001NTNM001NTNM001001 /* NotificationNames.swift */; };
+		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
+		CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */; };
+		DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EE1111EE11111111EE111EE1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8FF8298127500C060037FA83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8FF8298827500C060037FA83;
+			remoteInfo = SecVF;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		62A7A2B81952CC2F11BFE9A2 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
+		ALERT001ALERT001ALERT001 /* AlertPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertPresenter.swift; sourceTree = "<group>"; };
+		APPCO001APPCO001APPCO001 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
+		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
+		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
+		DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroVersionFetcher.swift; sourceTree = "<group>"; };
+		LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
+		NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProtocolColors.swift; sourceTree = "<group>"; };
+		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
+		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
+		8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptsUSBManager.swift; sourceTree = "<group>"; };
+		8CF202802EC84FE400AABC0F /* build-release.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; lineEnding = 0; name = "build-release.sh"; path = "scripts/build-release.sh"; sourceTree = SOURCE_ROOT; };
+		8F0313B127CB143B00360D7E /* Virtualization.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Virtualization.framework; path = System/Library/Frameworks/Virtualization.framework; sourceTree = SDKROOT; };
+		8FDC7765280E2517002AA4ED /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8FF8298927500C060037FA83 /* SecVF.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SecVF.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8FF8298C27500C060037FA83 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		8FF8298E27500C070037FA83 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		8FF8299127500C070037FA83 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
+		8FF8299327500C070037FA83 /* SecVF.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SecVF.entitlements; sourceTree = "<group>"; };
+		BB1111BB11111111BB111BB1 /* VMConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfiguration.swift; sourceTree = "<group>"; };
+		BB2222BB22222222BB222BB2 /* VMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManager.swift; sourceTree = "<group>"; };
+		BB3333BB33333333BB333BB3 /* VMLibraryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMLibraryWindowController.swift; sourceTree = "<group>"; };
+		BB4444BB44444444BB444BB4 /* RosettaAvailability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosettaAvailability.swift; sourceTree = "<group>"; };
+		BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = VMLibraryWindow.xib; path = Base.lproj/VMLibraryWindow.xib; sourceTree = "<group>"; };
+		BB6666BB66666666BB666BB6 /* MacOSVMInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOSVMInstaller.swift; sourceTree = "<group>"; };
+		BB7777BB77777777BB777BB7 /* VMSecurityMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMSecurityMonitor.swift; sourceTree = "<group>"; };
+		BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerWindowController.swift; sourceTree = "<group>"; };
+		BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashScreenWindow.swift; sourceTree = "<group>"; };
+		BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitch.swift; sourceTree = "<group>"; };
+		BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManager.swift; sourceTree = "<group>"; };
+		BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureManager.swift; sourceTree = "<group>"; };
+		BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketAnalysisWindowController.swift; sourceTree = "<group>"; };
+		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
+		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
+		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
+		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
+		DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManagerTests.swift; sourceTree = "<group>"; };
+		DD6666DD66666666DD666DD6 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
+		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
+		NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSwitchProtocol.swift; sourceTree = "<group>"; };
+		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
+		DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroConfiguration.swift; sourceTree = "<group>"; };
+		DSTJ001DSTJ001DSTJ001001 /* distros.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = distros.json; sourceTree = "<group>"; };
+		NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTrafficView.swift; sourceTree = "<group>"; };
+		NTNM001NTNM001NTNM001001 /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
+		UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTTypeExtensions.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8FF8298627500C060037FA83 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8F0313B227CB143B00360D7E /* Virtualization.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE3333EE33333333EE333EE3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		8FF8298027500C060037FA83 = {
+			isa = PBXGroup;
+			children = (
+				E489E24B87B74AAC6D64B249 /* README.md */,
+				8FF8298B27500C060037FA83 /* SecVF */,
+				EE4444EE44444444EE444EE4 /* SecVFTests */,
+				8FF8298A27500C060037FA83 /* Products */,
+				8FF82999275040C80037FA83 /* Frameworks */,
+				B3CD53DFE82FB005B58D97BF /* LICENSE */,
+			);
+			sourceTree = "<group>";
+		};
+		8FF8298A27500C060037FA83 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8FF8298927500C060037FA83 /* SecVF.app */,
+				EE2222EE22222222EE222EE2 /* SecVFTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8FF8298B27500C060037FA83 /* SecVF */ = {
+			isa = PBXGroup;
+			children = (
+				PROT000PROT000PROT000000 /* Protocols */,
+				RSRC000RSRC000RSRC000000 /* Resources */,
+				ALERT001ALERT001ALERT001 /* AlertPresenter.swift */,
+				APPCO001APPCO001APPCO001 /* AppColors.swift */,
+				CSERR001CSERR001CSERR001 /* SecVFError.swift */,
+				CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */,
+				DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */,
+				DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */,
+				LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */,
+				NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */,
+				NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */,
+				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
+				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
+				UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */,
+				PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */,
+				8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */,
+				8FDC7765280E2517002AA4ED /* Info.plist */,
+				8FF8298C27500C060037FA83 /* AppDelegate.swift */,
+				BB1111BB11111111BB111BB1 /* VMConfiguration.swift */,
+				BB2222BB22222222BB222BB2 /* VMManager.swift */,
+				BB3333BB33333333BB333BB3 /* VMLibraryWindowController.swift */,
+				BB6666BB66666666BB666BB6 /* MacOSVMInstaller.swift */,
+				BB4444BB44444444BB444BB4 /* RosettaAvailability.swift */,
+				BB7777BB77777777BB777BB7 /* VMSecurityMonitor.swift */,
+				BB8888BB88888888BB888BB8 /* LogViewerWindowController.swift */,
+				BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */,
+				BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */,
+				BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */,
+				BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */,
+				BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */,
+				8FF8298E27500C070037FA83 /* Assets.xcassets */,
+				8FF8299027500C070037FA83 /* MainMenu.xib */,
+				BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */,
+				8FF8299327500C070037FA83 /* SecVF.entitlements */,
+			);
+			path = SecVF;
+			sourceTree = "<group>";
+		};
+		8FF82999275040C80037FA83 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				8F0313B127CB143B00360D7E /* Virtualization.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		B3CD53DFE82FB005B58D97BF /* LICENSE */ = {
+			isa = PBXGroup;
+			children = (
+				62A7A2B81952CC2F11BFE9A2 /* LICENSE.txt */,
+				8CF202802EC84FE400AABC0F /* build-release.sh */,
+			);
+			name = LICENSE;
+			path = .;
+			sourceTree = "<group>";
+		};
+		EE4444EE44444444EE444EE4 /* SecVFTests */ = {
+			isa = PBXGroup;
+			children = (
+				DD4444DD44444444DD444DD4 /* TestHelpers.swift */,
+				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
+				DD2222DD22222222DD222DD2 /* VMManagerTests.swift */,
+				DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */,
+				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
+				DD6666DD66666666DD666DD6 /* IntegrationTests.swift */,
+			);
+			name = SecVFTests;
+			path = SecVF/Tests;
+			sourceTree = "<group>";
+		};
+		PROT000PROT000PROT000000 /* Protocols */ = {
+			isa = PBXGroup;
+			children = (
+				VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */,
+				NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */,
+				PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */,
+			);
+			path = Protocols;
+			sourceTree = "<group>";
+		};
+		RSRC000RSRC000RSRC000000 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				DSTJ001DSTJ001DSTJ001001 /* distros.json */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8FF8298827500C060037FA83 /* SecVF */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8FF8299627500C070037FA83 /* Build configuration list for PBXNativeTarget "SecVF" */;
+			buildPhases = (
+				8FF8298527500C060037FA83 /* Sources */,
+				8FF8298627500C060037FA83 /* Frameworks */,
+				8FF8298727500C060037FA83 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SecVF;
+			productName = SecVF;
+			productReference = 8FF8298927500C060037FA83 /* SecVF.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EE5555EE55555555EE555EE5 /* SecVFTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EE6666EE66666666EE666EE6 /* Build configuration list for PBXNativeTarget "SecVFTests" */;
+			buildPhases = (
+				EE7777EE77777777EE777EE7 /* Sources */,
+				EE3333EE33333333EE333EE3 /* Frameworks */,
+				EE8888EE88888888EE888EE8 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EE9999EE99999999EE999EE9 /* PBXTargetDependency */,
+			);
+			name = SecVFTests;
+			productName = SecVFTests;
+			productReference = EE2222EE22222222EE222EE2 /* SecVFTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8FF8298127500C060037FA83 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1330;
+				LastUpgradeCheck = 1620;
+				ORGANIZATIONNAME = Apple;
+				TargetAttributes = {
+					8FF8298827500C060037FA83 = {
+						CreatedOnToolsVersion = 13.3;
+					};
+					EE5555EE55555555EE555EE5 = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = 8FF8298827500C060037FA83;
+					};
+				};
+			};
+			buildConfigurationList = 8FF8298427500C060037FA83 /* Build configuration list for PBXProject "SecVF" */;
+			compatibilityVersion = "Xcode 13.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 8FF8298027500C060037FA83;
+			productRefGroup = 8FF8298A27500C060037FA83 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8FF8298827500C060037FA83 /* SecVF */,
+				EE5555EE55555555EE555EE5 /* SecVFTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8FF8298727500C060037FA83 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8FF8298F27500C070037FA83 /* Assets.xcassets in Resources */,
+				8FF8299227500C070037FA83 /* MainMenu.xib in Resources */,
+				AA5555AA55555555AA555AA5 /* VMLibraryWindow.xib in Resources */,
+				8CF202812EC84FE400AABC0F /* build-release.sh in Resources */,
+				DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE8888EE88888888EE888EE8 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8FF8298527500C060037FA83 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */,
+				APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */,
+				CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */,
+				CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */,
+				DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */,
+				DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */,
+				LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */,
+				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
+				NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */,
+				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
+				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
+				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
+				PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */,
+				VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */,
+				NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */,
+				PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */,
+				8FF8298D27500C060037FA83 /* AppDelegate.swift in Sources */,
+				AA1111AA11111111AA111AA1 /* VMConfiguration.swift in Sources */,
+				AA2222AA22222222AA222AA2 /* VMManager.swift in Sources */,
+				AA3333AA33333333AA333AA3 /* VMLibraryWindowController.swift in Sources */,
+				AA6666AA66666666AA666AA6 /* MacOSVMInstaller.swift in Sources */,
+				AA4444AA44444444AA444AA4 /* RosettaAvailability.swift in Sources */,
+				AA7777AA77777777AA777AA7 /* VMSecurityMonitor.swift in Sources */,
+				8C487CE62ED3D75C00A90BAF /* ScriptsUSBManager.swift in Sources */,
+				AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */,
+				AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */,
+				AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */,
+				AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */,
+				AADDDDAADDDDDDDDAADDDDAA /* PacketCaptureManager.swift in Sources */,
+				AAEEEEAAEEEEEEEEAAEEEEAA /* PacketAnalysisWindowController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EE7777EE77777777EE777EE7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
+				CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */,
+				CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */,
+				CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */,
+				CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */,
+				CC6666CC66666666CC666CC6 /* IntegrationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EE9999EE99999999EE999EE9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8FF8298827500C060037FA83 /* SecVF */;
+			targetProxy = EE1111EE11111111EE111EE1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		8FF8299027500C070037FA83 /* MainMenu.xib */ = {
+			isa = PBXVariantGroup;
+			children = (
+				8FF8299127500C070037FA83 /* Base */,
+			);
+			name = MainMenu.xib;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		8FF8299427500C070037FA83 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = SecVF/SecVF.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		8FF8299527500C070037FA83 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_ENTITLEMENTS = SecVF/SecVF.entitlements;
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		8FF8299727500C070037FA83 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "$(PROJECT_DIR)/SecVF/SecVF.entitlements";
+				CODE_SIGN_IDENTITY = "Mac Developer";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(PROJECT_DIR)/SecVF/Info.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainNibFile = MainMenu;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ItzDaxxy.SecVF;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		8FF8299827500C070037FA83 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "$(PROJECT_DIR)/SecVF/SecVF.entitlements";
+				CODE_SIGN_IDENTITY = "Mac Developer";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
+				CODE_SIGN_INJECT_BASE_ENTITLEMENTS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "$(PROJECT_DIR)/SecVF/Info.plist";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainNibFile = MainMenu;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ItzDaxxy.SecVF;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		EEAAAAEEAAAAAAAAAEEAAEEA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ItzDaxxy.SecVFTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SecVF.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SecVF";
+			};
+			name = Debug;
+		};
+		EEBBBBEEBBBBBBBBBEEBBEEB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ItzDaxxy.SecVFTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SecVF.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SecVF";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8FF8298427500C060037FA83 /* Build configuration list for PBXProject "SecVF" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8FF8299427500C070037FA83 /* Debug */,
+				8FF8299527500C070037FA83 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8FF8299627500C070037FA83 /* Build configuration list for PBXNativeTarget "SecVF" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8FF8299727500C070037FA83 /* Debug */,
+				8FF8299827500C070037FA83 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EE6666EE66666666EE666EE6 /* Build configuration list for PBXNativeTarget "SecVFTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EEAAAAEEAAAAAAAAAEEAAEEA /* Debug */,
+				EEBBBBEEBBBBBBBBBEEBBEEB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 8FF8298127500C060037FA83 /* Project object */;
+}
