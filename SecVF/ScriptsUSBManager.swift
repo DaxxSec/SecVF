@@ -458,10 +458,18 @@ class ScriptsUSBManager {
             return cwdPath
         }
 
-        // Check home directory for development
-        let homePath = NSHomeDirectory() + "/Code/Sandboxes/SecVF/scripts"
-        if FileManager.default.fileExists(atPath: homePath) {
-            return homePath
+        // Check common development directories (no hardcoded user-specific paths)
+        let commonDevPaths = [
+            "/Developer/SecVF/scripts",
+            "/Projects/SecVF/scripts",
+            "/Code/SecVF/scripts",
+            "/src/SecVF/scripts"
+        ]
+        for relativePath in commonDevPaths {
+            let fullPath = NSHomeDirectory() + relativePath
+            if FileManager.default.fileExists(atPath: fullPath) {
+                return fullPath
+            }
         }
 
         return nil

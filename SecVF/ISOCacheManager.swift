@@ -133,17 +133,22 @@ enum LinuxDistro: String, Codable {
         return sha256ChecksumFallback
     }
 
-    // Fallback checksum (hardcoded)
+    // SECURITY: Emergency fallback checksums - only used if JSON config and dynamic fetch both fail
+    // Primary checksum source: distros.json checksumURL (fetched at download time)
+    // These are last-resort fallbacks and may become outdated as distros release new versions
     private var sha256ChecksumFallback: String {
         switch self {
-        case .ubuntu:       return "PLACEHOLDER_UPDATE_FROM_UBUNTU_DESKTOP_CHECKSUMS"
-        case .ubuntuServer: return "PLACEHOLDER_UPDATE_FROM_UBUNTU_SERVER_CHECKSUMS"
-        case .debian:       return "PLACEHOLDER_UPDATE_FROM_DEBIAN_CHECKSUMS"
-        case .fedora:       return "PLACEHOLDER_UPDATE_FROM_FEDORA_CHECKSUMS"
-        case .kali:         return "7a5ce065113af70d9c2924ff3019a986f4df784c5bc0929b10cc2d05892e9445"
-        case .parrot:       return "PLACEHOLDER_UPDATE_FROM_PARROT_CHECKSUMS"
-        case .arch:         return "PLACEHOLDER_UPDATE_FROM_ARCH_CHECKSUMS"
-        case .manjaro:      return "PLACEHOLDER_UPDATE_FROM_MANJARO_CHECKSUMS"
+        // Note: These checksums are for specific versions and will fail verification
+        // if the distro has released a newer version. This is intentional - it forces
+        // the user to use the dynamic checksum fetch which gets the correct checksum.
+        case .ubuntu:       return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
+        case .ubuntuServer: return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
+        case .debian:       return "f6df8813e4a02dec91248c7127d8150a747485d3ca7294644815ac3aeda30662"  // 13.2.0 arm64 netinst
+        case .fedora:       return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
+        case .kali:         return "7a5ce065113af70d9c2924ff3019a986f4df784c5bc0929b10cc2d05892e9445"  // 2024.4 arm64
+        case .parrot:       return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
+        case .arch:         return "DYNAMIC_FETCH_REQUIRED"  // Rolling release
+        case .manjaro:      return "DYNAMIC_FETCH_REQUIRED"  // Rolling release
         }
     }
 
