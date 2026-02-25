@@ -28,7 +28,10 @@ NC='\033[0m' # No Color
 ROUTER_IP="10.0.100.1"
 ROUTER_NETMASK="255.255.255.0"
 ROUTER_NETWORK="10.0.100.0/24"
-INTERFACE="eth0"  # Primary network interface
+
+# Interface variables (detected dynamically)
+VSWITCH_IFACE=""   # Virtual switch interface (static IP, faces client VMs)
+NAT_IFACE=""       # NAT interface (DHCP, faces internet) — only present on dual-NIC
 
 # Logging
 LOG_FILE="/var/log/secvf-router-setup.log"
@@ -60,17 +63,89 @@ log "SecVF Kali Router Setup Script"
 log "=========================================="
 log ""
 
-# Step 1: Detect network interface
-log "Step 1: Detecting network interface..."
-DETECTED_IFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | head -n1)
-if [ -z "$DETECTED_IFACE" ]; then
-    error "No network interface detected"
+# Brief delay when running at boot to let the kernel enumerate virtual NICs
+if [ -n "$INVOCATION_ID" ]; then
+    info "Running as systemd service — waiting 5s for NICs to initialize..."
+    sleep 5
 fi
-info "Detected interface: $DETECTED_IFACE"
-INTERFACE="$DETECTED_IFACE"
 
-# Step 2: Configure network interface
-log "Step 2: Configuring network interface..."
+# Step 1: Detect network interfaces (dual-NIC aware)
+log "Step 1: Detecting network interfaces..."
+
+# Wait for interfaces to come up (on boot, eth1 may not be ready immediately)
+MAX_WAIT=30
+WAITED=0
+while true; do
+    ALL_IFACES=($(ip -o link show | awk -F': ' '{print $2}' | grep -v lo))
+    IFACE_COUNT=${#ALL_IFACES[@]}
+    if [ "$IFACE_COUNT" -ge 2 ]; then
+        break  # Both NICs are up
+    fi
+    if [ "$WAITED" -ge "$MAX_WAIT" ]; then
+        warning "Timed out waiting for second NIC after ${MAX_WAIT}s — continuing with $IFACE_COUNT interface(s)"
+        break
+    fi
+    info "Waiting for network interfaces... ($IFACE_COUNT found, expecting 2)"
+    sleep 2
+    WAITED=$((WAITED + 2))
+done
+
+# Re-enumerate after wait
+ALL_IFACES=($(ip -o link show | awk -F': ' '{print $2}' | grep -v lo))
+IFACE_COUNT=${#ALL_IFACES[@]}
+
+if [ "$IFACE_COUNT" -eq 0 ]; then
+    error "No network interfaces detected"
+fi
+
+info "Found $IFACE_COUNT interface(s): ${ALL_IFACES[*]}"
+
+if [ "$IFACE_COUNT" -ge 2 ]; then
+    # Dual-NIC mode: identify which interface gets a default route via DHCP (= NAT)
+    log "Dual-NIC detected — identifying NAT vs Virtual Switch interfaces..."
+
+    for iface in "${ALL_IFACES[@]}"; do
+        ip link set "$iface" up 2>/dev/null || true
+    done
+    sleep 1
+
+    # Try DHCP on each interface to find the one with internet (NAT)
+    for iface in "${ALL_IFACES[@]}"; do
+        info "Probing $iface for DHCP..."
+        # Run dhclient with a short timeout; capture whether it gets an address
+        timeout 10 dhclient -1 "$iface" 2>/dev/null || true
+
+        if ip route show dev "$iface" 2>/dev/null | grep -q "default"; then
+            NAT_IFACE="$iface"
+            info "NAT interface identified: $NAT_IFACE (has default route)"
+        else
+            # Release any partial lease so it doesn't interfere
+            dhclient -r "$iface" 2>/dev/null || true
+        fi
+    done
+
+    if [ -z "$NAT_IFACE" ]; then
+        warning "Could not identify NAT interface via DHCP — using first interface as virtual switch only"
+    fi
+
+    # The non-NAT interface is the virtual switch
+    for iface in "${ALL_IFACES[@]}"; do
+        if [ "$iface" != "$NAT_IFACE" ]; then
+            VSWITCH_IFACE="$iface"
+            break
+        fi
+    done
+
+    info "Virtual Switch interface: $VSWITCH_IFACE"
+    [ -n "$NAT_IFACE" ] && info "NAT interface: $NAT_IFACE"
+else
+    # Single-NIC mode (legacy): the one interface is the virtual switch
+    VSWITCH_IFACE="${ALL_IFACES[0]}"
+    info "Single-NIC mode — interface: $VSWITCH_IFACE"
+fi
+
+# Step 2: Configure network interfaces
+log "Step 2: Configuring network interfaces..."
 
 # Backup existing network configuration
 if [ -f /etc/network/interfaces ]; then
@@ -78,24 +153,30 @@ if [ -f /etc/network/interfaces ]; then
     info "Backed up /etc/network/interfaces"
 fi
 
-# Configure static IP for router
-cat > /etc/network/interfaces.d/${INTERFACE} << EOF
-# SecVF Virtual Router Interface
-auto ${INTERFACE}
-iface ${INTERFACE} inet static
+# Configure static IP on virtual switch interface
+cat > /etc/network/interfaces.d/${VSWITCH_IFACE} << EOF
+# SecVF Virtual Switch Interface (faces client VMs)
+auto ${VSWITCH_IFACE}
+iface ${VSWITCH_IFACE} inet static
     address ${ROUTER_IP}
     netmask ${ROUTER_NETMASK}
-    # No gateway - this IS the gateway for other VMs
+    # No gateway — this IS the gateway for client VMs
 EOF
 
-log "Configured ${INTERFACE} with IP ${ROUTER_IP}"
+ip addr flush dev ${VSWITCH_IFACE} 2>/dev/null || true
+ip addr add ${ROUTER_IP}/24 dev ${VSWITCH_IFACE}
+ip link set ${VSWITCH_IFACE} up
+log "Configured ${VSWITCH_IFACE} with IP ${ROUTER_IP} (virtual switch)"
 
-# Bring up the interface
-ip addr flush dev ${INTERFACE} 2>/dev/null || true
-ip addr add ${ROUTER_IP}/24 dev ${INTERFACE}
-ip link set ${INTERFACE} up
-
-log "Interface ${INTERFACE} is UP"
+# Configure NAT interface (if dual-NIC)
+if [ -n "$NAT_IFACE" ]; then
+    cat > /etc/network/interfaces.d/${NAT_IFACE} << EOF
+# SecVF NAT Interface (internet passthrough)
+auto ${NAT_IFACE}
+iface ${NAT_IFACE} inet dhcp
+EOF
+    log "Configured ${NAT_IFACE} for DHCP (NAT/internet)"
+fi
 
 # Step 3: Enable IP forwarding
 log "Step 3: Enabling IP forwarding..."
@@ -104,22 +185,20 @@ log "Step 3: Enabling IP forwarding..."
 sysctl -w net.ipv4.ip_forward=1 > /dev/null
 sysctl -w net.ipv6.conf.all.forwarding=1 > /dev/null
 
-# Make persistent across reboots
-cat >> /etc/sysctl.conf << EOF
-
-# SecVF Router: Enable IP forwarding
-net.ipv4.ip_forward=1
-net.ipv6.conf.all.forwarding=1
-EOF
+# Make persistent across reboots (idempotent)
+grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf 2>/dev/null || \
+    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+grep -q "net.ipv6.conf.all.forwarding=1" /etc/sysctl.conf 2>/dev/null || \
+    echo "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
 
 log "IP forwarding enabled"
 
 # Step 4: Configure firewall and NAT
 log "Step 4: Configuring firewall and NAT..."
 
-# Install iptables-persistent for rule persistence
+# Install iptables-persistent for rule persistence (suppress interactive prompts)
 apt-get update -qq
-apt-get install -y -qq iptables-persistent > /dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent > /dev/null 2>&1
 
 # Clear existing rules
 iptables -F
@@ -143,10 +222,15 @@ iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -s ${ROUTER_NETWORK} -j ACCEPT
 iptables -A FORWARD -s ${ROUTER_NETWORK} -j ACCEPT
 
-# NAT for outbound traffic (if needed for internet access)
-# Note: This is commented out by default since VMs are isolated on virtual switch
-# Uncomment if you want to provide internet access through this router
-# iptables -t nat -A POSTROUTING -s ${ROUTER_NETWORK} ! -d ${ROUTER_NETWORK} -j MASQUERADE
+# NAT masquerading for outbound traffic (dual-NIC only)
+if [ -n "$NAT_IFACE" ]; then
+    log "Enabling NAT masquerading: ${VSWITCH_IFACE} -> ${NAT_IFACE}"
+    iptables -t nat -A POSTROUTING -s ${ROUTER_NETWORK} -o ${NAT_IFACE} -j MASQUERADE
+    iptables -A FORWARD -i ${VSWITCH_IFACE} -o ${NAT_IFACE} -j ACCEPT
+    iptables -A FORWARD -i ${NAT_IFACE} -o ${VSWITCH_IFACE} -m state --state ESTABLISHED,RELATED -j ACCEPT
+else
+    info "Single-NIC mode — NAT masquerading not enabled (no internet passthrough)"
+fi
 
 # Log dropped packets (for security monitoring)
 iptables -A INPUT -m limit --limit 5/min -j LOG --log-prefix "iptables-INPUT-dropped: " --log-level 4
@@ -183,7 +267,7 @@ TOOLS=(
     "vnstat"           # Network traffic monitor
     "mtr"              # Network diagnostic
     "traceroute"       # Route tracing
-    "dhcpd"            # DHCP server (if needed)
+    "isc-dhcp-server"  # DHCP server (for client VMs)
     "bind9"            # DNS server (if needed)
 )
 
@@ -231,9 +315,9 @@ max-lease-time 7200;
 authoritative;
 
 subnet ${ROUTER_NETWORK%/*} netmask ${ROUTER_NETMASK} {
-    range 10.0.100.10 10.0.100.100;
+    range 10.0.100.50 10.0.100.200;
     option routers ${ROUTER_IP};
-    option domain-name-servers ${ROUTER_IP};
+    option domain-name-servers 1.1.1.1, 8.8.8.8;
     option domain-name "secvf.local";
 }
 
@@ -245,24 +329,30 @@ subnet ${ROUTER_NETWORK%/*} netmask ${ROUTER_NETMASK} {
 # }
 EOF
 
-# Configure DHCP to listen on the correct interface
-sed -i "s/INTERFACESv4=.*/INTERFACESv4=\"${INTERFACE}\"/" /etc/default/isc-dhcp-server 2>/dev/null || \
-    echo "INTERFACESv4=\"${INTERFACE}\"" >> /etc/default/isc-dhcp-server
+# Configure DHCP to listen on the virtual switch interface only
+sed -i "s/INTERFACESv4=.*/INTERFACESv4=\"${VSWITCH_IFACE}\"/" /etc/default/isc-dhcp-server 2>/dev/null || \
+    echo "INTERFACESv4=\"${VSWITCH_IFACE}\"" >> /etc/default/isc-dhcp-server
 
-log "DHCP server configured (not started by default)"
-info "To start DHCP: systemctl start isc-dhcp-server"
+# Start and enable DHCP server
+systemctl enable isc-dhcp-server 2>/dev/null || true
+systemctl restart isc-dhcp-server 2>/dev/null || warning "DHCP server failed to start (may need reboot)"
+log "DHCP server configured and enabled (starts on boot)"
 
 # Step 8: Setup monitoring and logging
 log "Step 8: Setting up monitoring and logging..."
 
-# Configure rsyslog for firewall logs
-cat > /etc/rsyslog.d/10-iptables.conf << 'EOF'
+# Configure rsyslog for firewall logs (if rsyslog is available)
+if [ -d /etc/rsyslog.d ] && command -v rsyslogd &>/dev/null; then
+    cat > /etc/rsyslog.d/10-iptables.conf << 'EOF'
 # SecVF iptables logging
 :msg,contains,"iptables-" /var/log/iptables.log
 & stop
 EOF
-
-systemctl restart rsyslog
+    systemctl restart rsyslog 2>/dev/null || true
+    log "rsyslog configured for iptables logging"
+else
+    info "rsyslog not found — iptables logs available via: journalctl -k --grep=iptables"
+fi
 
 # Create traffic monitoring script
 cat > /usr/local/bin/secvf-monitor << 'EOF'
@@ -316,12 +406,19 @@ cat > /etc/secvf-router.conf << EOF
 ROUTER_IP=${ROUTER_IP}
 ROUTER_NETMASK=${ROUTER_NETMASK}
 ROUTER_NETWORK=${ROUTER_NETWORK}
-INTERFACE=${INTERFACE}
+
+# Interface roles
+VSWITCH_IFACE=${VSWITCH_IFACE}
+NAT_IFACE=${NAT_IFACE}
+DUAL_NIC=$( [ -n "$NAT_IFACE" ] && echo "yes" || echo "no" )
+
+# Legacy alias (for backward compatibility with older scripts)
+INTERFACE=${VSWITCH_IFACE}
 
 # Services
 DHCP_ENABLED=no
 DNS_ENABLED=no
-NAT_ENABLED=no
+NAT_ENABLED=$( [ -n "$NAT_IFACE" ] && echo "yes" || echo "no" )
 EOF
 
 log "Router configuration saved to /etc/secvf-router.conf"
@@ -339,16 +436,23 @@ echo "=========================================="
 echo ""
 echo "Router IP:      ${ROUTER_IP}"
 echo "Network:        ${ROUTER_NETWORK}"
-echo "Interface:      ${INTERFACE}"
+echo "VSwitch Iface:  ${VSWITCH_IFACE}"
+echo "NAT Iface:      ${NAT_IFACE:-none (single-NIC)}"
+echo "Dual-NIC:       ${DUAL_NIC}"
 echo ""
 echo "IP Forwarding:  $(sysctl -n net.ipv4.ip_forward)"
+echo "NAT Enabled:    ${NAT_ENABLED}"
 echo ""
 echo "Services:"
 echo "  DHCP:         $(systemctl is-active isc-dhcp-server 2>/dev/null || echo 'inactive')"
 echo "  DNS:          $(systemctl is-active bind9 2>/dev/null || echo 'inactive')"
 echo ""
 echo "Interface Status:"
-ip addr show ${INTERFACE}
+ip addr show ${VSWITCH_IFACE}
+if [ -n "${NAT_IFACE}" ]; then
+    echo ""
+    ip addr show ${NAT_IFACE}
+fi
 echo ""
 echo "Active Connections:"
 conntrack -L 2>/dev/null | wc -l || echo "0"
@@ -358,6 +462,72 @@ EOF
 
 chmod +x /usr/local/bin/secvf-status
 
+# Step 11: Create boot-time service for persistence
+log "Step 11: Setting up boot persistence..."
+
+# Create a boot script that re-applies routing/NAT config on reboot
+cat > /usr/local/bin/secvf-router-boot << 'BOOTEOF'
+#!/bin/bash
+# SecVF Router Boot Script — restores routing config on reboot
+# Called by secvf-router.service
+
+source /etc/secvf-router.conf 2>/dev/null || exit 1
+
+# Wait for interfaces
+sleep 3
+
+# Bring up virtual switch with static IP
+ip addr flush dev ${VSWITCH_IFACE} 2>/dev/null || true
+ip addr add ${ROUTER_IP}/24 dev ${VSWITCH_IFACE}
+ip link set ${VSWITCH_IFACE} up
+
+# Enable IP forwarding
+sysctl -w net.ipv4.ip_forward=1 > /dev/null
+
+# If dual-NIC, get DHCP on NAT interface and enable masquerading
+if [ -n "$NAT_IFACE" ] && [ "$NAT_IFACE" != "" ]; then
+    ip link set ${NAT_IFACE} up
+    dhclient -1 ${NAT_IFACE} 2>/dev/null || true
+
+    # Flush and re-apply NAT rules
+    iptables -t nat -F
+    iptables -F FORWARD
+    iptables -P FORWARD ACCEPT
+    iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
+    iptables -A FORWARD -s ${ROUTER_NETWORK} -j ACCEPT
+    iptables -t nat -A POSTROUTING -s ${ROUTER_NETWORK} -o ${NAT_IFACE} -j MASQUERADE
+    iptables -A FORWARD -i ${VSWITCH_IFACE} -o ${NAT_IFACE} -j ACCEPT
+    iptables -A FORWARD -i ${NAT_IFACE} -o ${VSWITCH_IFACE} -m state --state ESTABLISHED,RELATED -j ACCEPT
+fi
+
+echo "[$(date)] SecVF router boot complete: ${VSWITCH_IFACE}=${ROUTER_IP}, NAT=${NAT_IFACE:-none}" >> /var/log/secvf-router-setup.log
+BOOTEOF
+
+chmod +x /usr/local/bin/secvf-router-boot
+
+# Create systemd service
+cat > /etc/systemd/system/secvf-router.service << 'SVCEOF'
+[Unit]
+Description=SecVF Router Configuration
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/secvf-router-boot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+systemctl daemon-reload
+systemctl enable secvf-router.service 2>/dev/null || true
+log "Boot persistence enabled (secvf-router.service)"
+
+# Also ensure netfilter-persistent restores iptables on boot
+systemctl enable netfilter-persistent 2>/dev/null || true
+
 # Final summary
 log ""
 log "=========================================="
@@ -366,7 +536,13 @@ log "=========================================="
 log ""
 log "Router IP:      ${ROUTER_IP}"
 log "Network:        ${ROUTER_NETWORK}"
-log "Interface:      ${INTERFACE}"
+log "VSwitch Iface:  ${VSWITCH_IFACE}"
+if [ -n "$NAT_IFACE" ]; then
+log "NAT Iface:      ${NAT_IFACE}"
+log "Mode:           Dual-NIC (monitoring + internet passthrough)"
+else
+log "Mode:           Single-NIC (isolated monitoring only)"
+fi
 log ""
 log "Useful commands:"
 log "  secvf-status   - Show router status"
@@ -375,7 +551,10 @@ log "  secvf-capture  - Capture network traffic"
 log ""
 log "Configuration files:"
 log "  /etc/secvf-router.conf"
-log "  /etc/network/interfaces.d/${INTERFACE}"
+log "  /etc/network/interfaces.d/${VSWITCH_IFACE}"
+if [ -n "$NAT_IFACE" ]; then
+log "  /etc/network/interfaces.d/${NAT_IFACE}"
+fi
 log "  /etc/dhcp/dhcpd.conf"
 log ""
 log "Log files:"
@@ -385,3 +564,13 @@ log "  /var/captures/"
 log ""
 warning "Reboot recommended to ensure all changes take effect"
 log ""
+
+# Desktop notification (works when a desktop session is active)
+if command -v notify-send &>/dev/null; then
+    MODE=$( [ -n "$NAT_IFACE" ] && echo "Dual-NIC (monitored + internet)" || echo "Single-NIC (isolated)" )
+    # Run as the logged-in user so the notification reaches their desktop session
+    DESKTOP_USER=$(who | grep -E 'tty|:0' | head -1 | awk '{print $1}')
+    if [ -n "$DESKTOP_USER" ]; then
+        su - "$DESKTOP_USER" -c "DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u $DESKTOP_USER)/bus notify-send -i network-wired 'SecVF Router Active' 'Mode: ${MODE}\nVSwitch: ${VSWITCH_IFACE} (${ROUTER_IP})\nNAT: ${NAT_IFACE:-none}' 2>/dev/null" || true
+    fi
+fi
