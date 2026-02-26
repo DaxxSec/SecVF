@@ -43,6 +43,7 @@ class MacOSVMInstaller: NSObject {
     private var vmBundlePath: String
     private var lastProgressUpdate: Date?
     private var lastBytesWritten: Int64 = 0
+    private var downloadStartTime: Date?
 
     var progressHandler: ((Double, String) -> Void)?
     var completionHandler: ((Result<URL, Error>) -> Void)?
@@ -226,12 +227,15 @@ class MacOSVMInstaller: NSObject {
         NSLog("[IPSW] Calling progressHandler with 'Connecting to %@...'", host)
         progressHandler?(0, "Connecting to \(host)...")
 
-        // SECURITY: Create session with secure configuration
+        // SECURITY: Create session with secure configuration optimized for large downloads
         NSLog("[IPSW] Creating URLSession with TLS 1.2+ requirement...")
         let config = URLSessionConfiguration.default
         config.tlsMinimumSupportedProtocolVersion = .TLSv12 // Require TLS 1.2 or higher
-        config.timeoutIntervalForRequest = 60.0
-        config.timeoutIntervalForResource = 3600.0 // 1 hour for large downloads
+        config.timeoutIntervalForRequest = 120.0 // 2 min per-request timeout (CDN can be slow to respond)
+        config.timeoutIntervalForResource = 14400.0 // 4 hours — 15GB IPSW at ~1 MB/s needs headroom
+        config.waitsForConnectivity = true // Retry automatically on transient network drops
+        config.networkServiceType = .responsiveData // Hint to OS: prioritize throughput
+        config.httpMaximumConnectionsPerHost = 8 // Allow more concurrent connections to CDN
 
         // Use background queue for delegate to avoid blocking main thread (which is blocked by modal dialog)
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
@@ -242,6 +246,7 @@ class MacOSVMInstaller: NSObject {
         // (More reliable than KVO for large downloads)
 
         NSLog("[IPSW] Calling downloadTask.resume()...")
+        downloadStartTime = Date()
         downloadTask?.resume()
         NSLog("[IPSW] Download task started!")
 
@@ -323,9 +328,24 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
             NSLog("[IPSW] Download progress: %.1f%% - %.2f GB / %.2f GB", progressPercent, gbWritten, gbTotal)
         }
 
+        // Calculate speed and ETA
+        var speedStr = ""
+        if let startTime = downloadStartTime {
+            let elapsed = now.timeIntervalSince(startTime)
+            if elapsed > 2 { // Wait a couple seconds for stable measurement
+                let bytesPerSec = Double(totalBytesWritten) / elapsed
+                let mbPerSec = bytesPerSec / (1024 * 1024)
+                let remainingBytes = Double(totalBytesExpectedToWrite - totalBytesWritten)
+                let etaSeconds = Int(remainingBytes / bytesPerSec)
+                let etaMin = etaSeconds / 60
+                let etaSec = etaSeconds % 60
+                speedStr = String(format: " — %.1f MB/s, ~%d:%02d remaining", mbPerSec, etaMin, etaSec)
+            }
+        }
+
         // Update UI with detailed progress
-        let message = String(format: "Downloading from %@: %.2f GB / %.2f GB",
-                           host, gbWritten, gbTotal)
+        let message = String(format: "Downloading from %@: %.2f GB / %.2f GB%@",
+                           host, gbWritten, gbTotal, speedStr)
         progressHandler?(progress, message)
     }
 

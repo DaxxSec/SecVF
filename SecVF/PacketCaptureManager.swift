@@ -253,6 +253,7 @@ class PacketCaptureManager {
     }
 
     private func handleCaptureStop() {
+        guard isCapturing else { return }
         isCapturing = false
 
         // Clear output handler

@@ -197,8 +197,8 @@ log "IP forwarding enabled"
 log "Step 4: Configuring firewall and NAT..."
 
 # Install iptables-persistent for rule persistence (suppress interactive prompts)
-apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent > /dev/null 2>&1
+apt-get update -qq || warning "apt-get update failed (no internet yet?) — iptables-persistent may not install"
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq iptables-persistent > /dev/null 2>&1 || warning "iptables-persistent not installed — rules won't auto-persist"
 
 # Clear existing rules
 iptables -F
@@ -237,7 +237,7 @@ iptables -A INPUT -m limit --limit 5/min -j LOG --log-prefix "iptables-INPUT-dro
 iptables -A FORWARD -m limit --limit 5/min -j LOG --log-prefix "iptables-FORWARD-dropped: " --log-level 4
 
 # Save rules
-netfilter-persistent save > /dev/null 2>&1
+netfilter-persistent save > /dev/null 2>&1 || warning "netfilter-persistent not available — iptables rules saved in memory only"
 
 log "Firewall rules configured"
 
@@ -245,7 +245,7 @@ log "Firewall rules configured"
 log "Step 5: Installing security analysis tools..."
 
 info "Updating package lists..."
-apt-get update -qq
+apt-get update -qq || warning "apt-get update failed — skipping tool installation"
 
 # Core networking and analysis tools
 TOOLS=(
@@ -521,7 +521,7 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 SVCEOF
 
-systemctl daemon-reload
+systemctl daemon-reload 2>/dev/null || true
 systemctl enable secvf-router.service 2>/dev/null || true
 log "Boot persistence enabled (secvf-router.service)"
 

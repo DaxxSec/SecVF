@@ -5,11 +5,11 @@ Abstract:
 The app delegate that sets up and starts the virtual machine.
 */
 
-import Virtualization
+@preconcurrency import Virtualization
 
 @main
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency VZVirtualMachineDelegate, NSWindowDelegate {
 
     // Multi-VM architecture - manage separate windows for each running VM
     private var vmWindows: [UUID: NSWindow] = [:]
@@ -105,6 +105,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
     @objc private func handleStartVM(_ notification: Notification) {
         guard let vm = notification.object as? VMConfiguration else { return }
+
+        // Prevent duplicate VM instances — skip if this VM already has a window open
+        if virtualMachines[vm.id] != nil || vmWindows[vm.id] != nil {
+            NSLog("[AppDelegate] VM '%@' is already running or starting — ignoring duplicate start", vm.name)
+            return
+        }
 
         // Store VM config in dictionary
         vmConfigs[vm.id] = vm
@@ -670,43 +676,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
     }
 
-    private func createNetworkDeviceConfiguration(for vmId: UUID) throws -> VZVirtioNetworkDeviceConfiguration {
+    private func createNetworkDeviceConfigurations(for vmId: UUID) throws -> [VZVirtioNetworkDeviceConfiguration] {
         guard let vmConfig = vmConfigs[vmId] else {
             throw SecVFError.vmConfigNotFound(vmId: vmId)
         }
 
-        let networkDevice = VZVirtioNetworkDeviceConfiguration()
-
         // Configure network attachment based on VM's network mode
         switch vmConfig.networkConfig.mode {
         case .nat:
-            // Standard NAT networking - VM has internet access
+            // Standard NAT networking - VM has internet access (single NIC)
+            let networkDevice = VZVirtioNetworkDeviceConfiguration()
             networkDevice.attachment = VZNATNetworkDeviceAttachment()
             print("[Network] Configuring NAT networking for \(vmConfig.name)")
+            return [networkDevice]
 
         case .virtual:
-            // Virtual switch networking - VM-to-VM communication only
+            // Virtual switch networking
             if let fileHandle = VirtualNetworkSwitch.shared.connectVM(
                 vmId: vmConfig.id,
                 vmName: vmConfig.name
             ) {
-                networkDevice.attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: fileHandle)
+                let vswitchDevice = VZVirtioNetworkDeviceConfiguration()
+                vswitchDevice.attachment = VZFileHandleNetworkDeviceAttachment(fileHandle: fileHandle)
                 print("[Network] Configuring virtual switch networking for \(vmConfig.name)")
 
-                // Log router configuration if applicable
                 if vmConfig.networkConfig.isRouter {
-                    print("[Network] \(vmConfig.name) configured as virtual network router")
+                    // Dual-NIC router: virtual switch (enp0s1) + NAT (enp0s2)
+                    // Kali routes client VM traffic from vswitch to internet via NAT
+                    let natDevice = VZVirtioNetworkDeviceConfiguration()
+                    natDevice.attachment = VZNATNetworkDeviceAttachment()
+                    print("[Network] \(vmConfig.name) configured as dual-NIC router (Virtual Switch + NAT)")
+                    return [vswitchDevice, natDevice]
                 } else if let routerVMId = vmConfig.networkConfig.routerVMId {
                     print("[Network] \(vmConfig.name) will route through VM: \(routerVMId)")
                 }
+
+                return [vswitchDevice]
             } else {
-                // Fallback to NAT if virtual switch connection fails
+                if vmConfig.networkConfig.isRouter {
+                    // Router VM must have virtual switch - no fallback
+                    throw SecVFError.networkConfigurationFailed(reason: "Router VM '\(vmConfig.name)' failed to connect to virtual switch. A router without the virtual switch cannot monitor traffic.")
+                }
+                // Fallback to NAT if virtual switch connection fails for non-router VMs
                 print("[Network] WARNING: Failed to connect to virtual switch, falling back to NAT")
+                let networkDevice = VZVirtioNetworkDeviceConfiguration()
                 networkDevice.attachment = VZNATNetworkDeviceAttachment()
+                return [networkDevice]
             }
         }
-
-        return networkDevice
     }
 
     private func createGraphicsDeviceConfiguration(isMacOS: Bool) throws -> VZGraphicsDeviceConfiguration {
@@ -921,31 +938,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 NSLog("[macOS Install] Starting installation...")
                 // Observe installation progress
                 installer.install { [weak self] result in
-                    guard let self = self else { return }
-                    NSLog("[macOS Install] Install callback received")
-                    switch result {
-                    case .success:
-                        NSLog("[macOS Install] Installation completed successfully!")
-                        // Mark as installed and save metadata
-                        if var vmConfig = self.vmConfigs[vmId] {
-                            vmConfig.macOSInstalled = true
-                            self.vmConfigs[vmId] = vmConfig
-                            self.needsInstallFlags[vmId] = false
+                    Task { @MainActor [weak self] in
+                        guard let self = self else { return }
+                        NSLog("[macOS Install] Install callback received")
+                        switch result {
+                        case .success:
+                            NSLog("[macOS Install] Installation completed successfully!")
+                            // Mark as installed and save metadata
+                            if var vmConfig = self.vmConfigs[vmId] {
+                                vmConfig.macOSInstalled = true
+                                self.vmConfigs[vmId] = vmConfig
+                                self.needsInstallFlags[vmId] = false
 
-                            // Save metadata AND update VMManager's in-memory copy
-                            do {
-                                try VMManager.shared.saveVMConfiguration(vmConfig)
-                                NSLog("[macOS Install] Metadata saved - macOS marked as installed")
-                            } catch {
-                                NSLog("[macOS Install] ERROR: Failed to save metadata: \(error)")
+                                // Save metadata AND update VMManager's in-memory copy
+                                do {
+                                    try VMManager.shared.saveVMConfiguration(vmConfig)
+                                    NSLog("[macOS Install] Metadata saved - macOS marked as installed")
+                                } catch {
+                                    NSLog("[macOS Install] ERROR: Failed to save metadata: \(error)")
+                                }
                             }
+
+                            // VM will automatically boot into installed macOS (no restart needed)
+                            NSLog("[macOS Install] Installation complete - VM will boot into macOS automatically")
+
+                        case .failure(let error):
+                            NSLog("[macOS Install] ERROR: Installation failed: \(error.localizedDescription)")
                         }
-
-                        // VM will automatically boot into installed macOS (no restart needed)
-                        NSLog("[macOS Install] Installation complete - VM will boot into macOS automatically")
-
-                    case .failure(let error):
-                        NSLog("[macOS Install] ERROR: Installation failed: \(error.localizedDescription)")
                     }
                 }
                 }  // End DispatchQueue.main.async
@@ -1044,7 +1063,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
         virtualMachineConfiguration.storageDevices = disks
 
-        virtualMachineConfiguration.networkDevices = [try createNetworkDeviceConfiguration(for: vmId)]
+        virtualMachineConfiguration.networkDevices = try createNetworkDeviceConfigurations(for: vmId)
         virtualMachineConfiguration.graphicsDevices = [try createGraphicsDeviceConfiguration(isMacOS: isMacOS)]
         virtualMachineConfiguration.audioDevices = [createInputAudioDeviceConfiguration(), createOutputAudioDeviceConfiguration()]
 
@@ -1180,7 +1199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
                     // Disconnect from virtual switch on failure
                     if vmConfig.networkConfig.mode == .virtual {
-                        VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
+                        VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
                     }
 
                     // Log to both NSLog and file
@@ -1710,6 +1729,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     }
 
     private func cleanupVMState(vmId: UUID) {
+        // Disconnect from virtual switch BEFORE clearing VM references
+        // to prevent the readability handler from firing on stale state
+        if let vmConfig = vmConfigs[vmId], vmConfig.networkConfig.mode == .virtual {
+            VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
+        }
+
+        // Clear delegate to prevent stale callbacks (guestDidStop/didStopWithError)
+        virtualMachines[vmId]?.delegate = nil
+
+        // Detach view before closing window to prevent framebuffer crash
+        if let view = vmViews[vmId] {
+            view.removeFromSuperview()
+        }
+
         if let window = vmWindows[vmId] {
             window.close()
         }
@@ -1819,8 +1852,65 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         return false
     }
 
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // Only intercept VM windows (identified by UUID)
+        guard let identifierString = sender.identifier?.rawValue,
+              let vmId = UUID(uuidString: identifierString),
+              let vm = virtualMachines[vmId],
+              let vmConfig = vmConfigs[vmId],
+              vm.state == .running || vm.state == .starting else {
+            return true  // Not a running VM window — allow close
+        }
+
+        // Count other running VMs (excluding this one)
+        let otherRunningVMs = virtualMachines.filter { $0.key != vmId && ($0.value.state == .running || $0.value.state == .starting) }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+
+        if otherRunningVMs.isEmpty {
+            // Only this VM is running — simpler dialog
+            alert.messageText = "Stop \"\(vmConfig.name)\"?"
+            alert.informativeText = "This VM is still running. Closing the window will stop it."
+            alert.addButton(withTitle: "Stop VM")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                // "Stop VM" — proceed with close, windowWillClose handles teardown
+                return true
+            }
+            return false  // Cancel
+        } else {
+            // Multiple VMs running — full 3-button dialog
+            let otherNames = otherRunningVMs.compactMap { vmConfigs[$0.key]?.name }.joined(separator: ", ")
+            alert.messageText = "VM \"\(vmConfig.name)\" is running"
+            alert.informativeText = "Other running VMs: \(otherNames)\n\nChoose an action:"
+            alert.addButton(withTitle: "Restart \"\(vmConfig.name)\"")
+            alert.addButton(withTitle: "Stop All VMs")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            switch response {
+            case .alertFirstButtonReturn:
+                // "Restart this VM" — restart without closing the window normally
+                restartVM(vmId: vmId)
+                return false  // Don't close the window — restart will reopen it
+
+            case .alertSecondButtonReturn:
+                // "Stop All VMs" — stop everything gracefully
+                stopAllVMs()
+                return false  // Don't close this window — stopAllVMs handles all cleanup
+
+            default:
+                return false  // Cancel
+            }
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
-        // When a VM window closes, stop the VM if it's running
+        // When a VM window closes, stop the VM if it's running.
+        // At this point windowShouldClose already approved the close.
         guard let window = notification.object as? NSWindow,
               let identifierString = window.identifier?.rawValue,
               let vmId = UUID(uuidString: identifierString) else {
@@ -1833,25 +1923,54 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
 
         if vm.state == .running || vm.state == .starting {
-            print("VM window closing - stopping VM: \(vmConfig.name)...")
+            NSLog("[AppDelegate] VM window closing - stopping VM: %@", vmConfig.name)
+
+            // 1. Clear delegate to prevent stale guestDidStop/didStopWithError callbacks
+            vm.delegate = nil
+
+            // 2. Detach VZVirtualMachineView from window BEFORE stopping VM
+            if let view = vmViews[vmId] {
+                view.removeFromSuperview()
+            }
+
+            // 3. Stop security monitoring
+            VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+
+            // 4. Update status
+            VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
+
+            // 5. Stop the VM — do NOT disconnect the vswitch socket beforehand.
+            //    The Virtualization framework needs the socket fd alive during its
+            //    internal teardown. Closing it early causes EXC_BAD_ACCESS in objc_release
+            //    as the framework accesses the invalidated socket state.
+            //    Disconnect and release all references AFTER vm.stop() completes.
             vm.stop { [weak self] error in
-                guard let self = self else { return }
-
-                if let error = error {
-                    print("Error stopping VM: \(error)")
-                } else {
-                    // Update status
-                    VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
-
-                    // SECURITY: Stop security monitoring
-                    VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
-
-                    // NETWORK: Disconnect from virtual switch
-                    if vmConfig.networkConfig.mode == .virtual {
-                        VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    if let error = error {
+                        NSLog("[AppDelegate] Error stopping VM: %@", error.localizedDescription)
                     }
+                    // Framework teardown complete — NOW safe to disconnect and release
+                    if vmConfig.networkConfig.mode == .virtual {
+                        VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
+                    }
+                    self.virtualMachines.removeValue(forKey: vmId)
+                    self.vmWindows.removeValue(forKey: vmId)
+                    self.vmViews.removeValue(forKey: vmId)
+                    self.vmConfigs.removeValue(forKey: vmId)
+                    self.installerISOPaths.removeValue(forKey: vmId)
+                    self.needsInstallFlags.removeValue(forKey: vmId)
+                }
+            }
 
-                    // Clean up references
+            // 6. Safety timeout — if vm.stop() never completes (hung VM), force cleanup
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+                guard let self = self else { return }
+                if self.virtualMachines[vmId] != nil {
+                    NSLog("[AppDelegate] VM stop timed out for %@ — forcing cleanup", vmConfig.name)
+                    if vmConfig.networkConfig.mode == .virtual {
+                        VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
+                    }
                     self.virtualMachines.removeValue(forKey: vmId)
                     self.vmWindows.removeValue(forKey: vmId)
                     self.vmViews.removeValue(forKey: vmId)
@@ -1862,6 +1981,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             }
         } else {
             // VM not running - just clean up references
+            vm.delegate = nil
             virtualMachines.removeValue(forKey: vmId)
             vmWindows.removeValue(forKey: vmId)
             vmViews.removeValue(forKey: vmId)
@@ -1869,6 +1989,125 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             installerISOPaths.removeValue(forKey: vmId)
             needsInstallFlags.removeValue(forKey: vmId)
         }
+    }
+
+    // MARK: - VM Lifecycle Helpers
+
+    /// Restarts a single VM: stops it, cleans up, then relaunches via .startVM notification.
+    private func restartVM(vmId: UUID) {
+        guard let vm = virtualMachines[vmId],
+              let vmConfig = vmConfigs[vmId] else { return }
+
+        NSLog("[AppDelegate] Restarting VM: %@", vmConfig.name)
+
+        // Keep a copy of the config for relaunch
+        let configCopy = vmConfig
+
+        // 1. Clear delegate
+        vm.delegate = nil
+
+        // 2. Detach view before stopping
+        if let view = vmViews[vmId] {
+            view.removeFromSuperview()
+        }
+
+        // 3. Stop security monitoring
+        VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+
+        // 4. Update status
+        VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
+
+        // 5. Stop the VM — disconnect vswitch AFTER stop completes, then relaunch
+        vm.stop { [weak self] error in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                if let error = error {
+                    NSLog("[AppDelegate] Error stopping VM for restart: %@", error.localizedDescription)
+                }
+
+                // Clean up all state for this VM
+                self.cleanupVMState(vmId: vmId)
+
+                // Relaunch after a brief delay to let cleanup complete
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    NSLog("[AppDelegate] Relaunching VM: %@", configCopy.name)
+                    NotificationCenter.default.post(name: .startVM, object: configCopy)
+                }
+            }
+        }
+    }
+
+    /// Gracefully stops all running VMs, cleans up state, and reopens the library window.
+    private func stopAllVMs() {
+        let runningVMs = virtualMachines.filter { $0.value.state == .running || $0.value.state == .starting }
+        guard !runningVMs.isEmpty else { return }
+
+        NSLog("[AppDelegate] Stopping all VMs (%d running)", runningVMs.count)
+
+        let vmIds = Array(runningVMs.keys)
+
+        for (vmId, vm) in runningVMs {
+            let vmConfig = vmConfigs[vmId]
+
+            // 1. Clear delegate
+            vm.delegate = nil
+
+            // 2. Detach view before stopping
+            if let view = vmViews[vmId] {
+                view.removeFromSuperview()
+            }
+
+            // 3. Stop security monitoring
+            if let config = vmConfig {
+                VMSecurityMonitor.shared.stopMonitoring(vmID: config.id)
+                VMManager.shared.updateVMStatus(config, status: .stopped)
+            }
+
+            // 4. Hide window immediately (without triggering windowShouldClose)
+            if let window = vmWindows[vmId] {
+                window.orderOut(nil)
+            }
+
+            // 5. Stop VM — disconnect vswitch and release refs AFTER framework teardown
+            vm.stop { [weak self] error in
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    if let error = error {
+                        NSLog("[AppDelegate] Error stopping VM %@: %@",
+                              vmConfig?.name ?? vmId.uuidString, error.localizedDescription)
+                    }
+                    if let config = vmConfig, config.networkConfig.mode == .virtual {
+                        VirtualNetworkSwitch.shared.disconnectPortSync(vmId: config.id)
+                    }
+                    self.virtualMachines.removeValue(forKey: vmId)
+                    self.vmWindows.removeValue(forKey: vmId)
+                    self.vmViews.removeValue(forKey: vmId)
+                    self.vmConfigs.removeValue(forKey: vmId)
+                    self.installerISOPaths.removeValue(forKey: vmId)
+                    self.needsInstallFlags.removeValue(forKey: vmId)
+                }
+            }
+        }
+
+        // Safety timeout — force cleanup for any VMs whose stop() never completed
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            guard let self = self else { return }
+            for vmId in vmIds where self.virtualMachines[vmId] != nil {
+                NSLog("[AppDelegate] VM stop timed out for %@ — forcing cleanup", vmId.uuidString)
+                if let config = self.vmConfigs[vmId], config.networkConfig.mode == .virtual {
+                    VirtualNetworkSwitch.shared.disconnectPortSync(vmId: config.id)
+                }
+                self.virtualMachines.removeValue(forKey: vmId)
+                self.vmWindows.removeValue(forKey: vmId)
+                self.vmViews.removeValue(forKey: vmId)
+                self.vmConfigs.removeValue(forKey: vmId)
+                self.installerISOPaths.removeValue(forKey: vmId)
+                self.needsInstallFlags.removeValue(forKey: vmId)
+            }
+        }
+
+        // Reopen library window
+        showLibraryWindow()
     }
 
     // MARK: VZVirtualMachineDelegate methods.
@@ -1893,7 +2132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // NETWORK: Disconnect from virtual switch if in virtual network mode
         if vmConfig.networkConfig.mode == .virtual {
-            VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
+            VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
         }
 
         // Update status and reopen library
@@ -1942,7 +2181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // NETWORK: Disconnect from virtual switch if in virtual network mode
         if vmConfig.networkConfig.mode == .virtual {
-            VirtualNetworkSwitch.shared.disconnectPort(vmId: vmConfig.id)
+            VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
         }
 
         // Update status

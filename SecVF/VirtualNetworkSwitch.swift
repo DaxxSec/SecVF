@@ -173,36 +173,51 @@ class VirtualNetworkSwitch {
         }
     }
 
-    /// Disconnect a VM from the virtual switch
+    /// Disconnect a VM from the virtual switch (async - for internal use only)
     func disconnectPort(vmId: UUID) {
         switchQueue.async { [weak self] in
-            guard let self = self else { return }
-
-            // Use removeValue for atomic check-and-remove to prevent double processing
-            guard let port = self.ports.removeValue(forKey: vmId) else {
-                // Already disconnected (race with readabilityHandler or shutdown)
-                return
-            }
-
-            port.connection?.cancel()
-            port.isConnected = false
-
-            // Clear handler to stop receiving - this prevents further callbacks
-            port.readHandle?.readabilityHandler = nil
-
-            // Remove from MAC table
-            if let mac = port.macAddress {
-                self.macTable.removeValue(forKey: mac)
-            }
-
-            // DON'T explicitly close() - the FileHandle was created with closeOnDealloc: true
-            // Calling close() while readabilityHandler might still be executing causes EXC_BAD_ACCESS
-            // Just clear our references and let ARC handle cleanup
-            port.readHandle = nil
-            port.writeHandle = nil
-
-            self.log("VM disconnected from virtual switch: \(port.vmName) [Remaining ports: \(self.ports.count)]")
+            self?.performDisconnect(vmId: vmId)
         }
+    }
+
+    /// Synchronously disconnect a VM from the virtual switch.
+    /// Must be called BEFORE deallocating the VZVirtualMachine to prevent use-after-free
+    /// in the readability handler. Safe to call from main thread.
+    func disconnectPortSync(vmId: UUID) {
+        switchQueue.sync {
+            performDisconnect(vmId: vmId)
+        }
+    }
+
+    /// Shared disconnect implementation. Must be called on switchQueue.
+    private func performDisconnect(vmId: UUID) {
+        // Use removeValue for atomic check-and-remove to prevent double processing
+        guard let port = ports.removeValue(forKey: vmId) else {
+            // Already disconnected (race with readabilityHandler or shutdown)
+            return
+        }
+
+        port.connection?.cancel()
+        port.isConnected = false
+
+        // Clear handler to stop receiving - this prevents further callbacks.
+        // Any in-flight handler is blocked on switchQueue.sync (which we hold),
+        // so it will see the port removed and bail out safely.
+        port.readHandle?.readabilityHandler = nil
+
+        // Remove from MAC table
+        if let mac = port.macAddress {
+            macTable.removeValue(forKey: mac)
+        }
+
+        // DON'T explicitly close() - the FileHandle was created with closeOnDealloc: true
+        // Just clear our references and let ARC handle cleanup. Any in-flight readability
+        // handler still holds a strong ref via its closure parameter, keeping the FileHandle
+        // alive until the handler completes.
+        port.readHandle = nil
+        port.writeHandle = nil
+
+        log("VM disconnected from virtual switch: \(port.vmName) [Remaining ports: \(ports.count)]")
     }
 
     // MARK: - Packet Processing
@@ -211,25 +226,27 @@ class VirtualNetworkSwitch {
         // Read Ethernet frames from VM
         // IMPORTANT: The handler runs on an internal dispatch queue, so we must be
         // defensive against the port being disconnected while the handler runs.
+        //
+        // The validity check AND the data read must be atomic (both inside switchQueue.sync)
+        // to prevent a TOCTOU race where disconnectPortSync runs between the check and the read,
+        // causing EXC_BAD_ACCESS on the invalidated file descriptor.
         handle.readabilityHandler = { [weak self] fileHandle in
             guard let self = self else { return }
 
-            // Check if port is still valid BEFORE calling availableData
-            // This prevents EXC_BAD_ACCESS when the handle is being closed
-            let portIsValid = self.switchQueue.sync { () -> Bool in
-                guard let port = self.ports[vmId] else { return false }
-                return port.isConnected
+            // Atomically check port validity and read data inside the same lock.
+            // This serializes with disconnectPortSync/performDisconnect on switchQueue,
+            // so the port cannot be torn down between the check and the read.
+            let data: Data? = self.switchQueue.sync {
+                guard let port = self.ports[vmId], port.isConnected else { return nil }
+                return fileHandle.availableData
             }
 
-            guard portIsValid else {
-                // Port was disconnected - don't touch the fileHandle
-                return
-            }
-
-            let data = fileHandle.availableData
-            guard !data.isEmpty else {
-                // Connection closed
-                self.disconnectPort(vmId: vmId)
+            guard let data = data, !data.isEmpty else {
+                // nil means port was disconnected — don't touch fileHandle.
+                // Empty data means connection closed — request async disconnect.
+                if data != nil {
+                    self.disconnectPort(vmId: vmId)
+                }
                 return
             }
 

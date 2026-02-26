@@ -1088,10 +1088,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         containerView.addSubview(osLabel)
 
         // Network state label and colored button (second line, right side)
-        let networkMode = vm.networkConfig.mode == .virtual ? "Isolated" : "NAT"
-        let networkColor = vm.networkConfig.mode == .virtual
-            ? NSColor(red: 0.0, green: 0.8, blue: 0.4, alpha: 1.0)   // Bright green for isolated (secure)
-            : NSColor(red: 0.95, green: 0.25, blue: 0.25, alpha: 1.0) // Red for NAT (less secure)
+        let networkMode: String
+        let networkColor: NSColor
+        if vm.networkConfig.isRouter && vm.networkConfig.mode == .virtual {
+            networkMode = "Router"
+            networkColor = NSColor(red: 1.0, green: 0.75, blue: 0.0, alpha: 1.0) // Amber for router (monitoring)
+        } else if vm.networkConfig.mode == .virtual {
+            networkMode = "VSwitch"
+            networkColor = NSColor(red: 0.0, green: 0.8, blue: 0.4, alpha: 1.0)   // Bright green for virtual switch (secure)
+        } else {
+            networkMode = "NAT"
+            networkColor = NSColor(red: 0.95, green: 0.25, blue: 0.25, alpha: 1.0) // Red for NAT (less secure)
+        }
 
         // "Network State:" label
         let netStateLabel = NSTextField(labelWithString: "Network:")
@@ -1114,9 +1122,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         netButton.contentTintColor = networkColor
         netButton.target = self
         netButton.action = #selector(toggleNetworkMode(_:))
-        netButton.toolTip = vm.networkConfig.mode == .virtual
-            ? "Isolated: VM-to-VM only (secure)"
-            : "NAT: Internet access (less secure)"
+        if vm.networkConfig.isRouter && vm.networkConfig.mode == .virtual {
+            netButton.toolTip = "Router: Monitors all traffic (Virtual Switch + NAT passthrough)"
+        } else if vm.networkConfig.mode == .virtual {
+            netButton.toolTip = "Virtual Switch: Routes through router VM (monitored)"
+        } else {
+            netButton.toolTip = "NAT: Internet access (less secure)"
+        }
         // Store VM ID in identifier
         netButton.identifier = NSUserInterfaceItemIdentifier(vm.id.uuidString)
         containerView.addSubview(netButton)
@@ -1178,16 +1190,27 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         NotificationCenter.default.post(name: .stopVM, object: vm)
     }
 
+    private var vmRestartInProgress: Set<UUID> = []
+
     @objc private func restartVMFromStatusBar(_ sender: NSButton) {
         guard let vm = findVMByIdentifier(sender.identifier) else {
             NSLog("[VMLibrary] Restart: VM not found")
             return
         }
+
+        // Guard against double-click spawning duplicate VMs
+        guard !vmRestartInProgress.contains(vm.id) else {
+            NSLog("[VMLibrary] Restart already in progress for: \(vm.name)")
+            return
+        }
+        vmRestartInProgress.insert(vm.id)
+
         NSLog("[VMLibrary] Restarting VM: \(vm.name)")
         // Stop then start
         NotificationCenter.default.post(name: .stopVM, object: vm)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             NotificationCenter.default.post(name: .startVM, object: vm)
+            self?.vmRestartInProgress.remove(vm.id)
         }
     }
 
@@ -1649,11 +1672,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             progressHandler: { progress, message in
                 // Use performSelector for modal dialog compatibility (DispatchQueue.main.async doesn't work with modal run loops)
                 RunLoop.main.perform(inModes: [.common], block: {
-                    progressAlert.informativeText = message
-                    let percentage = progress * 100.0
-                    progressIndicator.doubleValue = percentage
-                    percentageLabel.stringValue = String(format: "%.1f%%", percentage)
-                    // Force visual update during modal run loop
+                    if progress < 0 {
+                        // Phase transition: download complete, starting validation
+                        progressAlert.messageText = "Validating macOS Image"
+                        progressAlert.informativeText = message
+                        progressIndicator.doubleValue = 0
+                        percentageLabel.stringValue = "0%"
+                    } else {
+                        progressAlert.informativeText = message
+                        let percentage = progress * 100.0
+                        progressIndicator.doubleValue = percentage
+                        percentageLabel.stringValue = String(format: "%.1f%%", percentage)
+                    }
                     progressIndicator.display()
                 })
             },
@@ -1774,11 +1804,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             progressHandler: { progress, message in
                 // Use performSelector for modal dialog compatibility
                 RunLoop.main.perform(inModes: [.common], block: {
-                    progressAlert.informativeText = message
-                    let percentage = progress * 100.0
-                    progressIndicator.doubleValue = percentage
-                    percentageLabel.stringValue = String(format: "%.1f%%", percentage)
-                    // Force visual update during modal run loop
+                    if progress < 0 {
+                        // Phase transition: download complete, starting validation
+                        progressAlert.messageText = "Validating \(distro.rawValue) \(versionString) ISO"
+                        progressAlert.informativeText = message
+                        progressIndicator.doubleValue = 0
+                        percentageLabel.stringValue = "0%"
+                    } else {
+                        progressAlert.informativeText = message
+                        let percentage = progress * 100.0
+                        progressIndicator.doubleValue = percentage
+                        percentageLabel.stringValue = String(format: "%.1f%%", percentage)
+                    }
                     progressIndicator.display()
                 })
             },
@@ -1872,23 +1909,23 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         alert.addButton(withTitle: "Cancel")
 
         // Create form (increased height for Linux router controls + distro selection)
-        let view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 340))
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 380))
 
         // Name field
         let nameLabel = NSTextField(labelWithString: "Name:")
-        nameLabel.frame = NSRect(x: 0, y: 310, width: 100, height: 20)
+        nameLabel.frame = NSRect(x: 0, y: 350, width: 100, height: 20)
         view.addSubview(nameLabel)
 
-        let nameField = NSTextField(frame: NSRect(x: 110, y: 308, width: 280, height: 24))
+        let nameField = NSTextField(frame: NSRect(x: 110, y: 348, width: 280, height: 24))
         nameField.stringValue = "New VM"
         view.addSubview(nameField)
 
         // OS Type dropdown
         let osLabel = NSTextField(labelWithString: "OS Type:")
-        osLabel.frame = NSRect(x: 0, y: 280, width: 100, height: 20)
+        osLabel.frame = NSRect(x: 0, y: 320, width: 100, height: 20)
         view.addSubview(osLabel)
 
-        let osPopup = NSPopUpButton(frame: NSRect(x: 110, y: 275, width: 150, height: 26), pullsDown: false)
+        let osPopup = NSPopUpButton(frame: NSRect(x: 110, y: 315, width: 150, height: 26), pullsDown: false)
         osPopup.addItem(withTitle: "Linux")
         osPopup.addItem(withTitle: "macOS")
         osPopup.selectItem(at: 0) // Default to Linux
@@ -1896,10 +1933,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Linux Distribution dropdown (only visible for Linux VMs)
         let distroLabel = NSTextField(labelWithString: "Distribution:")
-        distroLabel.frame = NSRect(x: 0, y: 270, width: 100, height: 20)
+        distroLabel.frame = NSRect(x: 0, y: 290, width: 100, height: 20)
         view.addSubview(distroLabel)
 
-        let distroPopup = NSPopUpButton(frame: NSRect(x: 110, y: 265, width: 200, height: 26), pullsDown: false)
+        let distroPopup = NSPopUpButton(frame: NSRect(x: 110, y: 285, width: 200, height: 26), pullsDown: false)
         distroPopup.addItem(withTitle: "Kali")
         distroPopup.addItem(withTitle: "Ubuntu Desktop")
         distroPopup.addItem(withTitle: "Ubuntu Server")
@@ -1913,15 +1950,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Version dropdown (dynamic based on distro selection)
         let versionLabel = NSTextField(labelWithString: "Version:")
-        versionLabel.frame = NSRect(x: 0, y: 235, width: 100, height: 20)
+        versionLabel.frame = NSRect(x: 0, y: 260, width: 100, height: 20)
         view.addSubview(versionLabel)
 
-        let versionPopup = NSPopUpButton(frame: NSRect(x: 110, y: 230, width: 200, height: 26), pullsDown: false)
+        let versionPopup = NSPopUpButton(frame: NSRect(x: 110, y: 255, width: 200, height: 26), pullsDown: false)
         versionPopup.addItem(withTitle: "Default")
         view.addSubview(versionPopup)
 
         // Version loading indicator
-        let versionSpinner = NSProgressIndicator(frame: NSRect(x: 320, y: 233, width: 20, height: 20))
+        let versionSpinner = NSProgressIndicator(frame: NSRect(x: 320, y: 258, width: 20, height: 20))
         versionSpinner.style = .spinning
         versionSpinner.controlSize = .small
         versionSpinner.isHidden = true
@@ -1929,7 +1966,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // ISO Cache Status Label (below version dropdown)
         let isoCacheStatusLabel = NSTextField(labelWithString: "")
-        isoCacheStatusLabel.frame = NSRect(x: 110, y: 200, width: 280, height: 20)
+        isoCacheStatusLabel.frame = NSRect(x: 110, y: 230, width: 280, height: 20)
         isoCacheStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         isoCacheStatusLabel.isEditable = false
         isoCacheStatusLabel.isBordered = false
@@ -1937,7 +1974,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         view.addSubview(isoCacheStatusLabel)
 
         // Delegate to handle dynamic UI updates
-        class VMConfigDelegate: NSObject {
+        @MainActor class VMConfigDelegate: NSObject {
             weak var isoCheckbox: NSButton?
             weak var createButton: NSButton?
             weak var routerCheckbox: NSButton?
@@ -2504,7 +2541,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
 
         // Helper to update UI based on network mode
-        class ConfigDelegate: NSObject {
+        @MainActor class ConfigDelegate: NSObject {
             weak var linuxRouterCheckbox: NSButton?
             weak var routerLabel: NSTextField?
             weak var routerPopup: NSPopUpButton?
