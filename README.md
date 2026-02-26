@@ -1,24 +1,12 @@
 <div align="center">
 
-```
-███████╗███████╗ ██████╗██╗   ██╗███████╗
-██╔════╝██╔════╝██╔════╝██║   ██║██╔════╝
-███████╗█████╗  ██║     ██║   ██║█████╗
-╚════██║██╔══╝  ██║     ╚██╗ ██╔╝██╔══╝
-███████║███████╗╚██████╗ ╚████╔╝ ██║
-╚══════╝╚══════╝ ╚═════╝  ╚═══╝  ╚═╝
-```
-
-### Security Virtualization Framework
-*Native macOS platform for malware analysis, threat research & incident response*
-
-<br/>
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0f0c29,50:302b63,100:24243e&height=200&section=header&text=SecVF&fontSize=90&fontColor=ffffff&animation=twinkling&fontAlignY=40&desc=Security%20Virtualization%20Framework&descAlignY=62&descSize=20&descColor=a78bfa" width="100%"/>
 
 [![macOS](https://img.shields.io/badge/macOS_14+-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift_5.9-F05138?style=for-the-badge&logo=swift&logoColor=white)](https://swift.org)
 [![Apple Silicon](https://img.shields.io/badge/Apple_Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/newsroom/2020/11/apple-unleashes-m1/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge)](LICENSE.txt)
-[![Release](https://img.shields.io/github/v/release/DaxxSec/SecVF?style=for-the-badge&color=6366f1)](https://github.com/DaxxSec/SecVF/releases)
+[![Tag](https://img.shields.io/github/v/tag/DaxxSec/SecVF?style=for-the-badge&color=6366f1&label=version)](https://github.com/DaxxSec/SecVF/tags)
 [![Stars](https://img.shields.io/github/stars/DaxxSec/SecVF?style=for-the-badge&color=eab308)](https://github.com/DaxxSec/SecVF/stargazers)
 
 <br/>

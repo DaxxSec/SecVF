@@ -41,6 +41,8 @@ jobs:
           CODE_SIGN_IDENTITY="-" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
+          ARCHS=arm64 \
+          ONLY_ACTIVE_ARCH=YES \
           build
 
     - name: Prepare app bundle
