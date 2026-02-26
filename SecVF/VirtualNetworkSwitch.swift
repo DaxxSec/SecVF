@@ -59,7 +59,7 @@ class VirtualSwitchPort {
 class VirtualNetworkSwitch {
     static let shared = VirtualNetworkSwitch()
 
-    private let logger = OSLog(subsystem: "com.ItzDaxxy.SecVF", category: "VirtualSwitch")
+    private let logger = OSLog(subsystem: "com.DaxxSec.SecVF", category: "VirtualSwitch")
     private let switchQueue = DispatchQueue(label: "com.secvf.virtualswitch", qos: .userInitiated)
 
     // Connected VMs (ports on the switch)

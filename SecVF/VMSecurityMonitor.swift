@@ -63,7 +63,7 @@ struct SecurityEvent {
 class VMSecurityMonitor {
     static let shared = VMSecurityMonitor()
 
-    private let logger = OSLog(subsystem: "com.ItzDaxxy.SecVF", category: "Security")
+    private let logger = OSLog(subsystem: "com.DaxxSec.SecVF", category: "Security")
     private var fileMonitors: [String: DispatchSourceFileSystemObject] = [:]
     private var activeVMs: [String: VMSecurityContext] = [:]
     private let eventQueue = DispatchQueue(label: "com.secvf.security.events", qos: .userInitiated)

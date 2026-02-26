@@ -247,8 +247,8 @@ class ISOCacheManager {
         // SECURITY: Verify it's our app using exact bundle ID match
         // (contains() was weak - allowed "com.attacker.FakeSecVF" to pass)
         let validBundleIDs = [
-            "com.ItzDaxxy.SecVF",
-            "com.ItzDaxxy.SecVF"
+            "com.DaxxSec.SecVF",
+            "com.DaxxSec.SecVF"
         ]
         guard validBundleIDs.contains(bundleID) else {
             auditLog("SECURITY ALERT: Unknown bundle ID '\(bundleID)' - rejecting request")

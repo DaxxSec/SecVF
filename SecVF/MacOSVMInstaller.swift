@@ -134,7 +134,7 @@ class MacOSVMInstaller: NSObject {
                 guard self.validateDownloadURL(restoreImage.url) else {
                     NSLog("[IPSW] URL validation FAILED!")
                     let error = NSError(
-                        domain: "com.ItzDaxxy.SecVF.security",
+                        domain: "com.DaxxSec.SecVF.security",
                         code: 1001,
                         userInfo: [NSLocalizedDescriptionKey: "Security validation failed: URL from unauthorized source"]
                     )
@@ -205,7 +205,7 @@ class MacOSVMInstaller: NSObject {
         guard validateDownloadURL(url) else {
             NSLog("[IPSW] URL RE-validation FAILED!")
             let error = NSError(
-                domain: "com.ItzDaxxy.SecVF.security",
+                domain: "com.DaxxSec.SecVF.security",
                 code: 1002,
                 userInfo: [NSLocalizedDescriptionKey: "Security validation failed: Invalid download URL"]
             )
