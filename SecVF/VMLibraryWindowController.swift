@@ -239,7 +239,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let infoY: CGFloat = 115
         addInfoLabel(to: sidebar, text: "Built on", y: infoY, bold: false, width: sidebarWidth)
         addInfoLabel(to: sidebar, text: "Apple Virtualization Framework", y: infoY - 28, bold: true, width: sidebarWidth)
-        addInfoLabel(to: sidebar, text: "github.com/ItzDaxxy/SecVF", y: infoY - 58, bold: false, color: NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0), width: sidebarWidth)
+        addInfoLabel(to: sidebar, text: "github.com/DaxxSec/SecVF", y: infoY - 58, bold: false, color: NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0), width: sidebarWidth)
 
         // Add sidebar to window
         contentView.addSubview(sidebar, positioned: .above, relativeTo: nil)

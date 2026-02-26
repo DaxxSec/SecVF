@@ -71,7 +71,7 @@ brew install wireshark
 
 ### From Source
 ```bash
-git clone https://github.com/ItzDaxxy/SecVF.git
+git clone https://github.com/DaxxSec/SecVF.git
 cd SecVF
 open SecVF.xcodeproj
 ```
@@ -151,10 +151,10 @@ This project is licensed under the MIT License - see the LICENSE.txt file for de
 
 - Apple Virtualization Framework team
 - Wireshark/tshark developers
-- ItzDaxxy team
+- DaxxSec team
 
 ---
 
-**Developed by ItzDaxxy**
+**Developed by DaxxSec**
 - 
-- itzdaxxy@users.noreply.github.com
+- daxxsec@users.noreply.github.com
