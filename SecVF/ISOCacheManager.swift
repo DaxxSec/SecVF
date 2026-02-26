@@ -65,7 +65,7 @@ enum LinuxDistro: String, Codable {
         case .ubuntuServer: dateString = "2024-04-25"
         case .debian:       dateString = "2023-06-10"
         case .fedora:       dateString = "2023-11-07"
-        case .kali:         dateString = "2024-03-11"
+        case .kali:         dateString = "2025-12-08"
         case .parrot:       dateString = "2024-01-15"
         case .arch:         dateString = "2024-11-01"
         case .manjaro:      dateString = "2024-01-28"
@@ -88,7 +88,7 @@ enum LinuxDistro: String, Codable {
         case .ubuntuServer: return "24.04"
         case .debian:       return "12.0"
         case .fedora:       return "39"
-        case .kali:         return "2025.3"
+        case .kali:         return "2025.4"
         case .parrot:       return "6.0"
         case .arch:         return "Latest"
         case .manjaro:      return "23.1.3"
@@ -115,7 +115,7 @@ enum LinuxDistro: String, Codable {
         case .fedora:
             return "https://download.fedoraproject.org/pub/fedora/linux/releases/39/Server/aarch64/iso/Fedora-Server-dvd-aarch64-39-1.5.iso"
         case .kali:
-            return "https://cdimage.kali.org/kali-2025.3/kali-linux-2025.3-installer-arm64.iso"
+            return "https://cdimage.kali.org/kali-2025.4/kali-linux-2025.4-installer-arm64.iso"
         case .parrot:
             return "https://download.parrot.sh/parrot/iso/6.0/Parrot-security-6.0_arm64.iso"
         case .arch:
@@ -145,7 +145,7 @@ enum LinuxDistro: String, Codable {
         case .ubuntuServer: return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
         case .debian:       return "f6df8813e4a02dec91248c7127d8150a747485d3ca7294644815ac3aeda30662"  // 13.2.0 arm64 netinst
         case .fedora:       return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
-        case .kali:         return "7a5ce065113af70d9c2924ff3019a986f4df784c5bc0929b10cc2d05892e9445"  // 2024.4 arm64
+        case .kali:         return "DYNAMIC_FETCH_REQUIRED"  // Fetched from SHA256SUMS on CDN
         case .parrot:       return "DYNAMIC_FETCH_REQUIRED"  // Versions change frequently
         case .arch:         return "DYNAMIC_FETCH_REQUIRED"  // Rolling release
         case .manjaro:      return "DYNAMIC_FETCH_REQUIRED"  // Rolling release
@@ -518,6 +518,15 @@ class ISOCacheManager {
         progressHandler: @escaping (Double, String) -> Void,
         completionHandler: @escaping (Result<URL, Error>) -> Void
     ) {
+        // Prevent concurrent downloads — cancel existing if one is active
+        if let existingDelegate = activeISODelegate {
+            NSLog("[ISOCacheManager] Cancelling existing download before starting new one")
+            existingDelegate.downloadTask?.cancel()
+            existingDelegate.progressTimer?.invalidate()
+            existingDelegate.progressTimer = nil
+            activeISODelegate = nil
+        }
+
         let imagePath = getImagePath(for: .linux(distro: distro, version: version))
 
         // Create directory
@@ -573,6 +582,7 @@ class ISOCacheManager {
         self.activeISODelegate = delegate
 
         let session = URLSession(configuration: config, delegate: delegate, delegateQueue: .main)
+        delegate.session = session  // Delegate holds session so we can invalidate it when done
 
         // Start with initial progress message
         progressHandler(0.0, "Starting download from \(url.host ?? "server")...")
@@ -599,8 +609,8 @@ class ISOCacheManager {
                 let mbTotal = Double(totalBytes) / (1024 * 1024)
 
                 let status = String(format: "Downloading: %.1f / %.1f MB", mbReceived, mbTotal)
-                NSLog("[ISO Download] Calling progressHandler with progress: %.2f, status: %@", progress * 0.85, status)
-                delegate?.progressHandler?(progress * 0.85, status) // Reserve 0.85-1.0 for validation
+                NSLog("[ISO Download] Calling progressHandler with progress: %.2f, status: %@", progress, status)
+                delegate?.progressHandler?(progress, status)
             } else if bytesReceived > 0 {
                 // Show progress even without total size
                 let mbReceived = Double(bytesReceived) / (1024 * 1024)
@@ -725,6 +735,7 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
     var isoManager: ISOCacheManager?
     var progressTimer: Timer?
     var downloadTask: URLSessionDownloadTask?
+    var session: URLSession?  // Retained so we can call finishTasksAndInvalidate() on completion
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         // Stop progress timer
@@ -739,7 +750,9 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
             return
         }
 
-        progressHandler?(0.9, "Download complete, validating...")
+        // Signal phase transition: reset progress bar for validation phase
+        // -1.0 is a sentinel value that tells the UI to reset to 0% with a new "Validating" title
+        progressHandler?(-1.0, "Validating ISO...")
 
         // SECURITY: Validate file size using per-distro limits
         // (More restrictive than blanket 20GB - prevents malicious mirrors filling disk)
@@ -747,7 +760,19 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
             let sizeGB = Double(fileSize) / (1024 * 1024 * 1024)
             let maxSizeGB = distro.expectedMaxSizeGB
             print("[Cache] Downloaded file size: \(String(format: "%.2f", sizeGB)) GB (max: \(maxSizeGB) GB for \(distro.rawValue))")
-            progressHandler?(0.92, "Downloaded \(String(format: "%.2f", sizeGB)) GB")
+            progressHandler?(0.1, "File size: \(String(format: "%.2f", sizeGB)) GB")
+
+            // Minimum size check: ISOs should be at least 100MB
+            // If smaller, the server likely returned an error page or redirect HTML
+            let sizeMB = Double(fileSize) / (1024 * 1024)
+            if sizeMB < 100 {
+                let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [
+                    NSLocalizedDescriptionKey: "Download failed: received \(String(format: "%.1f", sizeMB)) MB instead of an ISO image. The download URL may be outdated or the server returned an error. Try selecting a specific version from the version dropdown."
+                ])
+                try? FileManager.default.removeItem(at: location)
+                completionHandler?(.failure(error))
+                return
+            }
 
             if sizeGB > maxSizeGB {
                 let error = NSError(domain: "ISOCacheManager", code: 101, userInfo: [
@@ -760,7 +785,7 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         }
 
         do {
-            progressHandler?(0.94, "Moving to cache...")
+            progressHandler?(0.2, "Moving to cache...")
 
             // Move to cache
             if FileManager.default.fileExists(atPath: destinationURL.path) {
@@ -770,7 +795,7 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
 
             // SECURITY: Verify SHA256 checksum
             // First try dynamic fetch from official source, fall back to static checksum
-            progressHandler?(0.86, "Fetching checksum from official source...")
+            progressHandler?(0.3, "Fetching checksum from official source...")
 
             // Prioritize custom checksum URL if provided (from discovered version), otherwise use distro config
             let checksumURLToUse: String?
@@ -904,10 +929,28 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         } catch {
             print("[Cache] Failed to move ISO: \(error)")
 
-            // Clear the delegate reference
-            isoManager.activeISODelegate = nil
+            // Guard: only clear if we're still the active delegate
+            if isoManager.activeISODelegate === self {
+                isoManager.activeISODelegate = nil
+            }
 
             completionHandler?(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        // Check HTTP status code on first data received
+        if let httpResponse = downloadTask.response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+            NSLog("[ISO Download] HTTP error: %d", httpResponse.statusCode)
+            downloadTask.cancel()
+            progressTimer?.invalidate()
+            progressTimer = nil
+            let error = NSError(domain: "ISOCacheManager", code: httpResponse.statusCode, userInfo: [
+                NSLocalizedDescriptionKey: "Download failed: HTTP \(httpResponse.statusCode). The ISO URL may be outdated — try selecting a specific version."
+            ])
+            completionHandler?(.failure(error))
+            completionHandler = nil  // Prevent double-call
+            return
         }
     }
 
@@ -920,11 +963,19 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
             NSLog("[Cache] Download failed: %@", error.localizedDescription)
             print("[Cache] Download failed: \(error)")
 
-            // Clear the delegate reference
-            isoManager?.activeISODelegate = nil
+            // Clear the delegate reference (guard ensures we don't clear a newer download's delegate)
+            if isoManager?.activeISODelegate === self {
+                isoManager?.activeISODelegate = nil
+            }
 
             completionHandler?(.failure(error))
         }
+
+        // Always invalidate the session when the task is done (success path completes via
+        // didFinishDownloadingTo, but this is the final callback in both cases). Without
+        // invalidation, URLSession holds a strong ref to the delegate indefinitely.
+        self.session?.finishTasksAndInvalidate()
+        self.session = nil
     }
 
     // MARK: - Verification Helpers
@@ -937,14 +988,14 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         isoManager: ISOCacheManager,
         checksumSource: String
     ) {
-        progressHandler?(0.88, "Verifying checksum (\(checksumSource))...")
+        progressHandler?(0.4, "Verifying checksum (\(checksumSource))...")
         print("[Cache] Verifying SHA256 checksum from \(checksumSource)...")
 
         // Show periodic progress updates during verification
-        var verificationProgress = 0.88
+        var verificationProgress = 0.4
         let updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             verificationProgress += 0.01
-            if verificationProgress <= 0.98 {
+            if verificationProgress <= 0.95 {
                 self?.progressHandler?(verificationProgress, "Verifying checksum (this may take 10-30 seconds)...")
             }
         }
@@ -963,8 +1014,11 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
                     ])
                     try? FileManager.default.removeItem(at: destinationURL)
 
-                    // Clear the delegate reference
-                    isoManager.activeISODelegate = nil
+                    // Guard: only clear if we're still the active delegate (a new download may
+                    // have started while this one was verifying in the background).
+                    if isoManager.activeISODelegate === self {
+                        isoManager.activeISODelegate = nil
+                    }
 
                     self?.completionHandler?(.failure(error))
                     return
@@ -974,8 +1028,10 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
                 self?.progressHandler?(1.0, "Checksum verified - Complete!")
                 print("[Cache] Successfully cached \(distro.rawValue) ISO")
 
-                // Clear the delegate reference
-                isoManager.activeISODelegate = nil
+                // Guard: only clear if we're still the active delegate
+                if isoManager.activeISODelegate === self {
+                    isoManager.activeISODelegate = nil
+                }
 
                 self?.completionHandler?(.success(destinationURL))
             }
@@ -1009,8 +1065,10 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         progressHandler?(1.0, "⚠️ Download complete (checksum not verified)")
         print("[Cache] Successfully cached \(distro.rawValue) ISO (UNVERIFIED)")
 
-        // Clear the delegate reference
-        isoManager.activeISODelegate = nil
+        // Guard: only clear if we're still the active delegate
+        if isoManager.activeISODelegate === self {
+            isoManager.activeISODelegate = nil
+        }
 
         completionHandler?(.success(destinationURL))
     }

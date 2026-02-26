@@ -567,7 +567,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     private func startBatchTimerIfNeeded() {
         guard batchUpdateTimer == nil else { return }
         batchUpdateTimer = Timer.scheduledTimer(withTimeInterval: batchInterval, repeats: false) { [weak self] _ in
-            self?.flushPacketBuffer()
+            MainActor.assumeIsolated { self?.flushPacketBuffer() }
         }
     }
 
@@ -601,8 +601,6 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         guard !currentFilter.isEmpty else { return true }
 
         let filter = currentFilter.lowercased()
-        let proto = packet.protocol.lowercased()
-        let info = packet.info.lowercased()
 
         // Handle "or" expressions - any term matching means pass
         if filter.contains(" or ") {

@@ -32,7 +32,7 @@ struct VirtualNetworkConfig: Codable {
             return "NAT (Internet access)"
         case .virtual:
             if isRouter {
-                return "Virtual Network Router"
+                return "Router (Dual-NIC: Switch + NAT)"
             } else if routerVMId != nil {
                 return "Routes via Linux VM"
             } else {

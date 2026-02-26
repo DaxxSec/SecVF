@@ -15,6 +15,7 @@ class SplashScreenWindow: NSWindow {
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
     private var fadeOutTimer: Timer?
+    private var versionPulseTimer: Timer?
 
     init() {
         // Create frameless window in center of screen
@@ -136,10 +137,11 @@ class SplashScreenWindow: NSWindow {
         contentView.addSubview(versionLabel)
 
         // Animate version label pulsing
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak versionLabel] _ in
+        versionPulseTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak versionLabel] _ in
+            guard let versionLabel = versionLabel else { return }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.5
-                versionLabel?.animator().alphaValue = versionLabel?.alphaValue == 0.3 ? 0.6 : 0.3
+                versionLabel.animator().alphaValue = versionLabel.alphaValue == 0.3 ? 0.6 : 0.3
             }
         }
     }
@@ -246,21 +248,24 @@ class SplashScreenWindow: NSWindow {
             context.duration = 0.8
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             logoImageView.animator().alphaValue = 1.0
-        }, completionHandler: {
-            // Pulse logo
-            self.pulseAnimation()
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                // Pulse logo
+                self.pulseAnimation()
 
-            // Fade in text
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.6
-                self.titleLabel.animator().alphaValue = 1.0
-                self.subtitleLabel.animator().alphaValue = 1.0
-            })
+                // Fade in text
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 0.6
+                    self.titleLabel.animator().alphaValue = 1.0
+                    self.subtitleLabel.animator().alphaValue = 1.0
+                })
+            }
         })
 
         // Auto-close after 3 seconds
         fadeOutTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-            self?.fadeOut()
+            MainActor.assumeIsolated { self?.fadeOut() }
         }
     }
 
@@ -271,25 +276,43 @@ class SplashScreenWindow: NSWindow {
             context.allowsImplicitAnimation = true
 
             logoImageView.layer?.transform = CATransform3DMakeScale(1.1, 1.1, 1.0)
-        }, completionHandler: {
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 1.5
-                self.logoImageView.layer?.transform = CATransform3DIdentity
-            })
+        }, completionHandler: { [weak self] in
+            guard let self else { return }
+            MainActor.assumeIsolated {
+                NSAnimationContext.runAnimationGroup({ context in
+                    context.duration = 1.5
+                    self.logoImageView.layer?.transform = CATransform3DIdentity
+                })
+            }
         })
     }
 
     func fadeOut() {
+        fadeOutTimer?.invalidate()
+        fadeOutTimer = nil
+        versionPulseTimer?.invalidate()
+        versionPulseTimer = nil
+
+        // Cancel any running layer animations (pulse, version label) to prevent
+        // use-after-free when the window is deallocated
+        logoImageView?.layer?.removeAllAnimations()
+        contentView?.subviews.forEach { $0.layer?.removeAllAnimations() }
+
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.5
             self.animator().alphaValue = 0
-        }, completionHandler: {
-            self.close()
+        }, completionHandler: { [weak self] in
+            // Defer close() to next run loop iteration so the _NSWindowTransformAnimation
+            // created by animator().alphaValue fully deallocates before the window closes
+            DispatchQueue.main.async { [weak self] in
+                self?.close()
+            }
         })
     }
 
     deinit {
         fadeOutTimer?.invalidate()
+        versionPulseTimer?.invalidate()
     }
 }
 

@@ -62,7 +62,7 @@ class NetworkTrafficView: NSView {
     func startAnimation() {
         stopAnimation()
         animationTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
-            self?.updateAnimation()
+            MainActor.assumeIsolated { self?.updateAnimation() }
         }
     }
 

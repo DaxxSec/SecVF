@@ -18,9 +18,14 @@ protocol NetworkSwitchProtocol: AnyObject {
     /// - Returns: FileHandle for the network connection, or nil if connection failed
     func connectVM(vmId: UUID, vmName: String) -> FileHandle?
 
-    /// Disconnect a VM from the virtual switch
+    /// Disconnect a VM from the virtual switch (async)
     /// - Parameter vmId: Unique identifier of the VM to disconnect
     func disconnectPort(vmId: UUID)
+
+    /// Synchronously disconnect a VM from the virtual switch.
+    /// Must be called BEFORE deallocating the VZVirtualMachine.
+    /// - Parameter vmId: Unique identifier of the VM to disconnect
+    func disconnectPortSync(vmId: UUID)
 
     /// Shutdown the entire virtual switch
     func shutdown()

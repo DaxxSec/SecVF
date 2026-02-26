@@ -21,9 +21,24 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Configuration
-ROUTER_IP="10.0.100.1"
-INTERFACE="eth0"
+# Load interface config from router setup (REQUIRED)
+if [ -f /etc/secvf-router.conf ]; then
+    source /etc/secvf-router.conf
+else
+    error "Router not configured yet. Run kali-router-setup.sh first."
+fi
+
+# Configuration (from secvf-router.conf)
+ROUTER_IP="${ROUTER_IP:-10.0.100.1}"
+INTERFACE="${VSWITCH_IFACE:-${INTERFACE}}"
+
+# Validate the interface actually exists
+if [ -z "$INTERFACE" ]; then
+    error "No virtual switch interface found in /etc/secvf-router.conf. Re-run kali-router-setup.sh."
+fi
+if ! ip link show "$INTERFACE" &>/dev/null; then
+    error "Interface '$INTERFACE' not found. Available interfaces: $(ip -o link show | awk -F': ' '{print $2}' | grep -v lo | tr '\n' ' ')"
+fi
 FAKENET_DIR="/opt/fakenet"
 LOG_DIR="/var/log/fakenet"
 CERT_DIR="/opt/fakenet/certs"
@@ -72,16 +87,27 @@ setup_directories() {
 install_dependencies() {
     log "Checking/installing dependencies..."
 
-    # Check if packages are installed
+    local needs_update=true
+
+    # Check each package via dpkg (command -v misses dnsmasq which is a service, not just a binary)
     PACKAGES="dnsmasq nginx python3 openssl tcpdump"
 
     for pkg in $PACKAGES; do
-        if ! command -v $pkg &> /dev/null; then
+        if ! dpkg -s "$pkg" &>/dev/null; then
+            if $needs_update; then
+                info "Updating package lists..."
+                apt-get update -qq
+                needs_update=false
+            fi
             info "Installing $pkg..."
-            apt-get update -qq
-            apt-get install -y $pkg
+            apt-get install -y -qq "$pkg" > /dev/null 2>&1 || warn "Failed to install $pkg"
         fi
     done
+
+    # Verify dnsmasq is actually available after install
+    if ! dpkg -s dnsmasq &>/dev/null; then
+        error "dnsmasq is required but could not be installed. Check your network/apt sources."
+    fi
 
     # Check for INetSim (optional but preferred)
     if command -v inetsim &> /dev/null; then
@@ -231,8 +257,15 @@ address=/msftncsi.com/$ROUTER_IP
 address=/msftconnecttest.com/$ROUTER_IP
 EOF
 
-    # Restart dnsmasq
-    systemctl restart dnsmasq || dnsmasq
+    # Ensure dnsmasq service is enabled and restart it
+    systemctl enable dnsmasq 2>/dev/null || true
+    if ! systemctl restart dnsmasq 2>/dev/null; then
+        # Systemd service might not exist — try starting the daemon directly
+        warn "systemctl restart failed, starting dnsmasq directly..."
+        killall dnsmasq 2>/dev/null || true
+        sleep 1
+        dnsmasq --conf-file=/etc/dnsmasq.conf || error "Failed to start dnsmasq"
+    fi
     log "Fake DNS active - all domains resolve to $ROUTER_IP"
 }
 
@@ -302,8 +335,8 @@ EOF
     ln -sf /etc/nginx/sites-available/fakenet /etc/nginx/sites-enabled/
     rm -f /etc/nginx/sites-enabled/default
 
-    # Test and reload nginx
-    nginx -t && systemctl reload nginx
+    # Test and start/reload nginx
+    nginx -t && (systemctl is-active --quiet nginx && systemctl reload nginx || systemctl start nginx)
     log "Fake HTTP/HTTPS active on ports 80 and 443"
 }
 

@@ -86,12 +86,12 @@
     {
       "id": "Kali",
       "displayName": "Kali Linux",
-      "version": "2024.4",
-      "releaseDate": "2024-12-02",
-      "downloadURL": "https://cdimage.kali.org/kali-2024.4/kali-linux-2024.4-installer-arm64.iso",
+      "version": "2025.4",
+      "releaseDate": "2025-12-08",
+      "downloadURL": "https://cdimage.kali.org/kali-2025.4/kali-linux-2025.4-installer-arm64.iso",
       "sha256Checksum": "FETCH_FROM_CHECKSUM_URL",
-      "expectedMaxSizeGB": 4.0,
-      "checksumURL": "https://cdimage.kali.org/kali-2024.4/SHA256SUMS",
+      "expectedMaxSizeGB": 4.5,
+      "checksumURL": "https://cdimage.kali.org/kali-2025.4/SHA256SUMS",
       "checksumFormat": "sha256sums",
       "versionDiscovery": {
         "enabled": true,
