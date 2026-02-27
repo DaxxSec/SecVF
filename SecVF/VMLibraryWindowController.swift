@@ -1003,8 +1003,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Network stats don't change rapidly enough to warrant 2Hz updates
         statsUpdateTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             // Timer callback is nonisolated, dispatch to main actor
+            // Bind weak self to let to avoid 'reference to captured var' in @Sendable Task closure
+            guard let self else { return }
             Task { @MainActor in
-                self?.updateNetworkStats()
+                self.updateNetworkStats()
             }
         }
     }

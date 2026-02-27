@@ -249,8 +249,10 @@ class LogViewerWindowController: NSWindowController {
         // Refresh every 2 seconds
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             // Timer callback is nonisolated, dispatch to main actor
+            // Bind weak self to let to avoid 'reference to captured var' in @Sendable Task closure
+            guard let self else { return }
             Task { @MainActor in
-                self?.loadLogContent()
+                self.loadLogContent()
             }
         }
     }
