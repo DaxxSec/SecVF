@@ -1171,6 +1171,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             // SECURITY: Start security monitoring for this VM
             VMSecurityMonitor.shared.startMonitoring(vm: vmConfig, virtualMachine: virtualMachine)
 
+            // Expose the AI Sandbox vsock exec channel as a UDS at
+            // /tmp/secvf-exec-<vmid>.sock so cross-process / cross-user
+            // clients (e.g. ai-mon's SecVFTracer, secvf-cli vm exec) can
+            // drive the guest. No-op for VMs without a vsock device.
+            VsockExecBridgeManager.shared.startBridge(
+                vmId: vmConfig.id, vmName: vmConfig.name, vm: virtualMachine
+            )
+
             let needsInstall = self.needsInstallFlags[vmId] ?? false
 
             // For macOS installation, use the installer instead of manually starting the VM
@@ -1197,6 +1205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
                     // Stop security monitoring on failure
                     VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+                    VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
                     // Disconnect from virtual switch on failure
                     if vmConfig.networkConfig.mode == .virtual {
                         VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
@@ -1935,6 +1944,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
             // 3. Stop security monitoring
             VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+            VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
 
             // 4. Update status
             VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
@@ -2013,6 +2023,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // 3. Stop security monitoring
         VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+        VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
 
         // 4. Update status
         VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
@@ -2060,6 +2071,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             // 3. Stop security monitoring
             if let config = vmConfig {
                 VMSecurityMonitor.shared.stopMonitoring(vmID: config.id)
+                VsockExecBridgeManager.shared.stopBridge(vmId: config.id)
                 VMManager.shared.updateVMStatus(config, status: .stopped)
             }
 
@@ -2178,6 +2190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // SECURITY: Stop security monitoring
         VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+        VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
 
         // NETWORK: Disconnect from virtual switch if in virtual network mode
         if vmConfig.networkConfig.mode == .virtual {
