@@ -250,17 +250,40 @@ sudo chmod 755 /usr/local/bin/ai-sandbox-vsock-agent.sh
 
 sudo tee /usr/local/bin/ai-sandbox-exec-handler.sh << 'HANDLER'
 #!/bin/bash
-# Called per vsock connection — reads one command, runs it, closes.
+# Called per vsock connection — reads one command line, runs it, streams output.
+#
+# Modes (selected by command-line prefix):
+#   "STREAM "  → no timeout, runs as root (for long-lived probes like dtrace)
+#   "ROOT "    → 120s timeout, runs as root (for setup / introspection)
+#   default    → 120s timeout, runs as ai-sandbox-agent (non-admin)
+#
+# All modes stream stdout+stderr line-by-line back over the socket so callers
+# (e.g. ai-mon's SecVFTracer) get live output, not a buffered dump on close.
+
 IFS= read -r cmd
 cmd="${cmd%$'\r'}"
 [[ -z "$cmd" ]] && exit 0
 
-# Validate working dir
 cd /workspace 2>/dev/null || exit 1
 
-# Run as ai-sandbox-agent (non-admin), with configurable timeout (default 120s)
-TIMEOUT="${AI_SANDBOX_EXEC_TIMEOUT:-120}"
-exec timeout "$TIMEOUT" sudo -u ai-sandbox-agent bash -c "$cmd" 2>&1
+case "$cmd" in
+    "STREAM "*)
+        # Long-running mode: no timeout, root privileges. Used for dtrace
+        # probes and other observe-only tools that need to outlive the
+        # default exec budget.
+        exec sudo bash -c "${cmd#STREAM }" 2>&1
+        ;;
+    "ROOT "*)
+        # Privileged short-running mode (setup / introspection / config).
+        TIMEOUT="${AI_SANDBOX_EXEC_TIMEOUT:-120}"
+        exec timeout "$TIMEOUT" sudo bash -c "${cmd#ROOT }" 2>&1
+        ;;
+    *)
+        # Default: drop to non-admin agent user, 120s timeout.
+        TIMEOUT="${AI_SANDBOX_EXEC_TIMEOUT:-120}"
+        exec timeout "$TIMEOUT" sudo -u ai-sandbox-agent bash -c "$cmd" 2>&1
+        ;;
+esac
 HANDLER
 sudo chmod 755 /usr/local/bin/ai-sandbox-exec-handler.sh
 
