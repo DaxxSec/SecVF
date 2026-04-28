@@ -162,6 +162,43 @@ syscall::connect:entry
 DTRACE
 sudo chmod 755 /usr/local/share/secvf-ai-sandbox/netmon.d
 
+# Per-PID stdout/stderr capture — invoked on demand (NOT a LaunchDaemon).
+# Used by ai-mon (and other consumers) to tail a specific process's writes
+# without the system-wide noise of execmon/filemon/netmon. See scripts/writemon.d
+# in the host repo for the canonical version.
+sudo tee /usr/local/share/secvf-ai-sandbox/writemon.d << 'DTRACE'
+#!/usr/sbin/dtrace -qs
+/*
+ * Per-PID stdout/stderr capture. Invoke as:
+ *   sudo dtrace -p <target_pid> -s writemon.d
+ * dtrace exits when the target exits; consumer sees a clean stream end.
+ */
+#pragma D option strsize=64k
+#pragma D option switchrate=10hz
+#pragma D option quiet
+
+syscall::write:entry,
+syscall::write_nocancel:entry
+/pid == $target && (arg0 == 1 || arg0 == 2)/
+{
+    self->fd  = arg0;
+    self->len = arg2;
+    self->buf = copyinstr(arg1, arg2);
+}
+
+syscall::write:return,
+syscall::write_nocancel:return
+/self->buf != NULL/
+{
+    printf("write(%d, \"%S\", %d) = %d\n",
+           self->fd, self->buf, self->len, (int)arg1);
+    self->fd  = 0;
+    self->len = 0;
+    self->buf = 0;
+}
+DTRACE
+sudo chmod 755 /usr/local/share/secvf-ai-sandbox/writemon.d
+
 # ── security telemetry LaunchDaemon ───────────────────────────────────────────────
 # Runs DTrace continuously, appends JSON lines to workspace telemetry dir
 sudo tee /Library/LaunchDaemons/com.secvf.ai-sandbox.security-execmon.plist << 'PLIST'
@@ -304,6 +341,7 @@ sudo tee "$MANIFEST_PATH" << MANIFEST
   "node_version":     "${NODE_VERSION}",
   "ai_agent_version": "${AI_AGENT_VERSION}",
   "monitoring":       ["dtrace", "esf-helper", "unified-logging"],
+  "dtrace_probes":    ["execmon", "filemon", "netmon", "writemon"],
   "ipc":              "vsock:2222",
   "agent_user":       "${AI_SANDBOX_USER}",
   "workspace_mount":  "${WORKSPACE_MOUNT}"
