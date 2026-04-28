@@ -497,7 +497,19 @@ class VirtualNetworkSwitch {
         // Check if this MAC is already learned from a different VM
         if let learnedVMId = macTable[srcMAC], learnedVMId != vmId {
             if let attackerPort = ports[vmId], let victimPort = ports[learnedVMId] {
-                log("SECURITY WARNING: MAC spoofing detected! \(attackerPort.vmName) using MAC \(srcMAC) already assigned to \(victimPort.vmName)", type: .error)
+                let msg = "MAC spoofing detected: \(attackerPort.vmName) using MAC \(srcMAC) already assigned to \(victimPort.vmName)"
+                log("SECURITY WARNING: \(msg)", type: .error)
+                VMSecurityMonitor.shared.logSecurityEvent(
+                    .critical,
+                    type: .networkAnomaly,
+                    vmName: attackerPort.vmName,
+                    message: msg,
+                    details: [
+                        "srcMAC": srcMAC,
+                        "victimVM": victimPort.vmName,
+                        "victimVMID": learnedVMId.uuidString
+                    ]
+                )
                 return true
             }
         }
@@ -523,12 +535,28 @@ class VirtualNetworkSwitch {
 
         // Limits: 10,000 packets/sec total, 1,000 broadcast/sec
         if port.packetsLastSecond > 10000 {
-            log("SECURITY WARNING: Rate limit exceeded for \(port.vmName) - \(port.packetsLastSecond) packets/sec (potential DoS)", type: .error)
+            let msg = "Rate limit exceeded for \(port.vmName) — \(port.packetsLastSecond) packets/sec (potential DoS)"
+            log("SECURITY WARNING: \(msg)", type: .error)
+            VMSecurityMonitor.shared.logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: port.vmName,
+                message: msg,
+                details: ["packetsPerSec": port.packetsLastSecond]
+            )
             return false
         }
 
         if port.broadcastCountLastSecond > 1000 {
-            log("SECURITY WARNING: Broadcast flood detected from \(port.vmName) - \(port.broadcastCountLastSecond) broadcasts/sec", type: .error)
+            let msg = "Broadcast flood from \(port.vmName) — \(port.broadcastCountLastSecond) broadcasts/sec"
+            log("SECURITY WARNING: \(msg)", type: .error)
+            VMSecurityMonitor.shared.logSecurityEvent(
+                .warning,
+                type: .networkAnomaly,
+                vmName: port.vmName,
+                message: msg,
+                details: ["broadcastsPerSec": port.broadcastCountLastSecond]
+            )
             return false
         }
 

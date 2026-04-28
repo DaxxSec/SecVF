@@ -65,6 +65,7 @@ class VMSecurityMonitor {
 
     private let logger = OSLog(subsystem: "com.DaxxSec.SecVF", category: "Security")
     private var fileMonitors: [String: DispatchSourceFileSystemObject] = [:]
+    private var resourceTimers: [String: DispatchSourceTimer] = [:]
     private var activeVMs: [String: VMSecurityContext] = [:]
     private let eventQueue = DispatchQueue(label: "com.secvf.security.events", qos: .userInitiated)
 
@@ -121,6 +122,9 @@ class VMSecurityMonitor {
 
                 // Stop filesystem monitor
                 self.stopFilesystemMonitoring(for: vmID.uuidString)
+
+                // Stop resource monitor
+                self.stopResourceMonitoring(for: vmID.uuidString)
 
                 // Remove from active VMs
                 self.activeVMs.removeValue(forKey: vmID.uuidString)
@@ -193,43 +197,59 @@ class VMSecurityMonitor {
     // MARK: - Resource Monitoring
 
     private func startResourceMonitoring(for vm: VMConfiguration) {
-        // Monitor CPU and memory usage
-        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in
-            guard let self = self else {
-                timer.invalidate()
-                return
-            }
-
-            // Check if VM is still active
+        // Polls SecVF's own RSS every 5s while this VM is registered as active.
+        // This is HOST-process memory, not the guest's — Virtualization.framework
+        // doesn't expose VM-side memory directly, so this is a coarse signal:
+        // sustained host-RSS growth while a VM is running often tracks with the
+        // host buffer/copy overhead of guest activity (large file shares, dense
+        // packet streams, etc.). For real per-guest numbers, the guest agent
+        // would need to report via vsock — TODO.
+        //
+        // Implemented with DispatchSourceTimer rather than Timer.scheduledTimer
+        // because we may not be on a queue with a runloop bound — Timer would
+        // silently never fire.
+        let timer = DispatchSource.makeTimerSource(queue: eventQueue)
+        timer.schedule(deadline: .now() + 5.0, repeating: 5.0)
+        timer.setEventHandler { [weak self, weak timer] in
+            guard let self = self else { timer?.cancel(); return }
             guard self.activeVMs[vm.id.uuidString] != nil else {
-                timer.invalidate()
+                timer?.cancel()
                 return
             }
 
-            // Get system resource usage
             var info = mach_task_basic_info()
-            var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
-
+            var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
             let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
                 $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
                     task_info(mach_task_self_,
-                             task_flavor_t(MACH_TASK_BASIC_INFO),
-                             $0,
-                             &count)
+                              task_flavor_t(MACH_TASK_BASIC_INFO),
+                              $0,
+                              &count)
                 }
             }
+            guard kerr == KERN_SUCCESS else { return }
 
-            if kerr == KERN_SUCCESS {
-                let usedMemoryMB = Double(info.resident_size) / 1024.0 / 1024.0
-
-                // Alert if memory usage is suspicious
-                if usedMemoryMB > 8000 {  // > 8GB host memory usage
-                    self.logSecurityEvent(.warning, type: .resourceExhaustion,
-                                        vmName: vm.name,
-                                        message: "High host memory usage detected",
-                                        details: ["memoryMB": usedMemoryMB])
-                }
+            let hostRssMB = Double(info.resident_size) / 1024.0 / 1024.0
+            if hostRssMB > 8000 {
+                self.logSecurityEvent(
+                    .warning,
+                    type: .resourceExhaustion,
+                    vmName: vm.name,
+                    message: "Host RSS over 8 GB while VM running — possible runaway guest",
+                    details: [
+                        "hostRssMB": hostRssMB,
+                        "note": "host-process figure, not guest-resident; see VMSecurityMonitor docs"
+                    ]
+                )
             }
+        }
+        timer.resume()
+        resourceTimers[vm.id.uuidString] = timer
+    }
+
+    private func stopResourceMonitoring(for vmID: String) {
+        if let timer = resourceTimers.removeValue(forKey: vmID) {
+            timer.cancel()
         }
     }
 
@@ -299,30 +319,63 @@ class VMSecurityMonitor {
 
     // MARK: - Security Recommendations
 
+    /// Build a list of human-readable security recommendations / observations for a VM.
+    ///
+    /// Reflects the VM's actual configuration (network mode, resource allocation,
+    /// OS type) and the host's live monitoring state — not a hardcoded checklist.
     func getSecurityRecommendations(for vm: VMConfiguration) -> [String] {
-        var recommendations: [String] = []
+        var rec: [String] = []
 
-        // Check if VM has network access (always does with NAT)
-        recommendations.append("⚠️ VM has network access - malware can communicate externally")
-
-        // Check resource allocation
-        if vm.cpuCount > 4 {
-            recommendations.append("ℹ️ High CPU allocation may enable sophisticated malware")
+        // ── Network posture ──────────────────────────────────────────────────
+        switch vm.networkConfig.mode {
+        case .nat:
+            rec.append("⚠️ NAT networking — guest reaches the live internet directly. For malware analysis, switch to virtual switch routed through a Kali router.")
+        case .virtual:
+            if vm.networkConfig.isRouter {
+                rec.append("ℹ️ Router VM — sits between client guests and the internet. Run kali-router-setup.sh inside; consider kali-fakenet-setup.sh to fully isolate.")
+            } else if vm.networkConfig.routerVMId != nil {
+                rec.append("✅ Virtual switch — egress goes through a router VM, not the host.")
+            } else {
+                rec.append("✅ Virtual switch — fully isolated from host and internet (no router configured).")
+            }
         }
 
-        if vm.memorySize > 8 * 1024 * 1024 * 1024 {
-            recommendations.append("ℹ️ High memory allocation - monitor for memory-based attacks")
+        // ── Resource allocation ──────────────────────────────────────────────
+        if vm.cpuCount > 8 {
+            rec.append("ℹ️ \(vm.cpuCount) vCPUs allocated — generous; fine for AI workloads, watch for runaway CPU in malware analysis.")
+        }
+        let memGB = Double(vm.memorySize) / 1_073_741_824.0
+        if memGB > 8 {
+            rec.append("ℹ️ \(String(format: "%.0f", memGB)) GB RAM allocated — keep an eye on host RSS while the VM is running.")
         }
 
-        // Check OS type
+        // ── OS-specific notes ────────────────────────────────────────────────
         if vm.osType == "macOS" {
-            recommendations.append("⚠️ macOS guest can potentially exploit framework vulnerabilities")
+            rec.append("⚠️ macOS guest — Virtualization.framework attack surface is broader than Linux; SIP / hardened-runtime settings inside the guest matter.")
         }
 
-        recommendations.append("✅ VM filesystem access is isolated to bundle directory")
-        recommendations.append("✅ Security monitoring is active")
+        // ── Live monitoring posture ──────────────────────────────────────────
+        let isActive = activeVMs[vm.id.uuidString] != nil
+        rec.append(isActive
+            ? "✅ Filesystem + resource monitoring active for this VM."
+            : "ℹ️ Filesystem + resource monitoring engages once the VM starts.")
 
-        return recommendations
+        let switchStats = VirtualNetworkSwitch.shared.getStatistics()
+        let switchUp = (switchStats["running"] as? Bool) ?? false
+        if vm.networkConfig.mode == .virtual && switchUp {
+            let connected = (switchStats["connectedPorts"] as? Int) ?? 0
+            rec.append("✅ Virtual switch up — \(connected) port(s) connected, \(switchStats["learnedMACs"] as? Int ?? 0) MAC(s) learned.")
+        } else if vm.networkConfig.mode == .virtual {
+            rec.append("⚠️ Virtual switch is not running — guest will have no L2 peer.")
+        }
+
+        if PacketCaptureManager.shared.isCapturing {
+            rec.append("✅ Packet capture is recording — analysis available in Wireshark view.")
+        }
+
+        rec.append("✅ Bundle filesystem is isolated; events logged to ~/.avf/logs/security-*.log.")
+
+        return rec
     }
 }
 
