@@ -155,15 +155,21 @@ struct AISandboxMacVMConfiguration {
         config.bootLoader = VZMacOSBootLoader()
 
         // ── 4. Storage ────────────────────────────────────────────────────────
-        // Using virtio-blk for compatibility with macOS 14 deployment target.
-        // macOS 15+ adds VZNVMExpressControllerDeviceConfiguration which is
-        // measurably faster for I/O-heavy workloads — worth gating on
-        // @available(macOS 15.0, *) when we bump the floor or want a runtime
-        // upgrade path.
+        // Use NVMe on macOS 15+ for substantially better I/O perf (faster queue
+        // depth, lower latency for the random-access patterns Homebrew, npm,
+        // and node_modules generate). Fall back to virtio-blk on macOS 14.
         let diskAttachment = try VZDiskImageStorageDeviceAttachment(
             url: bundle.diskURL, readOnly: false
         )
-        config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)]
+        if #available(macOS 15.0, *) {
+            config.storageDevices = [
+                VZNVMExpressControllerDeviceConfiguration(attachment: diskAttachment)
+            ]
+        } else {
+            config.storageDevices = [
+                VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)
+            ]
+        }
 
         // ── 5. Networking ─────────────────────────────────────────────────────
         // NAT — VM reaches internet (through Kali router VM in CSIRT-VF stack).
