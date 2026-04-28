@@ -437,6 +437,7 @@ class PacketCaptureManager {
     // MARK: - tshark Output Parsing
 
     private var jsonBuffer = Data()
+    private static let maxJsonBufferBytes = 4 * 1024 * 1024  // 4 MiB safety cap
 
     private func parseTsharkOutput(_ data: Data) {
         parseQueue.async { [weak self] in
@@ -444,38 +445,78 @@ class PacketCaptureManager {
 
             self.jsonBuffer.append(data)
 
-            // Try to parse complete JSON objects from buffer
+            // Drain every complete top-level object the buffer currently holds.
             while let packet = self.extractNextPacket() {
                 DispatchQueue.main.async {
                     self.addPacket(packet)
                     self.updateProtocolStats(packet.protocol, bytes: packet.length)
                 }
             }
+
+            // Bound the buffer so a malformed stream can't OOM us.
+            if self.jsonBuffer.count > Self.maxJsonBufferBytes {
+                let drop = self.jsonBuffer.count - Self.maxJsonBufferBytes
+                self.jsonBuffer.removeFirst(drop)
+                self.log("tshark JSON buffer truncated by \(drop) bytes (over \(Self.maxJsonBufferBytes) cap)", type: .error)
+            }
         }
     }
 
+    /// Pulls the next complete top-level `{ ... }` object out of `jsonBuffer`
+    /// using a brace-counting scan that respects strings and escaped quotes.
+    /// Returns nil when no complete object is available; in that case the
+    /// buffer is kept intact for the next read.
     private func extractNextPacket() -> CapturedPacket? {
-        // Look for complete JSON packet objects
-        guard let string = String(data: jsonBuffer, encoding: .utf8) else { return nil }
+        let bytes = jsonBuffer
+        let count = bytes.count
+        var i = 0
 
-        // tshark outputs array elements, look for complete objects
-        if let range = string.range(of: "\\{[^{}]*\"_source\"[^{}]*\\}", options: .regularExpression) {
-            let jsonString = String(string[range])
-
-            // Remove processed data from buffer
-            if let dataRange = jsonString.data(using: .utf8) {
-                if let bufferRange = jsonBuffer.range(of: dataRange) {
-                    jsonBuffer.removeSubrange(bufferRange)
-                }
-            }
-
-            // Parse JSON
-            if let jsonData = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                return parsePacketJSON(json)
-            }
+        // Skip whitespace, array delimiters, and any leading `[` from tshark's
+        // JSON-array output framing.
+        let skip: Set<UInt8> = [0x20, 0x09, 0x0A, 0x0D, 0x2C, 0x5B] // SPACE TAB LF CR , [
+        while i < count, skip.contains(bytes[i]) { i += 1 }
+        guard i < count, bytes[i] == 0x7B /* { */ else {
+            // No object yet — drop any leading garbage we skipped over so the
+            // next pass starts clean.
+            if i > 0 { jsonBuffer.removeFirst(i) }
+            return nil
         }
 
+        let start = i
+        var depth = 0
+        var inString = false
+        var escape = false
+
+        while i < count {
+            let b = bytes[i]
+            if escape {
+                escape = false
+            } else if inString {
+                if b == 0x5C /* \ */ { escape = true }
+                else if b == 0x22 /* " */ { inString = false }
+            } else {
+                switch b {
+                case 0x22: inString = true
+                case 0x7B: depth += 1               // {
+                case 0x7D:                          // }
+                    depth -= 1
+                    if depth == 0 {
+                        let objBytes = jsonBuffer.subdata(in: start..<(i + 1))
+                        jsonBuffer.removeFirst(i + 1)
+                        if let json = try? JSONSerialization.jsonObject(with: objBytes) as? [String: Any] {
+                            return parsePacketJSON(json)
+                        }
+                        return nil
+                    }
+                default: break
+                }
+            }
+            i += 1
+        }
+
+        // Reached end of buffer without closing the object — keep buffer for
+        // the next chunk to complete it. Trim leading garbage from before `start`.
+        if start > 0 { jsonBuffer.removeFirst(start) }
         return nil
     }
 

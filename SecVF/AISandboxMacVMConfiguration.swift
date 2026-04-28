@@ -155,6 +155,11 @@ struct AISandboxMacVMConfiguration {
         config.bootLoader = VZMacOSBootLoader()
 
         // ── 4. Storage ────────────────────────────────────────────────────────
+        // Using virtio-blk for compatibility with macOS 14 deployment target.
+        // macOS 15+ adds VZNVMExpressControllerDeviceConfiguration which is
+        // measurably faster for I/O-heavy workloads — worth gating on
+        // @available(macOS 15.0, *) when we bump the floor or want a runtime
+        // upgrade path.
         let diskAttachment = try VZDiskImageStorageDeviceAttachment(
             url: bundle.diskURL, readOnly: false
         )
@@ -240,6 +245,90 @@ struct AISandboxMacVMConfiguration {
         max(VZVirtualMachineConfiguration.minimumAllowedMemorySize,
             min(VZVirtualMachineConfiguration.maximumAllowedMemorySize, n))
     }
+}
+
+
+// ─── VSOCK CHANNEL — HOST↔GUEST IPC ───────────────────────────────────────────
+// Thin wrapper around VZVirtioSocketDevice for the AI Sandbox vsock surface.
+// The guest's vsock-agent (installed by provision-macos-vm.sh) listens on
+// :2222 with `socat VSOCK-LISTEN:2222,reuseaddr,fork EXEC:.../exec-handler.sh`,
+// which reads ONE command line per connection, runs it, and closes the socket.
+//
+// `runOneShot` matches that lifecycle: write a command, drain stdout until
+// the guest closes, return the accumulated string. Future streaming probes
+// (e.g. dtrace) can be added as additional methods on this enum.
+
+enum VsockChannel {
+    /// Send `command` over vsock to the guest and accumulate stdout until the
+    /// guest closes the socket. Suitable for the one-shot exec agent.
+    static func runOneShot(
+        on vm: VZVirtualMachine,
+        port: UInt32 = AISandboxDefaults.vsockPort,
+        command: String
+    ) async throws -> String {
+        guard let socketDev = vm.socketDevices.first as? VZVirtioSocketDevice else {
+            throw AISandboxVMError.socketDeviceNotFound
+        }
+        return try await connect(socketDevice: socketDev, port: port, command: command)
+    }
+
+    /// Same as `runOneShot` but takes a pre-resolved socket device — used when
+    /// the caller already holds a reference (e.g. installer flows).
+    static func runOneShot(
+        socketDevice: VZVirtioSocketDevice,
+        port: UInt32 = AISandboxDefaults.vsockPort,
+        command: String
+    ) async throws -> String {
+        return try await connect(socketDevice: socketDevice, port: port, command: command)
+    }
+
+    private static func connect(
+        socketDevice: VZVirtioSocketDevice,
+        port: UInt32,
+        command: String
+    ) async throws -> String {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
+            socketDevice.connect(toPort: port) { result in
+                switch result {
+                case .failure(let err):
+                    cont.resume(throwing: err)
+                case .success(let conn):
+                    // VZVirtioSocketConnection exposes a raw fileDescriptor; wrap
+                    // it in a FileHandle to use the readabilityHandler API. The
+                    // socket is bidirectional, so the same handle reads and writes.
+                    let handle = FileHandle(fileDescriptor: conn.fileDescriptor, closeOnDealloc: false)
+                    if let payload = (command + "\n").data(using: .utf8) {
+                        do { try handle.write(contentsOf: payload) } catch {
+                            cont.resume(throwing: error)
+                            return
+                        }
+                    }
+                    let state = VsockReadState()
+                    handle.readabilityHandler = { fh in
+                        let d = fh.availableData
+                        if d.isEmpty {
+                            fh.readabilityHandler = nil
+                            guard !state.hasResumed else { return }
+                            state.hasResumed = true
+                            // Hold onto `conn` until we're done so the fd stays open.
+                            _ = conn
+                            cont.resume(returning: state.output)
+                        } else {
+                            state.output += String(data: d, encoding: .utf8) ?? ""
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Reference-typed state for the vsock read continuation. Avoids Swift 6
+/// sendable-closure-capture warnings by holding mutable fields on an object
+/// rather than as captured `var`s.
+private final class VsockReadState {
+    var output: String = ""
+    var hasResumed: Bool = false
 }
 
 
@@ -358,15 +447,14 @@ class AISandboxMacVMInstaller {
         try await Task.sleep(nanoseconds: 30_000_000_000) // 30s for first boot + login
 
         // Send the provision script via vsock
-        guard let socketDev = vm.socketDevices.first as? VZVirtioSocketDevice else {
-            throw AISandboxVMError.socketDeviceNotFound
+        guard let scriptURL = Bundle.main.url(
+            forResource: "provision-macos-vm", withExtension: "sh"
+        ) else {
+            throw AISandboxVMError.provisionScriptMissing
         }
+        let provisionScript = try String(contentsOf: scriptURL, encoding: .utf8)
 
-        let provisionScript = try String(
-            contentsOf: Bundle.main.url(forResource: "provision-macos-vm", withExtension: "sh")!
-        )
-
-        _ = try await sendVsockCommand(provisionScript, socketDevice: socketDev)
+        _ = try await VsockChannel.runOneShot(on: vm, command: provisionScript)
 
         // Graceful shutdown
         try await vm.stop()
@@ -410,34 +498,6 @@ class AISandboxMacVMInstaller {
         try handle.truncate(atOffset: UInt64(sizeBytes))
     }
 
-    // ── vsock command helper ──────────────────────────────────────────────────
-    private static func sendVsockCommand(
-        _ command: String,
-        socketDevice: VZVirtioSocketDevice
-    ) async throws -> String {
-        try await withCheckedThrowingContinuation { cont in
-            socketDevice.connect(toPort: AISandboxDefaults.vsockPort) { result in
-                switch result {
-                case .failure(let e): cont.resume(throwing: e)
-                case .success(let conn):
-                    conn.fileHandleForWriting.write((command + "\n").data(using: .utf8)!)
-                    var output = ""
-                    var hasResumed = false
-                    conn.fileHandleForReading.readabilityHandler = { fh in
-                        let d = fh.availableData
-                        if d.isEmpty {
-                            fh.readabilityHandler = nil
-                            guard !hasResumed else { return }
-                            hasResumed = true
-                            cont.resume(returning: output)
-                        } else {
-                            output += String(data: d, encoding: .utf8) ?? ""
-                        }
-                    }
-                }
-            }
-        }
-    }
 }
 
 
@@ -473,30 +533,8 @@ class AISandboxVMSession {
     }
 
     func run(command: String) async throws -> String {
-        guard let machine = vm,
-              let socketDev = machine.socketDevices.first as? VZVirtioSocketDevice
-        else { throw AISandboxVMError.socketDeviceNotFound }
-
-        return try await withCheckedThrowingContinuation { cont in
-            socketDev.connect(toPort: AISandboxDefaults.vsockPort) { result in
-                switch result {
-                case .failure(let e): cont.resume(throwing: e)
-                case .success(let conn):
-                    conn.fileHandleForWriting.write((command + "\n").data(using: .utf8)!)
-                    var out = ""
-                    var hasResumed = false
-                    conn.fileHandleForReading.readabilityHandler = { fh in
-                        let d = fh.availableData
-                        if d.isEmpty {
-                            fh.readabilityHandler = nil
-                            guard !hasResumed else { return }
-                            hasResumed = true
-                            cont.resume(returning: out)
-                        } else { out += String(data: d, encoding: .utf8) ?? "" }
-                    }
-                }
-            }
-        }
+        guard let machine = vm else { throw AISandboxVMError.socketDeviceNotFound }
+        return try await VsockChannel.runOneShot(on: machine, command: command)
     }
 
     func destroy() async throws {
@@ -520,6 +558,7 @@ enum AISandboxVMError: LocalizedError {
     case baseBundleNotFound
     case diskCreationFailed
     case socketDeviceNotFound
+    case provisionScriptMissing
 
     var errorDescription: String? {
         switch self {
@@ -530,6 +569,7 @@ enum AISandboxVMError: LocalizedError {
         case .baseBundleNotFound:          return "Base bundle not found — run installer first"
         case .diskCreationFailed:          return "Could not create disk image file"
         case .socketDeviceNotFound:        return "vsock device not found or VM not running"
+        case .provisionScriptMissing:      return "provision-macos-vm.sh not found in app bundle resources"
         }
     }
 }
