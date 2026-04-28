@@ -197,54 +197,126 @@ class VMSecurityMonitor {
     // MARK: - Resource Monitoring
 
     private func startResourceMonitoring(for vm: VMConfiguration) {
-        // Polls SecVF's own RSS every 5s while this VM is registered as active.
-        // This is HOST-process memory, not the guest's — Virtualization.framework
-        // doesn't expose VM-side memory directly, so this is a coarse signal:
-        // sustained host-RSS growth while a VM is running often tracks with the
-        // host buffer/copy overhead of guest activity (large file shares, dense
-        // packet streams, etc.). For real per-guest numbers, the guest agent
-        // would need to report via vsock — TODO.
+        // For AI sandbox guests (VMs with a vsock device + the provisioned exec
+        // agent), poll real guest-side load and memory pressure every 5s via
+        // VsockChannel. For other VMs (Linux router, etc.), fall back to a
+        // coarse host-process RSS sanity check — better than nothing, but
+        // explicitly labeled as host-side in the log details.
         //
-        // Implemented with DispatchSourceTimer rather than Timer.scheduledTimer
-        // because we may not be on a queue with a runloop bound — Timer would
-        // silently never fire.
+        // DispatchSourceTimer rather than Timer.scheduledTimer because we
+        // can't rely on a runloop being bound to eventQueue.
         let timer = DispatchSource.makeTimerSource(queue: eventQueue)
         timer.schedule(deadline: .now() + 5.0, repeating: 5.0)
         timer.setEventHandler { [weak self, weak timer] in
             guard let self = self else { timer?.cancel(); return }
-            guard self.activeVMs[vm.id.uuidString] != nil else {
+            guard let context = self.activeVMs[vm.id.uuidString] else {
                 timer?.cancel()
                 return
             }
-
-            var info = mach_task_basic_info()
-            var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
-            let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
-                $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                    task_info(mach_task_self_,
-                              task_flavor_t(MACH_TASK_BASIC_INFO),
-                              $0,
-                              &count)
+            let machine = context.vm
+            // Branch: vsock-capable guests get real stats, others get host RSS.
+            if machine.socketDevices.first is VZVirtioSocketDevice {
+                Task { [weak self] in
+                    await self?.pollGuestResources(vmName: vm.name, vm: machine)
                 }
-            }
-            guard kerr == KERN_SUCCESS else { return }
-
-            let hostRssMB = Double(info.resident_size) / 1024.0 / 1024.0
-            if hostRssMB > 8000 {
-                self.logSecurityEvent(
-                    .warning,
-                    type: .resourceExhaustion,
-                    vmName: vm.name,
-                    message: "Host RSS over 8 GB while VM running — possible runaway guest",
-                    details: [
-                        "hostRssMB": hostRssMB,
-                        "note": "host-process figure, not guest-resident; see VMSecurityMonitor docs"
-                    ]
-                )
+            } else {
+                self.pollHostRSS(vmName: vm.name)
             }
         }
         timer.resume()
         resourceTimers[vm.id.uuidString] = timer
+    }
+
+    /// Polls the guest via the AI sandbox vsock exec agent. Emits
+    /// resource-exhaustion events if load average crosses thresholds.
+    private func pollGuestResources(vmName: String, vm: VZVirtualMachine) async {
+        // ROOT prefix routes through the privileged branch of the exec
+        // handler — no agent-user permissions on sysctl/vm_stat needed.
+        let cmd = "ROOT sysctl -n vm.loadavg && memory_pressure 2>/dev/null | head -3"
+        let output: String
+        do {
+            output = try await VsockChannel.runOneShot(on: vm, command: cmd)
+        } catch {
+            // Connection failed — VM may be in an unusual state, exec agent
+            // may not be running. Skip this tick silently rather than spamming.
+            return
+        }
+
+        // Parse load average. macOS `sysctl -n vm.loadavg` returns: { 0.65 0.72 0.80 }
+        let load1 = parseLoad1(output)
+        // Parse memory pressure %. Look for "System-wide memory free percentage: NN%"
+        let memFreePct = parseMemFreePct(output)
+
+        // Threshold-driven alerts. Tuned for "guest sustained at high load",
+        // not transient spikes — the timer fires every 5s so a single spike
+        // gets one event, sustained pressure gets a steady stream.
+        if let l = load1, l > 12.0 {
+            logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: vmName,
+                message: "Guest load average \(String(format: "%.2f", l)) over threshold (12.0)",
+                details: ["loadAvg1": l, "source": "vsock"]
+            )
+        }
+        if let f = memFreePct, f < 5.0 {
+            logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: vmName,
+                message: "Guest memory free \(String(format: "%.1f", f))% — under 5% threshold",
+                details: ["memFreePct": f, "source": "vsock"]
+            )
+        }
+    }
+
+    /// Fallback for non-vsock VMs — polls SecVF's own RSS as a coarse signal.
+    private func pollHostRSS(vmName: String) {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                          task_flavor_t(MACH_TASK_BASIC_INFO),
+                          $0,
+                          &count)
+            }
+        }
+        guard kerr == KERN_SUCCESS else { return }
+        let hostRssMB = Double(info.resident_size) / 1024.0 / 1024.0
+        if hostRssMB > 8000 {
+            logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: vmName,
+                message: "Host RSS over 8 GB while VM running — coarse signal (no vsock channel for guest stats)",
+                details: ["hostRssMB": hostRssMB, "source": "host-fallback"]
+            )
+        }
+    }
+
+    private func parseLoad1(_ output: String) -> Double? {
+        // sysctl -n vm.loadavg → "{ 0.65 0.72 0.80 }"
+        guard let openIdx = output.firstIndex(of: "{") else { return nil }
+        let after = output[output.index(after: openIdx)...]
+        let parts = after.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+        guard let first = parts.first else { return nil }
+        return Double(first)
+    }
+
+    private func parseMemFreePct(_ output: String) -> Double? {
+        // memory_pressure includes "System-wide memory free percentage: NN%"
+        for line in output.split(separator: "\n") {
+            if line.contains("memory free percentage") {
+                let digits = line.compactMap { c -> Character? in
+                    (c.isNumber || c == ".") ? c : nil
+                }
+                if !digits.isEmpty {
+                    return Double(String(digits))
+                }
+            }
+        }
+        return nil
     }
 
     private func stopResourceMonitoring(for vmID: String) {
