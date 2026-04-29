@@ -271,7 +271,24 @@ case "$cmd" in
         # Long-running mode: no timeout, root privileges. Used for dtrace
         # probes and other observe-only tools that need to outlive the
         # default exec budget.
-        exec sudo bash -c "${cmd#STREAM }" 2>&1
+        #
+        # Defense-in-depth: even though the host-side bridge already
+        # authenticates the peer's uid, restrict STREAM to a small set of
+        # observability binaries. The bridge is the primary gate; this
+        # whitelist limits blast radius if it ever fails open.
+        STREAM_CMD="${cmd#STREAM }"
+        FIRST_TOKEN="${STREAM_CMD%%[[:space:]]*}"
+        BASENAME="${FIRST_TOKEN##*/}"
+        case "$BASENAME" in
+            dtrace|fs_usage|ktrace|top|vm_stat|memory_pressure|sysctl|tail|log)
+                exec sudo bash -c "$STREAM_CMD" 2>&1
+                ;;
+            *)
+                echo "secvf-exec-handler: STREAM mode rejected — '$BASENAME' is not in the observability allowlist" >&2
+                echo "Allowed: dtrace fs_usage ktrace top vm_stat memory_pressure sysctl tail log" >&2
+                exit 64
+                ;;
+        esac
         ;;
     "ROOT "*)
         # Privileged short-running mode (setup / introspection / config).

@@ -1253,6 +1253,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         // Clean up any stray windows from previous sessions (macOS window restoration)
         closeAllVMWindows()
 
+        // Prune old logs and rotate the audit log on launch — bounded retention
+        // for accumulated network/security/error files in ~/.avf/logs/.
+        LogRotation.runAtLaunch()
+
         // Setup Monitoring menu
         setupMonitoringMenu()
 
