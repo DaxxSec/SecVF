@@ -26,6 +26,10 @@ import Darwin
 import Foundation
 import Virtualization
 
+#if canImport(Glibc)
+import Glibc
+#endif
+
 /// Per-VM bridge that exposes the AI Sandbox vsock exec channel as a Unix
 /// domain socket so non-SecVF processes can drive the guest.
 final class VsockExecBridge {
@@ -151,33 +155,93 @@ final class VsockExecBridge {
         guard clientFd >= 0 else { return }
         _ = fcntl(clientFd, F_SETFD, FD_CLOEXEC)
 
+        // SECURITY: peer-credential gate.
+        //
+        // The UDS lives at /tmp/secvf-exec-<UUID>.sock with mode 0666 so
+        // cross-user setups (multi-user mac mini) can connect. That alone
+        // would let any local account on the host get a root shell *inside*
+        // the guest via STREAM mode — which then has rw access to the
+        // host's ~/ai-sandbox-workspace. Mitigate by checking the connecting
+        // peer's uid against an allowlist.
+        //
+        // Default: only the user running SecVF.app may connect. Other users
+        // opt in by adding their username (or numeric uid) to
+        //   ~/.avf/config/exec-bridge-allowlist
+        // one entry per line, comments with #.
+        if let denyMessage = denyReasonForPeer(clientFd: clientFd) {
+            let line = "secvf-exec-bridge: \(denyMessage)\n"
+            _ = line.withCString { write(clientFd, $0, strlen($0)) }
+            close(clientFd)
+            NSLog("[VsockExecBridge] %@ refused connection: %@", vmName, denyMessage)
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.bridgeOneConnection(clientFd: clientFd)
         }
     }
 
+    /// Returns a deny reason string if the peer should be refused, or nil if
+    /// the connection is authorized to proceed.
+    private func denyReasonForPeer(clientFd: Int32) -> String? {
+        var euid: uid_t = 0
+        var egid: gid_t = 0
+        guard getpeereid(clientFd, &euid, &egid) == 0 else {
+            return "could not resolve peer credentials"
+        }
+        let allowed = VsockExecBridge.loadAllowlist()
+        if allowed.contains(euid) {
+            return nil
+        }
+        return "uid \(euid) not in exec-bridge allowlist (add to ~/.avf/config/exec-bridge-allowlist to authorize)"
+    }
+
+    /// Always-allowed UID is the one running SecVF.app. Plus any users
+    /// listed (numeric or by name) in the optional allowlist file.
+    /// Loaded on every connection so config edits take effect immediately —
+    /// the file is small, so re-reading is cheap.
+    private static func loadAllowlist() -> Set<uid_t> {
+        var allowed: Set<uid_t> = [getuid()]
+        let configPath = NSHomeDirectory() + "/.avf/config/exec-bridge-allowlist"
+        guard let raw = try? String(contentsOfFile: configPath, encoding: .utf8) else {
+            return allowed
+        }
+        for rawLine in raw.split(whereSeparator: { $0.isNewline }) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            if let numeric = uid_t(line) {
+                allowed.insert(numeric)
+                continue
+            }
+            // Resolve username → uid.
+            if let pw = getpwnam(line) {
+                allowed.insert(pw.pointee.pw_uid)
+            }
+        }
+        return allowed
+    }
+
     // MARK: - Bridging
 
+    /// Wires up bidirectional byte-piping between the UDS client and a fresh
+    /// vsock connection to the guest, then returns. Tear-down runs
+    /// asynchronously when either side EOFs — we do NOT block this worker
+    /// thread for the bridged session's lifetime.
     private func bridgeOneConnection(clientFd: Int32) {
         let clientHandle = FileHandle(fileDescriptor: clientFd, closeOnDealloc: true)
 
         guard let vm = vm else {
-            try? clientHandle.write(
-                contentsOf: Data("secvf-exec-bridge: VM no longer running\n".utf8)
-            )
-            try? clientHandle.close()
+            errorOut(clientHandle, "VM no longer running")
             return
         }
         guard let socketDev = vm.socketDevices.first as? VZVirtioSocketDevice else {
-            try? clientHandle.write(
-                contentsOf: Data("secvf-exec-bridge: no vsock device on VM\n".utf8)
-            )
-            try? clientHandle.close()
+            errorOut(clientHandle, "no vsock device on VM")
             return
         }
 
-        // Open the vsock connection. The completion fires on an internal queue,
-        // so the semaphore wait below doesn't deadlock.
+        // Bounded wait — if the guest's vsock stack never accepts (e.g. the
+        // exec agent isn't listening), we surface a clean error instead of
+        // wedging the thread forever.
         let sem = DispatchSemaphore(value: 0)
         var connOpt: VZVirtioSocketConnection?
         var connErr: Error?
@@ -188,17 +252,16 @@ final class VsockExecBridge {
             }
             sem.signal()
         }
-        sem.wait()
+        let connectTimeout: DispatchTime = .now() + .seconds(5)
+        if sem.wait(timeout: connectTimeout) == .timedOut {
+            errorOut(clientHandle, "vsock connect to :\(vsockPort) timed out after 5s")
+            return
+        }
 
         guard let vsockConn = connOpt else {
-            let msg: String
-            if let e = connErr {
-                msg = "secvf-exec-bridge: vsock connect to :\(vsockPort) failed: \(e.localizedDescription)\n"
-            } else {
-                msg = "secvf-exec-bridge: vsock connect to :\(vsockPort) returned nil (is the exec agent running in the guest?)\n"
-            }
-            try? clientHandle.write(contentsOf: Data(msg.utf8))
-            try? clientHandle.close()
+            let detail = connErr.map { $0.localizedDescription }
+                ?? "returned nil (is the exec agent running in the guest?)"
+            errorOut(clientHandle, "vsock connect to :\(vsockPort) failed: \(detail)")
             return
         }
 
@@ -207,62 +270,93 @@ final class VsockExecBridge {
             closeOnDealloc: false
         )
 
-        // Two-leg pipe — exit when either side EOFs.
-        let state = BridgeState()
-        let group = DispatchGroup()
-        group.enter()
-        group.enter()
+        // Two-leg pipe — when either side EOFs we close BOTH and clean up.
+        // BridgeState ensures the close runs exactly once even though both
+        // readabilityHandlers will end up firing with empty data (one
+        // because of the real EOF, the other because we closed the handle).
+        let state = BridgeState(client: clientHandle, vsock: vsockHandle, vsockConn: vsockConn)
 
-        clientHandle.readabilityHandler = { fh in
+        clientHandle.readabilityHandler = { [weak state] fh in
             let d = fh.availableData
             if d.isEmpty {
                 fh.readabilityHandler = nil
-                state.tearDown(other: vsockHandle, group: group)
-            } else {
-                do { try vsockHandle.write(contentsOf: d) } catch {
-                    fh.readabilityHandler = nil
-                    state.tearDown(other: vsockHandle, group: group)
-                }
+                state?.finish()
+                return
+            }
+            if state?.writeToVsock(d) != true {
+                fh.readabilityHandler = nil
             }
         }
 
-        vsockHandle.readabilityHandler = { fh in
+        vsockHandle.readabilityHandler = { [weak state] fh in
             let d = fh.availableData
             if d.isEmpty {
                 fh.readabilityHandler = nil
-                state.tearDown(other: clientHandle, group: group)
-            } else {
-                do { try clientHandle.write(contentsOf: d) } catch {
-                    fh.readabilityHandler = nil
-                    state.tearDown(other: clientHandle, group: group)
-                }
+                state?.finish()
+                return
+            }
+            if state?.writeToClient(d) != true {
+                fh.readabilityHandler = nil
             }
         }
+    }
 
-        group.wait()
-
-        // Keep the vsock connection alive until both legs are done.
-        _ = vsockConn
-        try? clientHandle.close()
+    private func errorOut(_ handle: FileHandle, _ msg: String) {
+        let line = "secvf-exec-bridge: \(msg)\n"
+        try? handle.write(contentsOf: Data(line.utf8))
+        try? handle.close()
     }
 }
 
-/// Reference type for tear-down state — shared between the two leg handlers.
+/// Holds both legs of an active bridged connection and runs cleanup exactly
+/// once. The two readabilityHandler closures hold weak refs to this object;
+/// when both are detached and `state` is the only thing keeping the handles
+/// alive, ARC frees everything cleanly.
 private final class BridgeState {
     private let lock = NSLock()
-    private var torn = false
+    private var finished = false
+    private let client: FileHandle
+    private let vsock: FileHandle
+    // Strong ref to the connection to keep its underlying fd alive.
+    private let vsockConn: VZVirtioSocketConnection
 
-    func tearDown(other: FileHandle, group: DispatchGroup) {
+    init(client: FileHandle, vsock: FileHandle, vsockConn: VZVirtioSocketConnection) {
+        self.client = client
+        self.vsock = vsock
+        self.vsockConn = vsockConn
+    }
+
+    /// Idempotent. Closes both handles + clears their readability handlers.
+    func finish() {
         lock.lock()
-        let firstLegFinishing = !torn
-        torn = true
+        let firstCall = !finished
+        finished = true
         lock.unlock()
-        group.leave()
-        if firstLegFinishing {
-            other.readabilityHandler = nil
-            try? other.close()
-            group.leave()
-        }
+        guard firstCall else { return }
+        client.readabilityHandler = nil
+        vsock.readabilityHandler = nil
+        try? client.close()
+        try? vsock.close()
+        // vsockConn drops with self.
+    }
+
+    /// Returns true if the write succeeded (caller can keep reading).
+    func writeToVsock(_ data: Data) -> Bool {
+        lock.lock()
+        let alive = !finished
+        lock.unlock()
+        guard alive else { return false }
+        do { try vsock.write(contentsOf: data); return true }
+        catch { finish(); return false }
+    }
+
+    func writeToClient(_ data: Data) -> Bool {
+        lock.lock()
+        let alive = !finished
+        lock.unlock()
+        guard alive else { return false }
+        do { try client.write(contentsOf: data); return true }
+        catch { finish(); return false }
     }
 }
 
@@ -301,16 +395,6 @@ final class VsockExecBridgeManager {
         let bridge = bridges.removeValue(forKey: vmId)
         lock.unlock()
         bridge?.stop()
-    }
-
-    func socketPath(forVmId vmId: UUID) -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return bridges[vmId]?.socketPath
-    }
-
-    func socketPath(forVmName vmName: String) -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return bridges.values.first(where: { $0.vmName == vmName })?.socketPath
     }
 }
 
