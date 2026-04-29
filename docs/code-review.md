@@ -1,5 +1,50 @@
 # Code Review: SecVF - Status Update
 
+## Recent Additions (2026-04 audit + vsock channel)
+
+### Cross-process / cross-user IPC
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Per-VM UDS exec bridge | ✅ Added | `VsockExecBridge.swift`; `/tmp/secvf-exec-<UUID>.sock` proxies UDS ↔ vsock:2222 |
+| `secvf-cli vm exec` subcommand | ✅ Added | Streams over the UDS bridge with `--stream`/`--root` mode flags |
+| Guest-side STREAM/ROOT mode routing | ✅ Added | `provision-macos-vm.sh` exec handler now routes by command prefix |
+| writemon.d per-PID dtrace probe | ✅ Added | `scripts/writemon.d`; consumed by ai-mon's `SecVFTracer` |
+| AppDelegate hooks for bridge lifecycle | ✅ Added | Start/stop next to `VMSecurityMonitor` per VM |
+
+### Security hardening (2026-04)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Exec-bridge peer-uid auth | ✅ Added | `getpeereid()` allowlist check; default = SecVF.app owner only |
+| Allowlist config file | ✅ Added | `~/.avf/config/exec-bridge-allowlist`, reloaded per connection |
+| STREAM mode binary whitelist | ✅ Added | dtrace/fs_usage/ktrace/top/vm_stat/memory_pressure/sysctl/tail/log only |
+| BridgeState double-leave race | ✅ Fixed | `DispatchGroup` was being left 3× when entered 2× |
+| Unbounded vsock connect wait | ✅ Fixed | 5s timeout on the connect semaphore |
+| Global-queue thread pinning | ✅ Fixed | Bridge no longer `group.wait()`s on a worker thread |
+| `VZVirtioSocketConnection.fileHandleFor*` misuse | ✅ Fixed | Wrap `fileDescriptor` in `FileHandle` properly |
+| DistributedNotificationCenter unauthenticated CLI ops | ⚠️ KNOWN GAP | See SECURITY.md — fix is to migrate to UDS bridge |
+| VMSecurityMonitor host-RSS misnomer | ✅ Fixed | Now reads real guest stats over vsock for AI Sandbox guests |
+| Timer.scheduledTimer in non-runloop queue | ✅ Fixed | Switched to `DispatchSourceTimer` |
+| networkAnomaly events never emitted | ✅ Fixed | L2 switch routes spoofing/rate-limit through `VMSecurityMonitor` |
+
+### Code quality (2026-04)
+
+| Item | Status | Notes |
+|------|--------|-------|
+| `VsockChannel` extracted | ✅ Done | Collapsed two duplicate continuation+readabilityHandler blocks |
+| Tshark JSON regex parser | ✅ Replaced | Streaming brace-counter; 4 MiB buffer cap with truncation log |
+| `getSecurityRecommendations` hardcoded strings | ✅ Replaced | Reflects actual VM network mode + live switch / capture state |
+| `String(contentsOf:)` macOS 15 deprecation | ✅ Fixed | Adopt `init(contentsOf:encoding:)` |
+| Force-unwrap on `Bundle.main.url(forResource:)` | ✅ Replaced | Typed `AISandboxVMError.provisionScriptMissing` |
+| `LogRotation` for `~/.avf/logs/` | ✅ Added | 30-day prune + 10 MB audit rotation, env-tunable |
+
+### Modern Virtualization.framework adoption
+
+| Item | Status | Notes |
+|------|--------|-------|
+| `VZNVMExpressControllerDeviceConfiguration` (macOS 15+) | ✅ Added | `@available` branch in AISandboxMacVMConfiguration storage |
+
 ## Completed Items
 
 ### Security (Critical)

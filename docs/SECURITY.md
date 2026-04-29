@@ -310,6 +310,7 @@ the lookup on their side. Use `ai-mon --no-enrich` to disable.
 ❌ **Display spoofing** - Sophisticated malware may fake VM display
 ❌ **Privileged peers on the exec-bridge allowlist** - any uid you authorize for `/tmp/secvf-exec-*.sock` can drive the guest as root via STREAM mode (within the binary whitelist). Curate the allowlist deliberately.
 ❌ **A compromised guest dropping artifacts into `/workspace`** - by design, the workspace is rw. Host-side consumers must treat workspace contents as untrusted.
+❌ **Unauthenticated DistributedNotificationCenter for CLI ops (KNOWN GAP).** SecVF.app's CLI lifecycle handlers (`com.secvf.cli.start` / `.stop` / `.force-stop`) listen on `DistributedNotificationCenter` without authenticating the poster. Any local process on the machine can post these notifications and the app will act on them — start a VM by name, stop a running VM, force-stop one mid-analysis. **Impact**: VM-state tampering by any local user (not RCE; not host privilege escalation). **Workaround until fixed**: keep the analysis Mac single-tenant when running SecVF, or accept the risk on multi-user setups. **Planned fix**: migrate CLI lifecycle ops to the authenticated UDS bridge that the AI Sandbox exec channel already uses, then drop the DistributedNotificationCenter handlers.
 
 ## Incident Response
 
