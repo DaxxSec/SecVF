@@ -535,20 +535,24 @@ struct VMExec: ParsableCommand {
             fail("socket path too long: \(socketPath)")
             return
         }
-        let connOK: Bool = withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
+        // Phase 1: copy path bytes into sun_path with exclusive access to
+        // that field only.
+        withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
             sunPath.withMemoryRebound(to: CChar.self, capacity: pathCapacity) { dst in
                 pathBytes.withUnsafeBufferPointer { src in
                     if let base = src.baseAddress { memcpy(dst, base, pathBytes.count) }
                 }
-                let rc = withUnsafePointer(to: &addr) { aptr in
-                    aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
-                        Darwin.connect(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
-                    }
-                }
-                return rc == 0
             }
         }
-        guard connOK else {
+
+        // Phase 2: connect, using a fresh whole-struct pointer so we don't
+        // overlap with phase 1's mutable access (Swift exclusivity rule).
+        let connResult: Int32 = withUnsafePointer(to: &addr) { aptr in
+            aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
+                Darwin.connect(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connResult == 0 else {
             fail("connect(\(socketPath)) failed: \(String(cString: strerror(errno)))")
             return
         }
