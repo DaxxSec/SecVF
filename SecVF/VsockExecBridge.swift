@@ -49,11 +49,15 @@ final class VsockExecBridge {
     )
     private(set) var isRunning = false
 
+    /// Canonical port is `AISandboxDefaults.vsockPort` (2222). Hardcoded here
+    /// as the default arg so the bridge file has no cross-file compile-time
+    /// dependency on the AI sandbox config — it works for any VM with any
+    /// vsock listener on 2222, AI sandbox or otherwise.
     init(
         vmId: UUID,
         vmName: String,
         vm: VZVirtualMachine,
-        vsockPort: UInt32 = AISandboxDefaults.vsockPort
+        vsockPort: UInt32 = 2222
     ) {
         self.vmId = vmId
         self.vmName = vmName
@@ -89,23 +93,27 @@ final class VsockExecBridge {
             throw VsockExecBridgeError.pathTooLong(socketPath)
         }
 
-        let bindOK: Bool = withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
+        // Phase 1: copy path bytes into addr.sun_path. This needs exclusive
+        // access to the sun_path field, so we keep this scope tight and
+        // exit it before taking a pointer to the whole `addr` for bind().
+        withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
             sunPath.withMemoryRebound(to: CChar.self, capacity: pathCapacity) { dst in
                 pathBytes.withUnsafeBufferPointer { src in
                     if let base = src.baseAddress {
                         memcpy(dst, base, pathBytes.count)
                     }
                 }
-                let rc = withUnsafePointer(to: &addr) { aptr in
-                    aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
-                        Darwin.bind(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
-                    }
-                }
-                return rc == 0
             }
         }
 
-        guard bindOK else {
+        // Phase 2: bind, with a fresh exclusive access to `addr` as a whole.
+        let bindResult: Int32 = withUnsafePointer(to: &addr) { aptr in
+            aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
+                Darwin.bind(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+
+        guard bindResult == 0 else {
             let e = errno
             close(fd)
             throw VsockExecBridgeError.bind(errno: e, path: socketPath)

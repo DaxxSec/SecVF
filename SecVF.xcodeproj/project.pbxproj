@@ -7,18 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ALERT001ALERT001ALERT001 /* AlertPresenter.swift */; };
-		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
-		DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */; };
-		DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */ = {isa = PBXBuildFile; fileRef = DSTJ001DSTJ001DSTJ001001 /* distros.json */; };
-		CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSERR001CSERR001CSERR001 /* SecVFError.swift */; };
-		LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */; };
-		NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */; };
-		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
-		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
 		8C487CE62ED3D75C00A90BAF /* ScriptsUSBManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */; };
-		AADDDDAADDDDDDDDAADDDDAA /* PacketCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */; };
-		AAEEEEAAEEEEEEEEAAEEEEAA /* PacketAnalysisWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */; };
 		8CF202812EC84FE400AABC0F /* build-release.sh in Resources */ = {isa = PBXBuildFile; fileRef = 8CF202802EC84FE400AABC0F /* build-release.sh */; };
 		8F0313B227CB143B00360D7E /* Virtualization.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8F0313B127CB143B00360D7E /* Virtualization.framework */; };
 		8FF8298D27500C060037FA83 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FF8298C27500C060037FA83 /* AppDelegate.swift */; };
@@ -35,20 +24,34 @@
 		AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB9999BB99999999BB999BB9 /* SplashScreenWindow.swift */; };
 		AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBBBBBBBBBBBBBBBBBBBBBBB /* VirtualNetworkSwitch.swift */; };
 		AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */; };
+		AADDDDAADDDDDDDDAADDDDAA /* PacketCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */; };
+		AAEEEEAAEEEEEEEEAAEEEEAA /* PacketAnalysisWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */; };
+		ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ALERT001ALERT001ALERT001 /* AlertPresenter.swift */; };
+		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
 		CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */; };
 		CC6666CC66666666CC666CC6 /* IntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6666DD66666666DD666DD6 /* IntegrationTests.swift */; };
-		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
-		NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */; };
-		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
-		NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */; };
-		NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTNM001NTNM001NTNM001001 /* NotificationNames.swift */; };
-		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
 		CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */; };
+		CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */ = {isa = PBXBuildFile; fileRef = CSERR001CSERR001CSERR001 /* SecVFError.swift */; };
+		DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */; };
+		DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */ = {isa = PBXBuildFile; fileRef = DSTJ001DSTJ001DSTJ001001 /* distros.json */; };
 		DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */; };
+		FF46DBDE2FA55401000AB30D /* AISandboxMacVMConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */; };
+		FF46DBE12FA55451000AB30D /* LogRotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBDF2FA55451000AB30D /* LogRotation.swift */; };
+		FF46DBE22FA55451000AB30D /* VsockExecBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */; };
+		LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */; };
+		NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */; };
+		NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */; };
+		NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTNM001NTNM001NTNM001001 /* NotificationNames.swift */; };
+		NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */; };
+		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
+		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
+		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
+		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
+		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,15 +66,6 @@
 
 /* Begin PBXFileReference section */
 		62A7A2B81952CC2F11BFE9A2 /* LICENSE.txt */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
-		ALERT001ALERT001ALERT001 /* AlertPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertPresenter.swift; sourceTree = "<group>"; };
-		APPCO001APPCO001APPCO001 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
-		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
-		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
-		DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroVersionFetcher.swift; sourceTree = "<group>"; };
-		LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
-		NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProtocolColors.swift; sourceTree = "<group>"; };
-		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
-		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
 		8C487CE52ED3D75C00A90BAF /* ScriptsUSBManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptsUSBManager.swift; sourceTree = "<group>"; };
 		8CF202802EC84FE400AABC0F /* build-release.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; lineEnding = 0; name = "build-release.sh"; path = "scripts/build-release.sh"; sourceTree = SOURCE_ROOT; };
 		8F0313B127CB143B00360D7E /* Virtualization.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Virtualization.framework; path = System/Library/Frameworks/Virtualization.framework; sourceTree = SDKROOT; };
@@ -81,6 +75,8 @@
 		8FF8298E27500C070037FA83 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8FF8299127500C070037FA83 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
 		8FF8299327500C070037FA83 /* SecVF.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SecVF.entitlements; sourceTree = "<group>"; };
+		ALERT001ALERT001ALERT001 /* AlertPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertPresenter.swift; sourceTree = "<group>"; };
+		APPCO001APPCO001APPCO001 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
 		BB1111BB11111111BB111BB1 /* VMConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfiguration.swift; sourceTree = "<group>"; };
 		BB2222BB22222222BB222BB2 /* VMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManager.swift; sourceTree = "<group>"; };
 		BB3333BB33333333BB333BB3 /* VMLibraryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMLibraryWindowController.swift; sourceTree = "<group>"; };
@@ -94,22 +90,32 @@
 		BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManager.swift; sourceTree = "<group>"; };
 		BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureManager.swift; sourceTree = "<group>"; };
 		BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketAnalysisWindowController.swift; sourceTree = "<group>"; };
+		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
+		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
 		DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManagerTests.swift; sourceTree = "<group>"; };
 		DD6666DD66666666DD666DD6 /* IntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationTests.swift; sourceTree = "<group>"; };
-		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
-		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
-		NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSwitchProtocol.swift; sourceTree = "<group>"; };
-		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroConfiguration.swift; sourceTree = "<group>"; };
 		DSTJ001DSTJ001DSTJ001001 /* distros.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = distros.json; sourceTree = "<group>"; };
-		NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTrafficView.swift; sourceTree = "<group>"; };
+		DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DistroVersionFetcher.swift; sourceTree = "<group>"; };
+		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxMacVMConfiguration.swift; sourceTree = "<group>"; };
+		FF46DBDF2FA55451000AB30D /* LogRotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogRotation.swift; sourceTree = "<group>"; };
+		FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VsockExecBridge.swift; sourceTree = "<group>"; };
+		LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
+		NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProtocolColors.swift; sourceTree = "<group>"; };
+		NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSwitchProtocol.swift; sourceTree = "<group>"; };
 		NTNM001NTNM001NTNM001001 /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
+		NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTrafficView.swift; sourceTree = "<group>"; };
+		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
+		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
+		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
 		UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTTypeExtensions.swift; sourceTree = "<group>"; };
+		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -161,6 +167,9 @@
 				APPCO001APPCO001APPCO001 /* AppColors.swift */,
 				CSERR001CSERR001CSERR001 /* SecVFError.swift */,
 				CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */,
+				FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */,
+				FF46DBDF2FA55451000AB30D /* LogRotation.swift */,
+				FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */,
 				DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */,
 				DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */,
 				LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */,
@@ -289,7 +298,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1330;
-				LastUpgradeCheck = 1620;
+				LastUpgradeCheck = 2640;
 				ORGANIZATIONNAME = Apple;
 				TargetAttributes = {
 					8FF8298827500C060037FA83 = {
@@ -349,9 +358,12 @@
 			files = (
 				ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */,
 				APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */,
+				FF46DBDE2FA55401000AB30D /* AISandboxMacVMConfiguration.swift in Sources */,
 				CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */,
 				CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */,
 				DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */,
+				FF46DBE12FA55451000AB30D /* LogRotation.swift in Sources */,
+				FF46DBE22FA55451000AB30D /* VsockExecBridge.swift in Sources */,
 				DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */,
 				LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */,
 				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
@@ -454,6 +466,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
@@ -476,6 +489,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -520,6 +534,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = NL3P3MMP9U;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
@@ -535,6 +550,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
@@ -553,7 +569,6 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = NL3P3MMP9U;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -589,7 +604,6 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = NL3P3MMP9U;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -618,7 +632,6 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = NL3P3MMP9U;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
@@ -638,7 +651,6 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = NL3P3MMP9U;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
