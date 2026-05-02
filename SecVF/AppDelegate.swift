@@ -1867,32 +1867,51 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         let bundleExists = FileManager.default.fileExists(atPath: baseBundleURL.path)
 
         let confirm = NSAlert()
-        confirm.messageText = "Create AI Sandbox VM?"
         if bundleExists {
+            confirm.messageText = "Replace existing AI Sandbox VM?"
             confirm.informativeText = """
-            A base bundle already exists at \(baseBundleURL.path).
-            Creation will fail unless you delete it first.
+            A base bundle already exists at:
+                \(baseBundleURL.path)
+
+            "Delete & Recreate" will remove it (including ~70 GB of disk.img)
+            and start a fresh install.
             """
             confirm.alertStyle = .warning
+            confirm.addButton(withTitle: "Delete & Recreate")
             confirm.addButton(withTitle: "Cancel")
-            _ = confirm.runModal()
-            return
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+            // Remove the stale bundle. We do this synchronously here on main
+            // — files are local, fast even at 70 GB sparse since most of
+            // disk.img is unused.
+            do {
+                try FileManager.default.removeItem(at: baseBundleURL)
+                NSLog("[AISandbox] Removed stale bundle at %@", baseBundleURL.path)
+            } catch {
+                showAlert(
+                    title: "Could not remove existing bundle",
+                    message: "\(error.localizedDescription)\n\nManually run:\n  rm -rf \(baseBundleURL.path)\n\nthen try again."
+                )
+                return
+            }
+        } else {
+            confirm.messageText = "Create AI Sandbox VM?"
+            confirm.informativeText = """
+            Builds a new AI Sandbox base bundle at:
+                \(baseBundleURL.path)
+
+            This will:
+              1. Install macOS via VZMacOSInstaller (uses cached IPSW if present)
+              2. Boot the guest and run provision-macos-vm.sh via vsock
+              3. Seal the bundle as the immutable base for session VMs
+
+            Total time: ~30-60 minutes. The host stays usable.
+            """
+            confirm.alertStyle = .informational
+            confirm.addButton(withTitle: "Create")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
         }
-        confirm.informativeText = """
-        Builds a new AI Sandbox base bundle at:
-            \(baseBundleURL.path)
-
-        This will:
-          1. Install macOS via VZMacOSInstaller (uses cached IPSW if present)
-          2. Boot the guest and run provision-macos-vm.sh via vsock
-          3. Seal the bundle as the immutable base for session VMs
-
-        Total time: ~30-60 minutes. The host stays usable.
-        """
-        confirm.alertStyle = .informational
-        confirm.addButton(withTitle: "Create")
-        confirm.addButton(withTitle: "Cancel")
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
 
         // Look for a cached IPSW to skip the download.
         let cachedIPSW = locateCachedIPSW()
