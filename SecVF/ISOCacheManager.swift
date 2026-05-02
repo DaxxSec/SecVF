@@ -246,9 +246,14 @@ class ISOCacheManager {
 
         // SECURITY: Verify it's our app using exact bundle ID match
         // (contains() was weak - allowed "com.attacker.FakeSecVF" to pass)
+        //
+        // The project's PRODUCT_BUNDLE_IDENTIFIER is still com.ItzDaxxy.SecVF
+        // (legacy from before the DaxxSec rename); accept both that and the
+        // intended new ID so the rename can move forward without forcing a
+        // resign/re-trust loop on every developer's box.
         let validBundleIDs = [
             "com.DaxxSec.SecVF",
-            "com.DaxxSec.SecVF"
+            "com.ItzDaxxy.SecVF",
         ]
         guard validBundleIDs.contains(bundleID) else {
             auditLog("SECURITY ALERT: Unknown bundle ID '\(bundleID)' - rejecting request")

@@ -1698,6 +1698,44 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     // MARK: - macOS VM Download
 
+    /// First checks `~/.avf/MacOS/` for a cached IPSW before starting any
+    /// download. If a cached IPSW exists, use it directly and skip the
+    /// download path. If not, prompt the user to run Tools → Download macOS
+    /// IPSW first instead of triggering an in-flow download from this window.
+    private func prepareMacOSVMUsingCachedIPSW(_ vmConfig: VMConfiguration) {
+        let macOSDir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".avf/MacOS", isDirectory: true)
+        let cachedIPSW = (try? FileManager.default.contentsOfDirectory(
+            at: macOSDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ))?.first(where: { $0.pathExtension.lowercased() == "ipsw" })
+
+        if let cached = cachedIPSW {
+            NSLog("[VMLibrary] Reusing cached IPSW: %@", cached.path)
+            selectedVM = vmConfig
+            vmManager.updateLastUsedDate(vmConfig)
+            NotificationCenter.default.post(
+                name: .startVMWithISO,
+                object: ["vm": vmConfig, "iso": cached]
+            )
+            return
+        }
+
+        // No cache — point the user at the dedicated download tool instead
+        // of starting an in-flow download from this dialog.
+        let alert = NSAlert()
+        alert.messageText = "No cached macOS IPSW"
+        alert.informativeText = """
+        New macOS VMs reuse a cached IPSW from \(macOSDir.path) — no copy is
+        currently there.
+
+        Use Tools → Download macOS IPSW… to fetch one (one-time, ~13-16 GB).
+        Then create this VM again.
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     private func downloadAndPrepareMacOSVM(_ vmConfig: VMConfiguration) {
         NSLog("[VMLibrary] === downloadAndPrepareMacOSVM() ENTERED ===")
         NSLog("[VMLibrary] VM config: %@", vmConfig.name)
@@ -2549,10 +2587,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
                 NSLog("[VMLibrary] Checking OS type: '%@'", osType)
                 if osType == "macOS" {
-                    // For macOS, automatically handle IPSW download/reuse
-                    NSLog("[VMLibrary] OS type is macOS, calling downloadAndPrepareMacOSVM...")
-                    downloadAndPrepareMacOSVM(newVM)
-                    NSLog("[VMLibrary] downloadAndPrepareMacOSVM() call completed")
+                    // macOS VMs reuse a cached IPSW from ~/.avf/MacOS/. If
+                    // none is present, the user is pointed at Tools →
+                    // Download macOS IPSW…. The legacy in-flow download via
+                    // downloadAndPrepareMacOSVM is kept around for now but
+                    // not the default path.
+                    NSLog("[VMLibrary] OS type is macOS, using cached IPSW path...")
+                    prepareMacOSVMUsingCachedIPSW(newVM)
                 } else if needsISO {
                     // For Linux, auto-download ISO via ISOCacheManager
                     let distroEnum = mapDistroNameToEnum(selectedDistro)

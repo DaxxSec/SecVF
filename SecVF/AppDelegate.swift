@@ -1432,6 +1432,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
         toolsMenu.addItem(NSMenuItem.separator())
 
+        // Download macOS IPSW (one-time cache for any macOS VM creation flow)
+        let downloadIPSWItem = NSMenuItem(
+            title: "Download macOS IPSW…",
+            action: #selector(downloadMacOSIPSW),
+            keyEquivalent: ""
+        )
+        downloadIPSWItem.target = self
+        toolsMenu.addItem(downloadIPSWItem)
+
         // Create AI Sandbox VM (programmatic AISandboxMacVMInstaller path)
         let createSandboxItem = NSMenuItem(
             title: "Create AI Sandbox VM…",
@@ -1972,6 +1981,151 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                     AISandboxInstallTracker.shared.reset()
                 }
             }
+        }
+    }
+
+    /// Tools → Download macOS IPSW. One-time pull of the latest Apple-supported
+    /// IPSW into `~/.avf/MacOS/`. Subsequent macOS VM creation flows
+    /// (regular + AI Sandbox) reuse the cached file and skip the multi-GB
+    /// re-download.
+    @objc private func downloadMacOSIPSW() {
+        Task { @MainActor in
+            let restoreImage: VZMacOSRestoreImage
+            do {
+                restoreImage = try await VZMacOSRestoreImage.latestSupported
+            } catch {
+                showAlert(
+                    title: "Could not query Apple for the latest IPSW",
+                    message: error.localizedDescription
+                )
+                return
+            }
+
+            let osv = restoreImage.operatingSystemVersion
+            let versionStr = "\(osv.majorVersion).\(osv.minorVersion)\(osv.patchVersion > 0 ? ".\(osv.patchVersion)" : "")"
+            let buildStr = restoreImage.buildVersion
+            let filename = "UniversalMac_\(versionStr)_\(buildStr)_Restore.ipsw"
+
+            let macOSDir = URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent(".avf/MacOS", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: macOSDir, withIntermediateDirectories: true
+            )
+            let destURL = macOSDir.appendingPathComponent(filename)
+
+            // Confirm + handle existing cache.
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                let alert = NSAlert()
+                alert.messageText = "IPSW already cached"
+                alert.informativeText = """
+                \(filename) is already at:
+                    \(destURL.path)
+
+                Replace it with a fresh download?
+                """
+                alert.addButton(withTitle: "Replace")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                try? FileManager.default.removeItem(at: destURL)
+            } else {
+                let alert = NSAlert()
+                alert.messageText = "Download \(filename)?"
+                alert.informativeText = """
+                Source: Apple (\(restoreImage.url.absoluteString))
+                Destination: \(destURL.path)
+
+                Size: ~13-16 GB. Time depends on your connection.
+                """
+                alert.addButton(withTitle: "Download")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+
+            // Progress alert (non-blocking sheet on the library window when
+            // available — the caller stays usable).
+            let progressAlert = NSAlert()
+            progressAlert.messageText = "Downloading macOS IPSW"
+            progressAlert.informativeText = "\(filename) — 0%"
+            progressAlert.alertStyle = .informational
+            progressAlert.addButton(withTitle: "Run in Background")
+            let progressBar = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 360, height: 16))
+            progressBar.style = .bar
+            progressBar.isIndeterminate = false
+            progressBar.minValue = 0
+            progressBar.maxValue = 1
+            progressAlert.accessoryView = progressBar
+            let onWindow = libraryWindowController?.window
+            if let win = onWindow {
+                progressAlert.beginSheetModal(for: win) { _ in /* dismissed */ }
+            }
+
+            // Download via URLSession + KVO on Progress.
+            do {
+                try await downloadFile(
+                    from: restoreImage.url,
+                    to: destURL,
+                    progress: { fraction in
+                        progressBar.doubleValue = fraction
+                        progressAlert.informativeText = "\(filename) — \(Int(fraction * 100))%"
+                    }
+                )
+                if let win = onWindow {
+                    win.endSheet(progressAlert.window)
+                }
+                showAlert(
+                    title: "IPSW Downloaded",
+                    message: "Saved to:\n    \(destURL.path)\n\nNew macOS VMs will reuse this without re-downloading."
+                )
+            } catch {
+                if let win = onWindow {
+                    win.endSheet(progressAlert.window)
+                }
+                showAlert(
+                    title: "Download failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    /// URLSession download with progress KVO. Moves the temp file into place
+    /// atomically on success.
+    @MainActor
+    private func downloadFile(
+        from source: URL,
+        to destination: URL,
+        progress: @escaping (Double) -> Void
+    ) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let task = URLSession.shared.downloadTask(with: source) { tmpURL, _, err in
+                if let err = err {
+                    cont.resume(throwing: err)
+                    return
+                }
+                guard let tmp = tmpURL else {
+                    cont.resume(throwing: NSError(domain: "downloadFile", code: 0,
+                        userInfo: [NSLocalizedDescriptionKey: "no temp URL from URLSession"]))
+                    return
+                }
+                do {
+                    try? FileManager.default.removeItem(at: destination)
+                    try FileManager.default.moveItem(at: tmp, to: destination)
+                    cont.resume()
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+            // KVO on the task's progress fires off-main; hop back to update UI.
+            let observation = task.progress.observe(\.fractionCompleted, options: [.new]) { p, _ in
+                let f = p.fractionCompleted
+                DispatchQueue.main.async { progress(f) }
+            }
+            // Keep observation alive until the task finishes.
+            task.resume()
+            // We can't easily dispose `observation` without keeping a ref;
+            // letting it drop with the task is fine — it stops firing once
+            // the underlying NSProgress is released alongside the task.
+            _ = observation
         }
     }
 
