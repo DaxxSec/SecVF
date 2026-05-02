@@ -9,7 +9,7 @@ The app delegate that sets up and starts the virtual machine.
 
 @main
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineDelegate, NSWindowDelegate {
 
     // Multi-VM architecture - manage separate windows for each running VM
     private var vmWindows: [UUID: NSWindow] = [:]
@@ -1921,21 +1921,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             NSLog("[AISandbox] No cached IPSW found — will download from Apple CDN")
         }
 
-        // Progress panel — minimal NSAlert with text we can update.
-        let progressAlert = NSAlert()
-        progressAlert.messageText = "Building AI Sandbox VM"
-        progressAlert.informativeText = "Phase 1/3: Installing macOS — 0%"
-        progressAlert.alertStyle = .informational
-        progressAlert.addButton(withTitle: "Run in Background")
-        // Show as a sheet on the library window if available, else modal.
-        let showOnWindow = libraryWindowController?.window
-        if let win = showOnWindow {
-            progressAlert.beginSheetModal(for: win) { _ in /* dismissed */ }
-        } else {
-            DispatchQueue.global(qos: .userInitiated).async {
-                _ = progressAlert.runModal()
-            }
-        }
+        // Drive the tracker singleton — VMLibraryWindowController watches it
+        // and renders an "installing" entry in the Running VMs sidebar.
+        AISandboxInstallTracker.shared.begin()
 
         Task { [weak self] in
             do {
@@ -1944,28 +1932,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     localIPSW: cachedIPSW,
                     progress: { fraction in
                         DispatchQueue.main.async {
-                            progressAlert.informativeText =
-                                "Phase 1/3: Installing macOS — \(Int(fraction * 100))%"
+                            AISandboxInstallTracker.shared.updateInstallFraction(fraction)
                         }
                     }
                 )
 
-                DispatchQueue.main.async {
-                    progressAlert.informativeText = "Phase 2/3: Provisioning guest (boot + setup script via vsock)…"
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.provisioning)
                 }
                 // Phase 2: provision
                 try await AISandboxMacVMInstaller.provisionBundle(bundle)
 
-                DispatchQueue.main.async {
-                    progressAlert.informativeText = "Phase 3/3: Sealing base bundle…"
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.sealing)
                 }
                 // Phase 3: seal
                 try AISandboxMacVMInstaller.sealBundle(bundle)
 
-                DispatchQueue.main.async {
-                    if let win = showOnWindow {
-                        win.endSheet(progressAlert.window)
-                    }
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.finished)
                     self?.showAlert(
                         title: "AI Sandbox VM Ready",
                         message: """
@@ -1975,16 +1960,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                         Use AISandboxVMSession to clone + boot a session VM.
                         """
                     )
+                    AISandboxInstallTracker.shared.reset()
                 }
             } catch {
-                DispatchQueue.main.async {
-                    if let win = showOnWindow {
-                        win.endSheet(progressAlert.window)
-                    }
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.fail(with: error.localizedDescription)
                     self?.showAlert(
                         title: "AI Sandbox VM creation failed",
                         message: "\(error.localizedDescription)\n\nFull: \(String(describing: error))"
                     )
+                    AISandboxInstallTracker.shared.reset()
                 }
             }
         }
