@@ -351,6 +351,10 @@ class AISandboxMacVMInstaller {
     /// Build a fresh AI Sandbox base bundle. If `localIPSW` is provided and
     /// readable, that IPSW is used (skipping the multi-GB download); otherwise
     /// the latest supported macOS image is fetched from Apple's CDN.
+    ///
+    /// `@MainActor` because `VZVirtualMachine.init`, `VZMacOSInstaller.init`,
+    /// and `installer.install` all assert they're called on the main queue.
+    @MainActor
     static func downloadAndInstall(
         localIPSW: URL? = nil,
         progress: @escaping (Double) -> Void
@@ -428,16 +432,21 @@ class AISandboxMacVMInstaller {
         try installConfig.validate()
 
         // ── Install macOS from IPSW ───────────────────────────────────────────
-        let vm        = VZVirtualMachine(configuration: installConfig)
-        let installer = VZMacOSInstaller(virtualMachine: vm, restoringFromImageAt: restoreImage.url)
+        // We're already on @MainActor (function annotation), so the framework
+        // queue assertions are satisfied. Suspending on Task.sleep / network
+        // calls / completion handlers all hop off main while suspended; we
+        // come back to main when resumed, which is what VZ wants.
+        let vm = VZVirtualMachine(configuration: installConfig)
+        let installer = VZMacOSInstaller(
+            virtualMachine: vm,
+            restoringFromImageAt: restoreImage.url
+        )
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            // Observe install progress
             var obs: NSKeyValueObservation?
             obs = installer.progress.observe(\.fractionCompleted, options: [.new]) { _, change in
                 progress(change.newValue ?? 0)
             }
-
             installer.install { result in
                 obs?.invalidate()
                 switch result {
@@ -453,9 +462,13 @@ class AISandboxMacVMInstaller {
     // ── Step 2: Provision the installed VM ────────────────────────────────────
     // After install, boot the VM and run the setup script.
     // The setup script installs the AI agent and configures monitoring.
+    ///
+    /// `@MainActor` for the same reason as `downloadAndInstall`: VZ lifecycle
+    /// APIs require the main queue.
+    @MainActor
     static func provisionBundle(_ bundle: AISandboxVMBundle) async throws {
         let vmConfig = try AISandboxMacVMConfiguration(bundle: bundle)
-        let vm       = VZVirtualMachine(configuration: vmConfig.configuration)
+        let vm = VZVirtualMachine(configuration: vmConfig.configuration)
 
         try await vm.start()
 
