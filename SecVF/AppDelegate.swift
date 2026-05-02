@@ -1082,6 +1082,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             virtualMachineConfiguration.consoleDevices = [createSpiceAgentConsoleDeviceConfiguration()]
         }
 
+        // Add a virtio socket device (vsock) only for macOS guests — that's
+        // where the AI sandbox exec agent listens on port 2222. Linux VMs in
+        // SecVF (kali router etc.) don't currently use vsock, and adding the
+        // device unconditionally caused VM-startup hangs in testing. Limit to
+        // macOS for now; revisit if a Linux-side use case appears.
+        if isMacOS {
+            virtualMachineConfiguration.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+            NSLog("[VM] Added virtio socket device (vsock) for host-guest IPC")
+        }
+
         NSLog("[VM] Validating virtual machine configuration...")
         do {
             try virtualMachineConfiguration.validate()
@@ -1419,6 +1429,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         )
         rebuildISOItem.target = self
         toolsMenu.addItem(rebuildISOItem)
+
+        toolsMenu.addItem(NSMenuItem.separator())
+
+        // Create AI Sandbox VM (programmatic AISandboxMacVMInstaller path)
+        let createSandboxItem = NSMenuItem(
+            title: "Create AI Sandbox VM…",
+            action: #selector(createAISandboxVM),
+            keyEquivalent: ""
+        )
+        createSandboxItem.target = self
+        toolsMenu.addItem(createSandboxItem)
 
         // Create top-level menu item
         let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
@@ -1831,6 +1852,137 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                 showAlert(title: "Error", message: "Failed to create scripts:\n\(errorMessages)")
             }
         }
+    }
+
+    // MARK: - AI Sandbox VM creation
+
+    /// Build a new AI Sandbox base bundle programmatically. Reuses any
+    /// IPSW already in `~/.avf/MacOS/` (avoids 13 GB redownload). Runs
+    /// install + provision + seal in the background and surfaces progress
+    /// + completion alerts to the user.
+    @objc private func createAISandboxVM() {
+        // Confirm with the user — this takes 30-60 min and is destructive
+        // if a base bundle already exists.
+        let baseBundleURL = AISandboxDefaults.baseBundle
+        let bundleExists = FileManager.default.fileExists(atPath: baseBundleURL.path)
+
+        let confirm = NSAlert()
+        confirm.messageText = "Create AI Sandbox VM?"
+        if bundleExists {
+            confirm.informativeText = """
+            A base bundle already exists at \(baseBundleURL.path).
+            Creation will fail unless you delete it first.
+            """
+            confirm.alertStyle = .warning
+            confirm.addButton(withTitle: "Cancel")
+            _ = confirm.runModal()
+            return
+        }
+        confirm.informativeText = """
+        Builds a new AI Sandbox base bundle at:
+            \(baseBundleURL.path)
+
+        This will:
+          1. Install macOS via VZMacOSInstaller (uses cached IPSW if present)
+          2. Boot the guest and run provision-macos-vm.sh via vsock
+          3. Seal the bundle as the immutable base for session VMs
+
+        Total time: ~30-60 minutes. The host stays usable.
+        """
+        confirm.alertStyle = .informational
+        confirm.addButton(withTitle: "Create")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+        // Look for a cached IPSW to skip the download.
+        let cachedIPSW = locateCachedIPSW()
+        if let ipsw = cachedIPSW {
+            NSLog("[AISandbox] Reusing cached IPSW: %@", ipsw.path)
+        } else {
+            NSLog("[AISandbox] No cached IPSW found — will download from Apple CDN")
+        }
+
+        // Progress panel — minimal NSAlert with text we can update.
+        let progressAlert = NSAlert()
+        progressAlert.messageText = "Building AI Sandbox VM"
+        progressAlert.informativeText = "Phase 1/3: Installing macOS — 0%"
+        progressAlert.alertStyle = .informational
+        progressAlert.addButton(withTitle: "Run in Background")
+        // Show as a sheet on the library window if available, else modal.
+        let showOnWindow = libraryWindowController?.window
+        if let win = showOnWindow {
+            progressAlert.beginSheetModal(for: win) { _ in /* dismissed */ }
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = progressAlert.runModal()
+            }
+        }
+
+        Task { [weak self] in
+            do {
+                // Phase 1: install
+                let bundle = try await AISandboxMacVMInstaller.downloadAndInstall(
+                    localIPSW: cachedIPSW,
+                    progress: { fraction in
+                        DispatchQueue.main.async {
+                            progressAlert.informativeText =
+                                "Phase 1/3: Installing macOS — \(Int(fraction * 100))%"
+                        }
+                    }
+                )
+
+                DispatchQueue.main.async {
+                    progressAlert.informativeText = "Phase 2/3: Provisioning guest (boot + setup script via vsock)…"
+                }
+                // Phase 2: provision
+                try await AISandboxMacVMInstaller.provisionBundle(bundle)
+
+                DispatchQueue.main.async {
+                    progressAlert.informativeText = "Phase 3/3: Sealing base bundle…"
+                }
+                // Phase 3: seal
+                try AISandboxMacVMInstaller.sealBundle(bundle)
+
+                DispatchQueue.main.async {
+                    if let win = showOnWindow {
+                        win.endSheet(progressAlert.window)
+                    }
+                    self?.showAlert(
+                        title: "AI Sandbox VM Ready",
+                        message: """
+                        Base bundle sealed at:
+                            \(bundle.url.path)
+
+                        Use AISandboxVMSession to clone + boot a session VM.
+                        """
+                    )
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    if let win = showOnWindow {
+                        win.endSheet(progressAlert.window)
+                    }
+                    self?.showAlert(
+                        title: "AI Sandbox VM creation failed",
+                        message: "\(error.localizedDescription)\n\nFull: \(String(describing: error))"
+                    )
+                }
+            }
+        }
+    }
+
+    /// Looks for a cached macOS IPSW under `~/.avf/MacOS/` — if found,
+    /// `AISandboxMacVMInstaller.downloadAndInstall` will use it and skip
+    /// the Apple CDN download.
+    private func locateCachedIPSW() -> URL? {
+        let macOSDir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".avf/MacOS", isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: macOSDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        return entries.first(where: { $0.pathExtension.lowercased() == "ipsw" })
     }
 
     private func showAlert(title: String, message: String) {

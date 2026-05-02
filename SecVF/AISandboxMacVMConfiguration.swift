@@ -27,6 +27,7 @@
 //   2. Create install VM → VZMacOSInstaller.install()
 //   3. Boot provisioned VM → run provision() to install AI agent + tooling
 //   4. Shut down → chmod the bundle → snapshot as base
+
 //
 // SESSION FLOW (every agent exec):
 //   1. cp -c base disk.img → session disk.img  (APFS CoW, ~0ms)
@@ -347,7 +348,11 @@ class AISandboxMacVMInstaller {
     static let bundleURL = AISandboxDefaults.baseBundle
 
     // ── Step 1: Download IPSW + create VM bundle ──────────────────────────────
+    /// Build a fresh AI Sandbox base bundle. If `localIPSW` is provided and
+    /// readable, that IPSW is used (skipping the multi-GB download); otherwise
+    /// the latest supported macOS image is fetched from Apple's CDN.
     static func downloadAndInstall(
+        localIPSW: URL? = nil,
         progress: @escaping (Double) -> Void
     ) async throws -> AISandboxVMBundle {
 
@@ -357,10 +362,15 @@ class AISandboxMacVMInstaller {
         }
         try bundle.create()
 
-        // ── Get latest supported restore image (IPSW URL from Apple CDN) ──────
-        // VZMacOSRestoreImage.latestSupported queries Apple's servers for the
-        // most recent macOS version compatible with this host's hardware.
-        let restoreImage = try await VZMacOSRestoreImage.latestSupported
+        // ── Resolve restore image ─────────────────────────────────────────────
+        // Prefer a caller-provided local IPSW (skips the multi-GB download).
+        // Otherwise query Apple's CDN for the latest supported macOS image.
+        let restoreImage: VZMacOSRestoreImage
+        if let local = localIPSW, FileManager.default.fileExists(atPath: local.path) {
+            restoreImage = try await VZMacOSRestoreImage.image(from: local)
+        } else {
+            restoreImage = try await VZMacOSRestoreImage.latestSupported
+        }
 
         // Get the hardware requirements for this restore image
         guard let requirements = restoreImage.mostFeaturefulSupportedConfiguration else {
