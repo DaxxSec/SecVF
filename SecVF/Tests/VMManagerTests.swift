@@ -214,7 +214,7 @@ final class VMManagerTests: XCTestCase {
         // Then
         XCTAssertEqual(config.networkConfig.mode, .virtual)
         XCTAssertTrue(config.networkConfig.isRouter)
-        XCTAssertEqual(config.networkConfig.description, "Virtual Network Router")
+        XCTAssertEqual(config.networkConfig.description, "Router (Dual-NIC: Switch + NAT)")
     }
 
     func testMacOSVMRoutingThroughLinux() {

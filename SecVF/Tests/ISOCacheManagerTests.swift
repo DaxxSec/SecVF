@@ -22,6 +22,13 @@ final class ISOCacheManagerTests: XCTestCase {
 
         // Get shared instance for testing
         cacheManager = ISOCacheManager.shared
+
+        // Reset the rate-limit cooldown between tests. Removing the legacy
+        // bundle-ID gate (item 12 of code review) means consecutive tests
+        // now actually exercise the rate limiter; without this reset, the
+        // second test in a run trips the 5s cooldown and fails for the
+        // wrong reason.
+        cacheManager.resetRateLimitForTesting()
     }
 
     override func tearDownWithError() throws {

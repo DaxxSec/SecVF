@@ -10,7 +10,8 @@ class ScriptsUSBManager {
 
     /// SECURITY: Validate and sanitize a file path before passing to external processes
     /// Prevents path injection attacks via special characters or path traversal
-    private func sanitizePath(_ path: String) -> String? {
+    /// Internal (not private) so unit tests can exercise it directly via @testable.
+    func sanitizePath(_ path: String) -> String? {
         // Normalize the path first
         let normalized = (path as NSString).standardizingPath
 
@@ -43,21 +44,34 @@ class ScriptsUSBManager {
         return normalized
     }
 
-    /// SECURITY: Validate a path is within expected boundaries
-    private func isPathWithinAllowedDirectories(_ path: String) -> Bool {
+    /// SECURITY: Validate a path is within expected boundaries.
+    ///
+    /// Critical invariant: every prefix must end with `/`. Otherwise the
+    /// hasPrefix check matches sibling directories — `/Users/openclaw`
+    /// matches `/Users/openclaw_evil/...` — and the allowlist is bypassed.
+    /// `/tmp/` and `/private/tmp/` already end in `/`; the home and bundle
+    /// paths don't, so we append it here.
+    /// Internal (not private) so unit tests can exercise it directly.
+    func isPathWithinAllowedDirectories(_ path: String) -> Bool {
         let normalized = (path as NSString).standardizingPath
         let homeDir = NSHomeDirectory()
+        let bundlePath = Bundle.main.bundlePath
 
-        // Allow paths within:
-        // 1. User's home directory
-        // 2. App bundle
-        // 3. /tmp (for temporary operations)
-        let allowedPrefixes = [
-            homeDir,
-            Bundle.main.bundlePath,
+        let allowedPrefixes: [String] = [
+            homeDir.hasSuffix("/") ? homeDir : homeDir + "/",
+            bundlePath.hasSuffix("/") ? bundlePath : bundlePath + "/",
             "/tmp/",
             "/private/tmp/"
         ]
+
+        // Equality with the bare directory is also allowed (e.g. the home
+        // dir itself, with no trailing slash on the input). hasPrefix on the
+        // slash-suffixed version handles every other case, including a path
+        // identical to the prefix when written as `<prefix>/`.
+        let bareAllowed: [String] = [homeDir, bundlePath]
+        if bareAllowed.contains(normalized) {
+            return true
+        }
 
         for prefix in allowedPrefixes {
             if normalized.hasPrefix(prefix) {
@@ -68,6 +82,35 @@ class ScriptsUSBManager {
         NSLog("[ScriptsUSB] SECURITY: Path outside allowed directories: %@", path)
         return false
     }
+
+    /// SECURITY: Resolve a candidate file's real path (following symlinks)
+    /// and ensure it is still inside the allowlist before we copy it onto a
+    /// disk that gets handed to a (potentially hostile) guest. Without this,
+    /// a symlink in the source tree pointing to /etc/passwd, /private/etc/...,
+    /// or a private key under ~/Library would be silently shipped to the VM.
+    private func resolveAndValidateSourceFile(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else {
+            NSLog("[ScriptsUSB] SECURITY: realpath failed for: %@", path)
+            return nil
+        }
+        defer { free(resolved) }
+        let realPath = String(cString: resolved)
+
+        // The resolved path must itself be inside the allowed directories.
+        // Without this, a symlink whose name passes sanitization can still
+        // dereference to anywhere on disk.
+        guard isPathWithinAllowedDirectories(realPath) else {
+            NSLog("[ScriptsUSB] SECURITY: Symlink target outside allowed directories — refusing to copy: %@ -> %@", path, realPath)
+            return nil
+        }
+
+        return realPath
+    }
+
+    // SECURITY: Single lock around create-disk operations. scriptsMountPath
+    // and scriptsStagingPath are shared singletons; concurrent callers would
+    // collide on the mount point and silently corrupt the produced image.
+    private let createDiskLock = NSLock()
 
     private let scriptsDiskPath: String      // Writable disk image for Linux
     private let scriptsISOPath: String       // Read-only ISO for macOS
@@ -116,6 +159,8 @@ class ScriptsUSBManager {
     /// Create or update the writable scripts disk image (for Linux VMs)
     /// Returns Result with the URL of the created disk image, or typed error on failure
     func createScriptsDisk(from scriptsDirectory: String? = nil) -> Result<URL, SecVFError> {
+        createDiskLock.lock()
+        defer { createDiskLock.unlock() }
         let rawSourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
 
         guard let rawSourceDir = rawSourceDir else {
@@ -211,13 +256,20 @@ class ScriptsUSBManager {
             let scriptsDestPath = scriptsMountPath + "/scripts"
             try FileManager.default.createDirectory(atPath: scriptsDestPath, withIntermediateDirectories: true)
 
-            // Copy all .sh files
+            // Copy all .sh files. Resolve symlinks before copying so a stray
+            // symlink in the source tree (legitimate in dev mode pointing to
+            // ~/Code/SecVF/scripts/...) cannot bake an arbitrary host file
+            // into the disk image we hand to the guest.
             let contents = try FileManager.default.contentsOfDirectory(atPath: sourceDir)
             for file in contents {
                 if file.hasSuffix(".sh") || file == "README.md" {
                     let sourcePath = sourceDir + "/" + file
+                    guard let realSource = resolveAndValidateSourceFile(sourcePath) else {
+                        NSLog("[ScriptsUSB] SECURITY: Skipping %@ (symlink resolution failed allowlist)", file)
+                        continue
+                    }
                     let destPath = scriptsDestPath + "/" + file
-                    try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath)
+                    try FileManager.default.copyItem(atPath: realSource, toPath: destPath)
                     NSLog("[ScriptsUSB] Copied: \(file)")
                 }
             }
@@ -305,6 +357,8 @@ class ScriptsUSBManager {
     /// Create or update the scripts ISO (for macOS VMs - read-only is fine)
     /// Returns Result with the URL of the created ISO, or typed error on failure
     func createScriptsISO(from scriptsDirectory: String? = nil) -> Result<URL, SecVFError> {
+        createDiskLock.lock()
+        defer { createDiskLock.unlock() }
         let rawSourceDir = scriptsDirectory ?? getScriptsSourceDirectory()
 
         guard let rawSourceDir = rawSourceDir else {
@@ -336,13 +390,18 @@ class ScriptsUSBManager {
             let scriptsDestPath = scriptsStagingPath + "/scripts"
             try FileManager.default.createDirectory(atPath: scriptsDestPath, withIntermediateDirectories: true)
 
-            // Copy all .sh files
+            // Copy all .sh files. See createScriptsDisk above — resolve
+            // symlinks and re-validate against the allowlist before copying.
             let contents = try FileManager.default.contentsOfDirectory(atPath: sourceDir)
             for file in contents {
                 if file.hasSuffix(".sh") || file == "README.md" {
                     let sourcePath = sourceDir + "/" + file
+                    guard let realSource = resolveAndValidateSourceFile(sourcePath) else {
+                        NSLog("[ScriptsUSB] SECURITY: Skipping %@ (symlink resolution failed allowlist)", file)
+                        continue
+                    }
                     let destPath = scriptsDestPath + "/" + file
-                    try FileManager.default.copyItem(atPath: sourcePath, toPath: destPath)
+                    try FileManager.default.copyItem(atPath: realSource, toPath: destPath)
                     NSLog("[ScriptsUSB] Copied: \(file)")
                 }
             }

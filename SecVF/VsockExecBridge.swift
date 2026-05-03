@@ -49,6 +49,15 @@ final class VsockExecBridge {
     )
     private(set) var isRunning = false
 
+    // SECURITY (DoS): Cap concurrent bridged sessions per VM. An allowed UID
+    // could otherwise open hundreds of connections, each consuming a worker on
+    // DispatchQueue.global() for the lifetime of the bridged session and
+    // pinning a kernel fd table slot. 16 is more than enough for any
+    // reasonable interactive use; excess connections are refused at accept().
+    static let maxConcurrentConnections = 16
+    private let connectionCountLock = NSLock()
+    private var connectionCount = 0
+
     /// Canonical port is `AISandboxDefaults.vsockPort` (2222). Hardcoded here
     /// as the default arg so the bridge file has no cross-file compile-time
     /// dependency on the AI sandbox config — it works for any VM with any
@@ -106,12 +115,19 @@ final class VsockExecBridge {
             }
         }
 
-        // Phase 2: bind, with a fresh exclusive access to `addr` as a whole.
+        // Phase 2: bind under a tightened umask so the file is created with
+        // mode 0600 first, then chmod'd up to 0666 in a single step. This
+        // closes the small bind→chmod window where a peer connecting before
+        // the chmod could rely on the inherited (potentially looser) default
+        // mode. The peer-credential check (getpeereid + allowlist) is still
+        // the real security boundary — file mode is just defence in depth.
+        let oldUmask = umask(0o177)  // strip group/other bits so file is created 0600
         let bindResult: Int32 = withUnsafePointer(to: &addr) { aptr in
             aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
                 Darwin.bind(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
+        umask(oldUmask)
 
         guard bindResult == 0 else {
             let e = errno
@@ -119,7 +135,10 @@ final class VsockExecBridge {
             throw VsockExecBridgeError.bind(errno: e, path: socketPath)
         }
 
-        // Cross-user access on the multi-user mac mini.
+        // Cross-user access on the multi-user mac mini. Now that the umask
+        // narrowed the create mode, this is the single moment where the file
+        // mode opens up — and any peer that connected before now would have
+        // had to guess the path AND match the allowlist anyway.
         chmod(socketPath, 0o666)
 
         guard Darwin.listen(fd, 8) == 0 else {
@@ -184,9 +203,39 @@ final class VsockExecBridge {
             return
         }
 
+        // Connection-cap gate: refuse and log if we're at the limit. Reserving
+        // the slot here (under the lock) closes the obvious race where N
+        // accepts in a row each see count < limit.
+        if !reserveConnectionSlot() {
+            let line = "secvf-exec-bridge: too many concurrent connections (cap: \(VsockExecBridge.maxConcurrentConnections))\n"
+            _ = line.withCString { write(clientFd, $0, strlen($0)) }
+            close(clientFd)
+            NSLog("[VsockExecBridge] %@ refused: connection cap reached", vmName)
+            return
+        }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Slot is released by BridgeState's onFinish hook (success path)
+            // or by bridgeOneConnection itself if it bails before installing
+            // a BridgeState (early-error paths).
             self?.bridgeOneConnection(clientFd: clientFd)
         }
+    }
+
+    private func reserveConnectionSlot() -> Bool {
+        connectionCountLock.lock()
+        defer { connectionCountLock.unlock() }
+        guard connectionCount < VsockExecBridge.maxConcurrentConnections else {
+            return false
+        }
+        connectionCount += 1
+        return true
+    }
+
+    private func releaseConnectionSlot() {
+        connectionCountLock.lock()
+        if connectionCount > 0 { connectionCount -= 1 }
+        connectionCountLock.unlock()
     }
 
     /// Returns a deny reason string if the peer should be refused, or nil if
@@ -208,9 +257,14 @@ final class VsockExecBridge {
     /// listed (numeric or by name) in the optional allowlist file.
     /// Loaded on every connection so config edits take effect immediately —
     /// the file is small, so re-reading is cheap.
-    private static func loadAllowlist() -> Set<uid_t> {
+    static func loadAllowlist() -> Set<uid_t> {
+        return loadAllowlist(at: NSHomeDirectory() + "/.avf/config/exec-bridge-allowlist")
+    }
+
+    /// Internal entry point that takes an explicit allowlist path so tests
+    /// can drive the parser without writing into the real ~/.avf tree.
+    static func loadAllowlist(at configPath: String) -> Set<uid_t> {
         var allowed: Set<uid_t> = [getuid()]
-        let configPath = NSHomeDirectory() + "/.avf/config/exec-bridge-allowlist"
         guard let raw = try? String(contentsOfFile: configPath, encoding: .utf8) else {
             return allowed
         }
@@ -237,6 +291,11 @@ final class VsockExecBridge {
     /// thread for the bridged session's lifetime.
     private func bridgeOneConnection(clientFd: Int32) {
         let clientHandle = FileHandle(fileDescriptor: clientFd, closeOnDealloc: true)
+
+        // Track whether a BridgeState was installed; if not, we own slot
+        // release on the early-error paths below.
+        var slotHandedOff = false
+        defer { if !slotHandedOff { releaseConnectionSlot() } }
 
         guard let vm = vm else {
             errorOut(clientHandle, "VM no longer running")
@@ -282,7 +341,15 @@ final class VsockExecBridge {
         // BridgeState ensures the close runs exactly once even though both
         // readabilityHandlers will end up firing with empty data (one
         // because of the real EOF, the other because we closed the handle).
-        let state = BridgeState(client: clientHandle, vsock: vsockHandle, vsockConn: vsockConn)
+        // Hand slot release to BridgeState so it fires exactly once when the
+        // bridged session actually ends, not when this setup function returns.
+        let state = BridgeState(
+            client: clientHandle,
+            vsock: vsockHandle,
+            vsockConn: vsockConn,
+            onFinish: { [weak self] in self?.releaseConnectionSlot() }
+        )
+        slotHandedOff = true
 
         clientHandle.readabilityHandler = { [weak state] fh in
             let d = fh.availableData
@@ -327,11 +394,20 @@ private final class BridgeState {
     private let vsock: FileHandle
     // Strong ref to the connection to keep its underlying fd alive.
     private let vsockConn: VZVirtioSocketConnection
+    // Hook fired exactly once when the bridged session ends — used by the
+    // owning bridge to release its concurrent-connection slot.
+    private let onFinish: (() -> Void)?
 
-    init(client: FileHandle, vsock: FileHandle, vsockConn: VZVirtioSocketConnection) {
+    init(
+        client: FileHandle,
+        vsock: FileHandle,
+        vsockConn: VZVirtioSocketConnection,
+        onFinish: (() -> Void)? = nil
+    ) {
         self.client = client
         self.vsock = vsock
         self.vsockConn = vsockConn
+        self.onFinish = onFinish
     }
 
     /// Idempotent. Closes both handles + clears their readability handlers.
@@ -346,25 +422,42 @@ private final class BridgeState {
         try? client.close()
         try? vsock.close()
         // vsockConn drops with self.
+        onFinish?()
     }
 
-    /// Returns true if the write succeeded (caller can keep reading).
+    /// Performs the alive-check and the write inside the same critical
+    /// section. The previous implementation snapshotted `alive` and dropped
+    /// the lock before writing, which left a window where finish() could run
+    /// in between — racing the write against a closed handle and triggering
+    /// a redundant finish() on throw. Folding both into one critical section
+    /// makes the semantics straightforward at the cost of holding the lock
+    /// across a single short write.
     func writeToVsock(_ data: Data) -> Bool {
         lock.lock()
-        let alive = !finished
-        lock.unlock()
-        guard alive else { return false }
-        do { try vsock.write(contentsOf: data); return true }
-        catch { finish(); return false }
+        if finished { lock.unlock(); return false }
+        do {
+            try vsock.write(contentsOf: data)
+            lock.unlock()
+            return true
+        } catch {
+            lock.unlock()
+            finish()
+            return false
+        }
     }
 
     func writeToClient(_ data: Data) -> Bool {
         lock.lock()
-        let alive = !finished
-        lock.unlock()
-        guard alive else { return false }
-        do { try client.write(contentsOf: data); return true }
-        catch { finish(); return false }
+        if finished { lock.unlock(); return false }
+        do {
+            try client.write(contentsOf: data)
+            lock.unlock()
+            return true
+        } catch {
+            lock.unlock()
+            finish()
+            return false
+        }
     }
 }
 
@@ -383,19 +476,45 @@ final class VsockExecBridgeManager {
 
     /// Start a bridge for `vm`. No-op if the VM has no vsock device (the
     /// regular Linux VMs and non-AI-sandbox macOS VMs don't carry one).
+    ///
+    /// Two concurrent calls (e.g. lifecycle events from main + a notification)
+    /// could previously each construct + start a bridge before either inserted
+    /// into the map, leaking the loser. We now serialize the whole
+    /// build-and-install path under the lock and stop any prior bridge for
+    /// the same vmId before installing the new one.
     func startBridge(vmId: UUID, vmName: String, vm: VZVirtualMachine) {
         guard vm.socketDevices.first is VZVirtioSocketDevice else { return }
+
+        lock.lock()
+        // Stop any in-place bridge first — its UDS path is the same UUID-based
+        // path the new one will try to bind, so a leftover would either get
+        // unlink'd by the new bridge or its accept loop would silently target
+        // the wrong fd.
+        let prior = bridges[vmId]
+        bridges[vmId] = nil
+        lock.unlock()
+        prior?.stop()
+
         let bridge = VsockExecBridge(vmId: vmId, vmName: vmName, vm: vm)
         do {
             try bridge.start()
-            lock.lock()
-            bridges[vmId]?.stop()
-            bridges[vmId] = bridge
-            lock.unlock()
         } catch {
             NSLog("[VsockExecBridgeManager] %@ start failed: %@",
                   vmName, error.localizedDescription)
+            return
         }
+
+        // Install. If a concurrent caller raced in and installed first, stop
+        // ours and keep theirs — bridges are interchangeable (same vmId), and
+        // we'd rather throw away the duplicate than leak it.
+        lock.lock()
+        if bridges[vmId] != nil {
+            lock.unlock()
+            bridge.stop()
+            return
+        }
+        bridges[vmId] = bridge
+        lock.unlock()
     }
 
     func stopBridge(vmId: UUID) {

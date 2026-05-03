@@ -213,59 +213,30 @@ class ISOCacheManager {
         try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
     }
 
-    // SECURITY: Audit logging for all download requests
+    // SECURITY: Audit logging for all download requests.
+    //
+    // Routed through AVFAuditLog's serial queue so concurrent callers (the
+    // app + the CLI sharing the same file via a different process is handled
+    // by O_APPEND in AVFAuditLog) cannot interleave bytes mid-line. The old
+    // open-seek-write-close per call had no lock and produced corrupt forensic
+    // logs under concurrency.
     private func auditLog(_ message: String) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let processID = ProcessInfo.processInfo.processIdentifier
         let logEntry = "[\(timestamp)] [PID:\(processID)] \(message)\n"
-
-        // Append to audit log
-        if let data = logEntry.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: auditLogPath) {
-                if let fileHandle = FileHandle(forWritingAtPath: auditLogPath) {
-                    fileHandle.seekToEndOfFile()
-                    fileHandle.write(data)
-                    fileHandle.closeFile()
-                }
-            } else {
-                try? data.write(to: URL(fileURLWithPath: auditLogPath))
-            }
-        }
-
-        // Also print to console
+        AVFAuditLog.append(logEntry, to: auditLogPath)
         print("[AUDIT] \(message)")
     }
 
-    // SECURITY: Verify caller is legitimate (main app UI, not external process)
-    private func verifyCallerIsMainApp() -> Bool {
-        // Check we're running in the main app bundle
-        guard let bundleID = Bundle.main.bundleIdentifier else {
-            auditLog("SECURITY ALERT: No bundle identifier - rejecting request")
-            return false
-        }
-
-        // SECURITY: Verify it's our app using exact bundle ID match
-        // (contains() was weak - allowed "com.attacker.FakeSecVF" to pass)
-        //
-        // The project's PRODUCT_BUNDLE_IDENTIFIER is still com.ItzDaxxy.SecVF
-        // (legacy from before the DaxxSec rename); accept both that and the
-        // intended new ID so the rename can move forward without forcing a
-        // resign/re-trust loop on every developer's box.
-        let validBundleIDs = [
-            "com.DaxxSec.SecVF",
-            "com.ItzDaxxy.SecVF",
-        ]
-        guard validBundleIDs.contains(bundleID) else {
-            auditLog("SECURITY ALERT: Unknown bundle ID '\(bundleID)' - rejecting request")
-            return false
-        }
-
-        // Note: Thread checking removed - not a meaningful security control
-        // Attackers can easily dispatch to main thread. Real security comes from
-        // bundle ID verification and URL whitelisting above.
-
-        return true
+    /// Test-only: clear the cooldown timestamp. Without this, removing the
+    /// (legacy theatrical) `verifyCallerIsMainApp` gate exposes the real
+    /// rate-limiter to test runs that previously short-circuited at the
+    /// bundle-ID check, and consecutive tests trip the 5s cooldown.
+    #if DEBUG
+    func resetRateLimitForTesting() {
+        lastDownloadTime = nil
     }
+    #endif
 
     // SECURITY: Rate limiting to prevent abuse
     private func checkRateLimit() -> Bool {
@@ -332,17 +303,11 @@ class ISOCacheManager {
     ) {
         NSLog("[ISOCacheManager] downloadImage() called")
 
-        // SECURITY: Verify caller is legitimate (main app, not external process)
-        guard verifyCallerIsMainApp() else {
-            let error = NSError(
-                domain: "ISOCacheManager",
-                code: 300,
-                userInfo: [NSLocalizedDescriptionKey: "SECURITY: Download request rejected - invalid caller context"]
-            )
-            auditLog("SECURITY ALERT: Download rejected - failed caller verification")
-            completionHandler(.failure(error))
-            return
-        }
+        // The previous bundle-ID gate here was security theatre: it verified
+        // what process is running, not who is calling. Inside the process,
+        // every caller passed. Real security in this code path comes from URL
+        // whitelisting (validateDownloadURL) and SHA256 verification — both
+        // still in place. See `docs/CODE_REVIEW_2026-05-03.md` Item 12.
 
         // SECURITY: Rate limiting to prevent abuse
         guard checkRateLimit() else {
@@ -631,8 +596,9 @@ class ISOCacheManager {
         NSLog("[ISO Download] Download task state after resume: %ld", downloadTask.state.rawValue)
     }
 
-    // SECURITY: Validate download URL
-    private func validateDownloadURL(_ url: URL, allowedDomains: Set<String>) -> Bool {
+    // SECURITY: Validate download URL.
+    // Internal (not private) so unit tests can exercise it directly.
+    func validateDownloadURL(_ url: URL, allowedDomains: Set<String>) -> Bool {
         // Ensure HTTPS
         guard url.scheme == "https" else {
             print("SECURITY: Rejected non-HTTPS URL: \(url)")
@@ -655,9 +621,27 @@ class ISOCacheManager {
         return true
     }
 
-    // SECURITY: Verify SHA256 checksum using streaming to avoid loading entire file into memory
-    // This is critical for large ISO files (4-8GB) that would otherwise cause memory pressure
-    func verifySHA256(file: URL, expectedHash: String) -> Bool {
+    // SECURITY: Verify SHA256 checksum using streaming to avoid loading
+    // entire file into memory. Critical for 4–8 GB ISOs.
+    //
+    // The optional `progress` callback fires as each 1 MB chunk is hashed
+    // so the UI can show a real progress bar instead of the previous fake
+    // 1%-per-second timer that hit 95% before hashing finished and just sat.
+    // The callback receives a fraction in [0, 1] computed from bytes hashed
+    // over total file size.
+    func verifySHA256(
+        file: URL,
+        expectedHash: String,
+        progress: ((Double) -> Void)? = nil
+    ) -> Bool {
+        // Total size for fractional progress. If we can't stat the file, just
+        // skip progress reporting rather than fail verification.
+        let totalBytes: Int64 = {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
+                  let n = attrs[.size] as? Int64 else { return 0 }
+            return n
+        }()
+
         guard let inputStream = InputStream(url: file) else {
             print("SECURITY: Failed to open file stream for SHA256 verification")
             return false
@@ -666,10 +650,10 @@ class ISOCacheManager {
         inputStream.open()
         defer { inputStream.close() }
 
-        // Use 1MB buffer for streaming hash - balances memory usage vs I/O efficiency
         let bufferSize = 1024 * 1024  // 1MB chunks
         var buffer = [UInt8](repeating: 0, count: bufferSize)
         var hasher = SHA256()
+        var bytesHashed: Int64 = 0
 
         while inputStream.hasBytesAvailable {
             let bytesRead = inputStream.read(&buffer, maxLength: bufferSize)
@@ -681,6 +665,11 @@ class ISOCacheManager {
                 break
             }
             hasher.update(data: Data(buffer[0..<bytesRead]))
+            bytesHashed += Int64(bytesRead)
+            if let progress = progress, totalBytes > 0 {
+                let fraction = min(1.0, Double(bytesHashed) / Double(totalBytes))
+                progress(fraction)
+            }
         }
 
         let digest = hasher.finalize()
@@ -996,22 +985,24 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         progressHandler?(0.4, "Verifying checksum (\(checksumSource))...")
         print("[Cache] Verifying SHA256 checksum from \(checksumSource)...")
 
-        // Show periodic progress updates during verification
-        var verificationProgress = 0.4
-        let updateTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
-            verificationProgress += 0.01
-            if verificationProgress <= 0.95 {
-                self?.progressHandler?(verificationProgress, "Verifying checksum (this may take 10-30 seconds)...")
-            }
-        }
-        RunLoop.main.add(updateTimer, forMode: .common)
-
-        // Run SHA256 verification on background thread (CPU-intensive for large files)
+        // Run SHA256 verification on background thread (CPU-intensive for
+        // large files). Real progress comes from the streaming hasher itself
+        // — bytesHashed/totalBytes — mapped into the [0.4, 0.95] band so the
+        // download phase keeps owning [0.0, 0.4]. The previous fake 1%/sec
+        // timer hit 95% before hashing finished and looked broken.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let isValid = isoManager.verifySHA256(file: destinationURL, expectedHash: expectedHash)
+            let isValid = isoManager.verifySHA256(
+                file: destinationURL,
+                expectedHash: expectedHash,
+                progress: { [weak self] fraction in
+                    let mapped = 0.4 + (0.55 * fraction)
+                    DispatchQueue.main.async {
+                        self?.progressHandler?(mapped, "Verifying checksum (\(checksumSource))...")
+                    }
+                }
+            )
 
             DispatchQueue.main.async {
-                updateTimer.invalidate()
 
                 if !isValid {
                     let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [
@@ -1043,38 +1034,41 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         }
     }
 
-    /// Complete download without checksum verification (with warning)
+    /// Fail closed when no checksum can be obtained.
+    ///
+    /// Prior behavior here was to log a warning and return `.success`, which left the
+    /// downstream installer to install an unverified ISO. A network adversary able to
+    /// 404 the checksum URL (a different host than the ISO) could deliver a tampered
+    /// image that the user reasonably assumed was verified. We now delete the file and
+    /// return `SecVFError.checksumUnavailable` so the caller sees an explicit failure.
     private func completeWithoutVerification(
         destinationURL: URL,
         distro: LinuxDistro,
         isoManager: ISOCacheManager,
         reason: String
     ) {
-        let warningMsg = "WARNING: SHA256 checksum not verified for \(distro.rawValue) (\(reason))"
-        print("[SECURITY] \(warningMsg)")
+        let errorMsg = "SECURITY: SHA256 checksum unavailable for \(distro.rawValue) (\(reason)) — refusing to use unverified ISO"
+        print("[SECURITY] \(errorMsg)")
 
-        // Log to audit trail
+        // Log to audit trail via the serialized writer so concurrent
+        // downloads can't interleave bytes mid-line.
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let auditEntry = "[\(timestamp)] SECURITY WARNING: Downloaded \(distro.rawValue) ISO without checksum verification (\(reason))\n"
-        let auditPath = NSHomeDirectory() + "/.avf/logs/iso-cache-audit.log"
-        if let data = auditEntry.data(using: .utf8) {
-            if let handle = FileHandle(forWritingAtPath: auditPath) {
-                handle.seekToEndOfFile()
-                handle.write(data)
-                handle.closeFile()
-            } else {
-                try? data.write(to: URL(fileURLWithPath: auditPath))
-            }
-        }
+        let auditEntry = "[\(timestamp)] SECURITY: Refused unverified \(distro.rawValue) ISO (\(reason))\n"
+        AVFAuditLog.append(auditEntry, to: AVFPaths.isoCacheAuditLog)
 
-        progressHandler?(1.0, "⚠️ Download complete (checksum not verified)")
-        print("[Cache] Successfully cached \(distro.rawValue) ISO (UNVERIFIED)")
+        // Delete the unverified file — it must not be left in the cache where
+        // findCachedImage / a future download attempt could pick it up.
+        try? FileManager.default.removeItem(at: destinationURL)
+
+        progressHandler?(1.0, "❌ Download rejected (checksum unavailable)")
 
         // Guard: only clear if we're still the active delegate
         if isoManager.activeISODelegate === self {
             isoManager.activeISODelegate = nil
         }
 
-        completionHandler?(.success(destinationURL))
+        let error = SecVFError.checksumUnavailable(distro: distro.rawValue, reason: reason)
+        error.logToAudit()
+        completionHandler?(.failure(error))
     }
 }
