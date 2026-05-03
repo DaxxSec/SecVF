@@ -241,7 +241,6 @@ sudo tee /usr/local/bin/ai-sandbox-vsock-agent.sh << 'AGENT'
 # On the guest side, we listen using the VSOCK character device.
 set -euo pipefail
 WORKSPACE="/workspace"
-POLICY_BLOCKED=("/etc" "/var/db" "/Library/Keychains" "/Users/$(whoami)/.ai-sandbox")
 
 exec socat VSOCK-LISTEN:2222,reuseaddr,fork \
     EXEC:"/usr/local/bin/ai-sandbox-exec-handler.sh",pty,stderr
@@ -272,11 +271,28 @@ case "$cmd" in
         # probes and other observe-only tools that need to outlive the
         # default exec budget.
         #
-        # Defense-in-depth: even though the host-side bridge already
-        # authenticates the peer's uid, restrict STREAM to a small set of
-        # observability binaries. The bridge is the primary gate; this
-        # whitelist limits blast radius if it ever fails open.
+        # Defense-in-depth has TWO gates here. The host-side bridge is the
+        # primary defense (peer-uid allowlist via getpeereid). If that ever
+        # fails open we fall through to:
+        #
+        #   1. Reject any input containing shell metacharacters that enable
+        #      command sequencing or substitution: ; & | ` $ < > ( ) newline.
+        #      Without these, `bash -c` can't be tricked into running a
+        #      second command — a basename match really IS what executes.
+        #   2. The first whitespace-separated token's basename must be in
+        #      the observability allowlist below.
+        #
+        # If you need a complex dtrace probe with shell metacharacters in
+        # its body, drop the script into a .d file under
+        # /usr/local/share/secvf-ai-sandbox/ and invoke as `dtrace -s file.d`
+        # — file paths don't need metacharacters.
         STREAM_CMD="${cmd#STREAM }"
+        case "$STREAM_CMD" in
+            *\;*|*\&*|*\|*|*\`*|*\$*|*\<*|*\>*|*\(*|*\)*|*$'\n'*)
+                echo "secvf-exec-handler: STREAM mode rejected — input contains shell metacharacters that enable command chaining" >&2
+                exit 64
+                ;;
+        esac
         FIRST_TOKEN="${STREAM_CMD%%[[:space:]]*}"
         BASENAME="${FIRST_TOKEN##*/}"
         case "$BASENAME" in
