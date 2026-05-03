@@ -59,22 +59,43 @@ class PacketCaptureManager {
 
     // MARK: - Combine Publishers (reactive updates)
 
+    // Publishers below all `.receive(on: DispatchQueue.main)` at the publisher
+    // boundary. The internal subjects fire on whichever queue called `send()`
+    // (often `captureQueue`/`parseQueue`), and SwiftUI / AppKit subscribers
+    // that update views must be hopped to main. Rather than make every
+    // subscriber remember to add the hop, we apply it once here.
+
     /// Publisher that emits each captured packet as it arrives
     private let packetSubject = PassthroughSubject<CapturedPacket, Never>()
     var packetsPublisher: AnyPublisher<CapturedPacket, Never> {
-        packetSubject.eraseToAnyPublisher()
+        packetSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
     /// Publisher that emits protocol statistics updates
     private let statsSubject = PassthroughSubject<[ProtocolCount], Never>()
     var protocolStatsPublisher: AnyPublisher<[ProtocolCount], Never> {
-        statsSubject.eraseToAnyPublisher()
+        statsSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
     /// Publisher that emits capture state changes (true = capturing, false = stopped)
     private let captureStateSubject = CurrentValueSubject<Bool, Never>(false)
     var captureStatePublisher: AnyPublisher<Bool, Never> {
-        captureStateSubject.eraseToAnyPublisher()
+        captureStateSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
+    }
+
+    // Bounded ring buffer of recent tshark stderr lines. Previously dumped
+    // to FileHandle.nullDevice, which made "capture panel is empty" bug
+    // reports nearly impossible to diagnose. We keep the last ~64 lines so
+    // they can be surfaced with `getRecentTsharkErrors()` (and to os_log).
+    private static let maxStderrLines = 64
+    private let stderrLock = NSLock()
+    private var recentTsharkStderr: [String] = []
+    private var tsharkStderrPipe: Pipe?
+
+    func getRecentTsharkErrors() -> [String] {
+        stderrLock.lock()
+        defer { stderrLock.unlock() }
+        return recentTsharkStderr
     }
 
     // Capture state
@@ -175,18 +196,34 @@ class PacketCaptureManager {
             "--no-duplicate-keys" // Prevent duplicate JSON keys
         ]
 
-        // Setup output pipe
+        // Setup output pipe + stderr ring buffer. Discarding tshark stderr
+        // wholesale used to make "capture panel is empty" tickets effectively
+        // undebuggable (item 18 of code review). We now keep the last 64
+        // stderr lines and emit each to os_log.
         let outputPipe = Pipe()
+        let errorPipe = Pipe()
         process.standardOutput = outputPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errorPipe
 
         tsharkOutputPipe = outputPipe
+        tsharkStderrPipe = errorPipe
 
         // Handle tshark JSON output
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.parseTsharkOutput(data)
+        }
+
+        // Handle tshark stderr — log + retain in ring buffer.
+        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty,
+                  let text = String(data: data, encoding: .utf8) else { return }
+            for rawLine in text.split(whereSeparator: { $0.isNewline }) {
+                let line = String(rawLine)
+                self?.appendTsharkStderr(line)
+            }
         }
 
         // Handle process termination
@@ -252,6 +289,16 @@ class PacketCaptureManager {
         handleCaptureStop()
     }
 
+    private func appendTsharkStderr(_ line: String) {
+        os_log("%{public}@", log: logger, type: .error, "[tshark stderr] \(line)")
+        stderrLock.lock()
+        recentTsharkStderr.append(line)
+        if recentTsharkStderr.count > Self.maxStderrLines {
+            recentTsharkStderr.removeFirst(recentTsharkStderr.count - Self.maxStderrLines)
+        }
+        stderrLock.unlock()
+    }
+
     private func handleCaptureStop() {
         guard isCapturing else { return }
         isCapturing = false
@@ -259,6 +306,8 @@ class PacketCaptureManager {
         // Clear output handler
         tsharkOutputPipe?.fileHandleForReading.readabilityHandler = nil
         tsharkOutputPipe = nil
+        tsharkStderrPipe?.fileHandleForReading.readabilityHandler = nil
+        tsharkStderrPipe = nil
         tsharkProcess = nil
 
         // Remove FIFO
@@ -283,6 +332,8 @@ class PacketCaptureManager {
         tsharkProcess?.terminate()
         tsharkProcess = nil
         tsharkOutputPipe = nil
+        tsharkStderrPipe?.fileHandleForReading.readabilityHandler = nil
+        tsharkStderrPipe = nil
     }
 
     // MARK: - Packet Capture (called from VirtualNetworkSwitch)
@@ -437,6 +488,7 @@ class PacketCaptureManager {
     // MARK: - tshark Output Parsing
 
     private var jsonBuffer = Data()
+    private static let maxJsonBufferBytes = 4 * 1024 * 1024  // 4 MiB safety cap
 
     private func parseTsharkOutput(_ data: Data) {
         parseQueue.async { [weak self] in
@@ -444,38 +496,78 @@ class PacketCaptureManager {
 
             self.jsonBuffer.append(data)
 
-            // Try to parse complete JSON objects from buffer
+            // Drain every complete top-level object the buffer currently holds.
             while let packet = self.extractNextPacket() {
                 DispatchQueue.main.async {
                     self.addPacket(packet)
                     self.updateProtocolStats(packet.protocol, bytes: packet.length)
                 }
             }
+
+            // Bound the buffer so a malformed stream can't OOM us.
+            if self.jsonBuffer.count > Self.maxJsonBufferBytes {
+                let drop = self.jsonBuffer.count - Self.maxJsonBufferBytes
+                self.jsonBuffer.removeFirst(drop)
+                self.log("tshark JSON buffer truncated by \(drop) bytes (over \(Self.maxJsonBufferBytes) cap)", type: .error)
+            }
         }
     }
 
+    /// Pulls the next complete top-level `{ ... }` object out of `jsonBuffer`
+    /// using a brace-counting scan that respects strings and escaped quotes.
+    /// Returns nil when no complete object is available; in that case the
+    /// buffer is kept intact for the next read.
     private func extractNextPacket() -> CapturedPacket? {
-        // Look for complete JSON packet objects
-        guard let string = String(data: jsonBuffer, encoding: .utf8) else { return nil }
+        let bytes = jsonBuffer
+        let count = bytes.count
+        var i = 0
 
-        // tshark outputs array elements, look for complete objects
-        if let range = string.range(of: "\\{[^{}]*\"_source\"[^{}]*\\}", options: .regularExpression) {
-            let jsonString = String(string[range])
-
-            // Remove processed data from buffer
-            if let dataRange = jsonString.data(using: .utf8) {
-                if let bufferRange = jsonBuffer.range(of: dataRange) {
-                    jsonBuffer.removeSubrange(bufferRange)
-                }
-            }
-
-            // Parse JSON
-            if let jsonData = jsonString.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                return parsePacketJSON(json)
-            }
+        // Skip whitespace, array delimiters, and any leading `[` from tshark's
+        // JSON-array output framing.
+        let skip: Set<UInt8> = [0x20, 0x09, 0x0A, 0x0D, 0x2C, 0x5B] // SPACE TAB LF CR , [
+        while i < count, skip.contains(bytes[i]) { i += 1 }
+        guard i < count, bytes[i] == 0x7B /* { */ else {
+            // No object yet — drop any leading garbage we skipped over so the
+            // next pass starts clean.
+            if i > 0 { jsonBuffer.removeFirst(i) }
+            return nil
         }
 
+        let start = i
+        var depth = 0
+        var inString = false
+        var escape = false
+
+        while i < count {
+            let b = bytes[i]
+            if escape {
+                escape = false
+            } else if inString {
+                if b == 0x5C /* \ */ { escape = true }
+                else if b == 0x22 /* " */ { inString = false }
+            } else {
+                switch b {
+                case 0x22: inString = true
+                case 0x7B: depth += 1               // {
+                case 0x7D:                          // }
+                    depth -= 1
+                    if depth == 0 {
+                        let objBytes = jsonBuffer.subdata(in: start..<(i + 1))
+                        jsonBuffer.removeFirst(i + 1)
+                        if let json = try? JSONSerialization.jsonObject(with: objBytes) as? [String: Any] {
+                            return parsePacketJSON(json)
+                        }
+                        return nil
+                    }
+                default: break
+                }
+            }
+            i += 1
+        }
+
+        // Reached end of buffer without closing the object — keep buffer for
+        // the next chunk to complete it. Trim leading garbage from before `start`.
+        if start > 0 { jsonBuffer.removeFirst(start) }
         return nil
     }
 

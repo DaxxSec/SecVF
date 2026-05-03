@@ -162,6 +162,43 @@ syscall::connect:entry
 DTRACE
 sudo chmod 755 /usr/local/share/secvf-ai-sandbox/netmon.d
 
+# Per-PID stdout/stderr capture — invoked on demand (NOT a LaunchDaemon).
+# Used by ai-mon (and other consumers) to tail a specific process's writes
+# without the system-wide noise of execmon/filemon/netmon. See scripts/writemon.d
+# in the host repo for the canonical version.
+sudo tee /usr/local/share/secvf-ai-sandbox/writemon.d << 'DTRACE'
+#!/usr/sbin/dtrace -qs
+/*
+ * Per-PID stdout/stderr capture. Invoke as:
+ *   sudo dtrace -p <target_pid> -s writemon.d
+ * dtrace exits when the target exits; consumer sees a clean stream end.
+ */
+#pragma D option strsize=64k
+#pragma D option switchrate=10hz
+#pragma D option quiet
+
+syscall::write:entry,
+syscall::write_nocancel:entry
+/pid == $target && (arg0 == 1 || arg0 == 2)/
+{
+    self->fd  = arg0;
+    self->len = arg2;
+    self->buf = copyinstr(arg1, arg2);
+}
+
+syscall::write:return,
+syscall::write_nocancel:return
+/self->buf != NULL/
+{
+    printf("write(%d, \"%S\", %d) = %d\n",
+           self->fd, self->buf, self->len, (int)arg1);
+    self->fd  = 0;
+    self->len = 0;
+    self->buf = 0;
+}
+DTRACE
+sudo chmod 755 /usr/local/share/secvf-ai-sandbox/writemon.d
+
 # ── security telemetry LaunchDaemon ───────────────────────────────────────────────
 # Runs DTrace continuously, appends JSON lines to workspace telemetry dir
 sudo tee /Library/LaunchDaemons/com.secvf.ai-sandbox.security-execmon.plist << 'PLIST'
@@ -213,17 +250,57 @@ sudo chmod 755 /usr/local/bin/ai-sandbox-vsock-agent.sh
 
 sudo tee /usr/local/bin/ai-sandbox-exec-handler.sh << 'HANDLER'
 #!/bin/bash
-# Called per vsock connection — reads one command, runs it, closes.
+# Called per vsock connection — reads one command line, runs it, streams output.
+#
+# Modes (selected by command-line prefix):
+#   "STREAM "  → no timeout, runs as root (for long-lived probes like dtrace)
+#   "ROOT "    → 120s timeout, runs as root (for setup / introspection)
+#   default    → 120s timeout, runs as ai-sandbox-agent (non-admin)
+#
+# All modes stream stdout+stderr line-by-line back over the socket so callers
+# (e.g. ai-mon's SecVFTracer) get live output, not a buffered dump on close.
+
 IFS= read -r cmd
 cmd="${cmd%$'\r'}"
 [[ -z "$cmd" ]] && exit 0
 
-# Validate working dir
 cd /workspace 2>/dev/null || exit 1
 
-# Run as ai-sandbox-agent (non-admin), with configurable timeout (default 120s)
-TIMEOUT="${AI_SANDBOX_EXEC_TIMEOUT:-120}"
-exec timeout "$TIMEOUT" sudo -u ai-sandbox-agent bash -c "$cmd" 2>&1
+case "$cmd" in
+    "STREAM "*)
+        # Long-running mode: no timeout, root privileges. Used for dtrace
+        # probes and other observe-only tools that need to outlive the
+        # default exec budget.
+        #
+        # Defense-in-depth: even though the host-side bridge already
+        # authenticates the peer's uid, restrict STREAM to a small set of
+        # observability binaries. The bridge is the primary gate; this
+        # whitelist limits blast radius if it ever fails open.
+        STREAM_CMD="${cmd#STREAM }"
+        FIRST_TOKEN="${STREAM_CMD%%[[:space:]]*}"
+        BASENAME="${FIRST_TOKEN##*/}"
+        case "$BASENAME" in
+            dtrace|fs_usage|ktrace|top|vm_stat|memory_pressure|sysctl|tail|log)
+                exec sudo bash -c "$STREAM_CMD" 2>&1
+                ;;
+            *)
+                echo "secvf-exec-handler: STREAM mode rejected — '$BASENAME' is not in the observability allowlist" >&2
+                echo "Allowed: dtrace fs_usage ktrace top vm_stat memory_pressure sysctl tail log" >&2
+                exit 64
+                ;;
+        esac
+        ;;
+    "ROOT "*)
+        # Privileged short-running mode (setup / introspection / config).
+        TIMEOUT="${AI_SANDBOX_EXEC_TIMEOUT:-120}"
+        exec timeout "$TIMEOUT" sudo bash -c "${cmd#ROOT }" 2>&1
+        ;;
+    *)
+        # Default: drop to non-admin agent user, 120s timeout.
+        TIMEOUT="${AI_SANDBOX_EXEC_TIMEOUT:-120}"
+        exec timeout "$TIMEOUT" sudo -u ai-sandbox-agent bash -c "$cmd" 2>&1
+        ;;
+esac
 HANDLER
 sudo chmod 755 /usr/local/bin/ai-sandbox-exec-handler.sh
 
@@ -304,6 +381,7 @@ sudo tee "$MANIFEST_PATH" << MANIFEST
   "node_version":     "${NODE_VERSION}",
   "ai_agent_version": "${AI_AGENT_VERSION}",
   "monitoring":       ["dtrace", "esf-helper", "unified-logging"],
+  "dtrace_probes":    ["execmon", "filemon", "netmon", "writemon"],
   "ipc":              "vsock:2222",
   "agent_user":       "${AI_SANDBOX_USER}",
   "workspace_mount":  "${WORKSPACE_MOUNT}"

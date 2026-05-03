@@ -87,6 +87,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             object: nil
         )
 
+        // Refresh the running-VMs sidebar whenever an AI Sandbox install
+        // changes phase or progress so the user sees real-time state.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAISandboxInstallTrackerChanged(_:)),
+            name: .aiSandboxInstallTrackerChanged,
+            object: nil
+        )
+
         // Update button states
         updateButtonStates()
 
@@ -951,6 +960,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let clientVMs = runningVMs.filter { !$0.vm.networkConfig.isRouter }
         let hasActiveNetwork = routerVM != nil && !clientVMs.isEmpty
 
+        // Prepend an AI Sandbox install entry when a build is active, so the
+        // user can see real-time phase + progress in the same panel they
+        // already watch for running VMs.
+        if AISandboxInstallTracker.shared.isActive {
+            container.addArrangedSubview(createInstallProgressItem())
+        }
+
         // Add status items with network visualization between router and clients
         var visualizationAdded = false
 
@@ -1031,6 +1047,77 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
 
         netView.updateStats(forwarded: forwarded, broadcast: broadcast, bytes: Int(totalBytes), ports: ports)
+    }
+
+    /// Synthetic sidebar card showing AI Sandbox install state. Mirrors the
+    /// dimensions of `createVMStatusItem` so the layout stays consistent;
+    /// uses a magenta border to distinguish it from real VM cards.
+    private func createInstallProgressItem() -> NSView {
+        let cardWidth: CGFloat  = 188
+        let cardHeight: CGFloat = 85
+
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
+        containerView.wantsLayer = true
+        containerView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.06, blue: 0.16, alpha: 1.0).cgColor
+        containerView.layer?.cornerRadius = 6
+        containerView.layer?.borderWidth = 1
+        containerView.layer?.borderColor = NSColor(red: 0.78, green: 0.30, blue: 0.95, alpha: 0.65).cgColor
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.widthAnchor.constraint(equalToConstant: cardWidth).isActive = true
+        containerView.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
+
+        let tracker = AISandboxInstallTracker.shared
+
+        // Title — building / done / failed
+        let titleColor = NSColor(red: 0.86, green: 0.50, blue: 1.00, alpha: 1.0) // magenta
+        let titleLabel = NSTextField(labelWithString: "⚙ AI Sandbox VM (building)")
+        titleLabel.frame = NSRect(x: 8, y: cardHeight - 22, width: cardWidth - 16, height: 16)
+        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = titleColor
+        titleLabel.lineBreakMode = .byTruncatingTail
+        containerView.addSubview(titleLabel)
+
+        // Phase label
+        let phaseLabel = NSTextField(labelWithString: tracker.phase.humanLabel)
+        phaseLabel.frame = NSRect(x: 8, y: cardHeight - 38, width: cardWidth - 16, height: 14)
+        phaseLabel.font = NSFont.systemFont(ofSize: 9)
+        phaseLabel.textColor = NSColor(white: 0.7, alpha: 1.0)
+        containerView.addSubview(phaseLabel)
+
+        // Progress bar — determinate during install (we have a real fraction
+        // from VZMacOSInstaller's progress KVO), indeterminate otherwise.
+        let progressBar = NSProgressIndicator(frame: NSRect(x: 8, y: 18, width: cardWidth - 16, height: 8))
+        progressBar.style = .bar
+        progressBar.controlSize = .small
+        progressBar.minValue = 0
+        progressBar.maxValue = 1
+        progressBar.isIndeterminate = (tracker.phase != .installing)
+        if tracker.phase == .installing {
+            progressBar.doubleValue = tracker.fraction
+        } else {
+            progressBar.startAnimation(nil)
+        }
+        containerView.addSubview(progressBar)
+
+        // Percent / phase number text
+        let footerText: String
+        switch tracker.phase {
+        case .installing:
+            footerText = "Phase 1/3 · \(Int(tracker.fraction * 100))%"
+        case .provisioning:
+            footerText = "Phase 2/3"
+        case .sealing:
+            footerText = "Phase 3/3"
+        default:
+            footerText = ""
+        }
+        let footerLabel = NSTextField(labelWithString: footerText)
+        footerLabel.frame = NSRect(x: 8, y: 2, width: cardWidth - 16, height: 12)
+        footerLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        footerLabel.textColor = NSColor(white: 0.6, alpha: 1.0)
+        containerView.addSubview(footerLabel)
+
+        return containerView
     }
 
     private func createVMStatusItem(vm: VMConfiguration, state: String) -> NSView {
@@ -1328,6 +1415,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         }
     }
 
+    @objc private func handleAISandboxInstallTrackerChanged(_ notification: Notification) {
+        // Tracker drives a synthetic entry at the top of the running-VMs
+        // sidebar; rebuild the sidebar to pick up the new state.
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshStatusBar()
+        }
+    }
+
     private func refreshStatusBar() {
         let runningVMs = vmManager.getRunningVMs()
         let vmStates: [(vm: VMConfiguration, state: String)] = runningVMs.map { vm in
@@ -1602,6 +1697,44 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     // MARK: - macOS VM Download
+
+    /// First checks `~/.avf/MacOS/` for a cached IPSW before starting any
+    /// download. If a cached IPSW exists, use it directly and skip the
+    /// download path. If not, prompt the user to run Tools → Download macOS
+    /// IPSW first instead of triggering an in-flow download from this window.
+    private func prepareMacOSVMUsingCachedIPSW(_ vmConfig: VMConfiguration) {
+        let macOSDir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".avf/MacOS", isDirectory: true)
+        let cachedIPSW = (try? FileManager.default.contentsOfDirectory(
+            at: macOSDir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ))?.first(where: { $0.pathExtension.lowercased() == "ipsw" })
+
+        if let cached = cachedIPSW {
+            NSLog("[VMLibrary] Reusing cached IPSW: %@", cached.path)
+            selectedVM = vmConfig
+            vmManager.updateLastUsedDate(vmConfig)
+            NotificationCenter.default.post(
+                name: .startVMWithISO,
+                object: ["vm": vmConfig, "iso": cached]
+            )
+            return
+        }
+
+        // No cache — point the user at the dedicated download tool instead
+        // of starting an in-flow download from this dialog.
+        let alert = NSAlert()
+        alert.messageText = "No cached macOS IPSW"
+        alert.informativeText = """
+        New macOS VMs reuse a cached IPSW from \(macOSDir.path) — no copy is
+        currently there.
+
+        Use Tools → Download macOS IPSW… to fetch one (one-time, ~13-16 GB).
+        Then create this VM again.
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
 
     private func downloadAndPrepareMacOSVM(_ vmConfig: VMConfiguration) {
         NSLog("[VMLibrary] === downloadAndPrepareMacOSVM() ENTERED ===")
@@ -2454,10 +2587,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
                 NSLog("[VMLibrary] Checking OS type: '%@'", osType)
                 if osType == "macOS" {
-                    // For macOS, automatically handle IPSW download/reuse
-                    NSLog("[VMLibrary] OS type is macOS, calling downloadAndPrepareMacOSVM...")
-                    downloadAndPrepareMacOSVM(newVM)
-                    NSLog("[VMLibrary] downloadAndPrepareMacOSVM() call completed")
+                    // macOS VMs reuse a cached IPSW from ~/.avf/MacOS/. If
+                    // none is present, the user is pointed at Tools →
+                    // Download macOS IPSW…. The legacy in-flow download via
+                    // downloadAndPrepareMacOSVM is kept around for now but
+                    // not the default path.
+                    NSLog("[VMLibrary] OS type is macOS, using cached IPSW path...")
+                    prepareMacOSVMUsingCachedIPSW(newVM)
                 } else if needsISO {
                     // For Linux, auto-download ISO via ISOCacheManager
                     let distroEnum = mapDistroNameToEnum(selectedDistro)

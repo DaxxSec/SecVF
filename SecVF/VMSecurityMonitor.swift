@@ -65,6 +65,7 @@ class VMSecurityMonitor {
 
     private let logger = OSLog(subsystem: "com.DaxxSec.SecVF", category: "Security")
     private var fileMonitors: [String: DispatchSourceFileSystemObject] = [:]
+    private var resourceTimers: [String: DispatchSourceTimer] = [:]
     private var activeVMs: [String: VMSecurityContext] = [:]
     private let eventQueue = DispatchQueue(label: "com.secvf.security.events", qos: .userInitiated)
 
@@ -121,6 +122,9 @@ class VMSecurityMonitor {
 
                 // Stop filesystem monitor
                 self.stopFilesystemMonitoring(for: vmID.uuidString)
+
+                // Stop resource monitor
+                self.stopResourceMonitoring(for: vmID.uuidString)
 
                 // Remove from active VMs
                 self.activeVMs.removeValue(forKey: vmID.uuidString)
@@ -193,43 +197,131 @@ class VMSecurityMonitor {
     // MARK: - Resource Monitoring
 
     private func startResourceMonitoring(for vm: VMConfiguration) {
-        // Monitor CPU and memory usage
-        Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in
-            guard let self = self else {
-                timer.invalidate()
+        // For AI sandbox guests (VMs with a vsock device + the provisioned exec
+        // agent), poll real guest-side load and memory pressure every 5s via
+        // VsockChannel. For other VMs (Linux router, etc.), fall back to a
+        // coarse host-process RSS sanity check — better than nothing, but
+        // explicitly labeled as host-side in the log details.
+        //
+        // DispatchSourceTimer rather than Timer.scheduledTimer because we
+        // can't rely on a runloop being bound to eventQueue.
+        let timer = DispatchSource.makeTimerSource(queue: eventQueue)
+        timer.schedule(deadline: .now() + 5.0, repeating: 5.0)
+        timer.setEventHandler { [weak self, weak timer] in
+            guard let self = self else { timer?.cancel(); return }
+            guard let context = self.activeVMs[vm.id.uuidString] else {
+                timer?.cancel()
                 return
             }
-
-            // Check if VM is still active
-            guard self.activeVMs[vm.id.uuidString] != nil else {
-                timer.invalidate()
-                return
+            let machine = context.vm
+            // Branch: vsock-capable guests get real stats, others get host RSS.
+            if machine.socketDevices.first is VZVirtioSocketDevice {
+                Task { [weak self] in
+                    await self?.pollGuestResources(vmName: vm.name, vm: machine)
+                }
+            } else {
+                self.pollHostRSS(vmName: vm.name)
             }
+        }
+        timer.resume()
+        resourceTimers[vm.id.uuidString] = timer
+    }
 
-            // Get system resource usage
-            var info = mach_task_basic_info()
-            var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size)/4
+    /// Polls the guest via the AI sandbox vsock exec agent. Emits
+    /// resource-exhaustion events if load average crosses thresholds.
+    private func pollGuestResources(vmName: String, vm: VZVirtualMachine) async {
+        // ROOT prefix routes through the privileged branch of the exec
+        // handler — no agent-user permissions on sysctl/vm_stat needed.
+        let cmd = "ROOT sysctl -n vm.loadavg && memory_pressure 2>/dev/null | head -3"
+        let output: String
+        do {
+            output = try await VsockChannel.runOneShot(on: vm, command: cmd)
+        } catch {
+            // Connection failed — VM may be in an unusual state, exec agent
+            // may not be running. Skip this tick silently rather than spamming.
+            return
+        }
 
-            let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
-                $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
-                    task_info(mach_task_self_,
-                             task_flavor_t(MACH_TASK_BASIC_INFO),
-                             $0,
-                             &count)
+        // Parse load average. macOS `sysctl -n vm.loadavg` returns: { 0.65 0.72 0.80 }
+        let load1 = parseLoad1(output)
+        // Parse memory pressure %. Look for "System-wide memory free percentage: NN%"
+        let memFreePct = parseMemFreePct(output)
+
+        // Threshold-driven alerts. Tuned for "guest sustained at high load",
+        // not transient spikes — the timer fires every 5s so a single spike
+        // gets one event, sustained pressure gets a steady stream.
+        if let l = load1, l > 12.0 {
+            logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: vmName,
+                message: "Guest load average \(String(format: "%.2f", l)) over threshold (12.0)",
+                details: ["loadAvg1": l, "source": "vsock"]
+            )
+        }
+        if let f = memFreePct, f < 5.0 {
+            logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: vmName,
+                message: "Guest memory free \(String(format: "%.1f", f))% — under 5% threshold",
+                details: ["memFreePct": f, "source": "vsock"]
+            )
+        }
+    }
+
+    /// Fallback for non-vsock VMs — polls SecVF's own RSS as a coarse signal.
+    private func pollHostRSS(vmName: String) {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+        let kerr: kern_return_t = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_,
+                          task_flavor_t(MACH_TASK_BASIC_INFO),
+                          $0,
+                          &count)
+            }
+        }
+        guard kerr == KERN_SUCCESS else { return }
+        let hostRssMB = Double(info.resident_size) / 1024.0 / 1024.0
+        if hostRssMB > 8000 {
+            logSecurityEvent(
+                .warning,
+                type: .resourceExhaustion,
+                vmName: vmName,
+                message: "Host RSS over 8 GB while VM running — coarse signal (no vsock channel for guest stats)",
+                details: ["hostRssMB": hostRssMB, "source": "host-fallback"]
+            )
+        }
+    }
+
+    private func parseLoad1(_ output: String) -> Double? {
+        // sysctl -n vm.loadavg → "{ 0.65 0.72 0.80 }"
+        guard let openIdx = output.firstIndex(of: "{") else { return nil }
+        let after = output[output.index(after: openIdx)...]
+        let parts = after.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+        guard let first = parts.first else { return nil }
+        return Double(first)
+    }
+
+    private func parseMemFreePct(_ output: String) -> Double? {
+        // memory_pressure includes "System-wide memory free percentage: NN%"
+        for line in output.split(separator: "\n") {
+            if line.contains("memory free percentage") {
+                let digits = line.compactMap { c -> Character? in
+                    (c.isNumber || c == ".") ? c : nil
+                }
+                if !digits.isEmpty {
+                    return Double(String(digits))
                 }
             }
+        }
+        return nil
+    }
 
-            if kerr == KERN_SUCCESS {
-                let usedMemoryMB = Double(info.resident_size) / 1024.0 / 1024.0
-
-                // Alert if memory usage is suspicious
-                if usedMemoryMB > 8000 {  // > 8GB host memory usage
-                    self.logSecurityEvent(.warning, type: .resourceExhaustion,
-                                        vmName: vm.name,
-                                        message: "High host memory usage detected",
-                                        details: ["memoryMB": usedMemoryMB])
-                }
-            }
+    private func stopResourceMonitoring(for vmID: String) {
+        if let timer = resourceTimers.removeValue(forKey: vmID) {
+            timer.cancel()
         }
     }
 
@@ -299,30 +391,63 @@ class VMSecurityMonitor {
 
     // MARK: - Security Recommendations
 
+    /// Build a list of human-readable security recommendations / observations for a VM.
+    ///
+    /// Reflects the VM's actual configuration (network mode, resource allocation,
+    /// OS type) and the host's live monitoring state — not a hardcoded checklist.
     func getSecurityRecommendations(for vm: VMConfiguration) -> [String] {
-        var recommendations: [String] = []
+        var rec: [String] = []
 
-        // Check if VM has network access (always does with NAT)
-        recommendations.append("⚠️ VM has network access - malware can communicate externally")
-
-        // Check resource allocation
-        if vm.cpuCount > 4 {
-            recommendations.append("ℹ️ High CPU allocation may enable sophisticated malware")
+        // ── Network posture ──────────────────────────────────────────────────
+        switch vm.networkConfig.mode {
+        case .nat:
+            rec.append("⚠️ NAT networking — guest reaches the live internet directly. For malware analysis, switch to virtual switch routed through a Kali router.")
+        case .virtual:
+            if vm.networkConfig.isRouter {
+                rec.append("ℹ️ Router VM — sits between client guests and the internet. Run kali-router-setup.sh inside; consider kali-fakenet-setup.sh to fully isolate.")
+            } else if vm.networkConfig.routerVMId != nil {
+                rec.append("✅ Virtual switch — egress goes through a router VM, not the host.")
+            } else {
+                rec.append("✅ Virtual switch — fully isolated from host and internet (no router configured).")
+            }
         }
 
-        if vm.memorySize > 8 * 1024 * 1024 * 1024 {
-            recommendations.append("ℹ️ High memory allocation - monitor for memory-based attacks")
+        // ── Resource allocation ──────────────────────────────────────────────
+        if vm.cpuCount > 8 {
+            rec.append("ℹ️ \(vm.cpuCount) vCPUs allocated — generous; fine for AI workloads, watch for runaway CPU in malware analysis.")
+        }
+        let memGB = Double(vm.memorySize) / 1_073_741_824.0
+        if memGB > 8 {
+            rec.append("ℹ️ \(String(format: "%.0f", memGB)) GB RAM allocated — keep an eye on host RSS while the VM is running.")
         }
 
-        // Check OS type
+        // ── OS-specific notes ────────────────────────────────────────────────
         if vm.osType == "macOS" {
-            recommendations.append("⚠️ macOS guest can potentially exploit framework vulnerabilities")
+            rec.append("⚠️ macOS guest — Virtualization.framework attack surface is broader than Linux; SIP / hardened-runtime settings inside the guest matter.")
         }
 
-        recommendations.append("✅ VM filesystem access is isolated to bundle directory")
-        recommendations.append("✅ Security monitoring is active")
+        // ── Live monitoring posture ──────────────────────────────────────────
+        let isActive = activeVMs[vm.id.uuidString] != nil
+        rec.append(isActive
+            ? "✅ Filesystem + resource monitoring active for this VM."
+            : "ℹ️ Filesystem + resource monitoring engages once the VM starts.")
 
-        return recommendations
+        let switchStats = VirtualNetworkSwitch.shared.getStatistics()
+        let switchUp = (switchStats["running"] as? Bool) ?? false
+        if vm.networkConfig.mode == .virtual && switchUp {
+            let connected = (switchStats["connectedPorts"] as? Int) ?? 0
+            rec.append("✅ Virtual switch up — \(connected) port(s) connected, \(switchStats["learnedMACs"] as? Int ?? 0) MAC(s) learned.")
+        } else if vm.networkConfig.mode == .virtual {
+            rec.append("⚠️ Virtual switch is not running — guest will have no L2 peer.")
+        }
+
+        if PacketCaptureManager.shared.isCapturing {
+            rec.append("✅ Packet capture is recording — analysis available in Wireshark view.")
+        }
+
+        rec.append("✅ Bundle filesystem is isolated; events logged to ~/.avf/logs/security-*.log.")
+
+        return rec
     }
 }
 

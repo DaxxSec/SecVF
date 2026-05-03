@@ -13,6 +13,7 @@ struct VMCommand: ParsableCommand {
             VMStatus.self,
             VMDelete.self,
             VMSSH.self,
+            VMExec.self,
             VMCopyTo.self,
             VMCopyFrom.self,
             VMSnapshot.self,
@@ -449,6 +450,148 @@ struct VMDelete: ParsableCommand {
                 print("Error: \(error)")
             } else {
                 print("✓ Deleted VM: \(name)")
+            }
+        }
+    }
+}
+
+// MARK: - VM Exec
+//
+// Drives a guest via the AI sandbox vsock exec channel — no SSH credentials,
+// no public IP, just a Unix domain socket exposed by SecVF.app at
+// /tmp/secvf-exec-<UUID>.sock when the VM is running. The host-side bridge
+// proxies bytes between the UDS and the VM's vsock:2222.
+//
+// Three modes are routed via prefix tokens the in-guest exec handler
+// recognizes:
+//
+//     (default)  → run as ai-sandbox-agent, 120s timeout
+//     ROOT <cmd> → run as root, 120s timeout
+//     STREAM     → run as root, NO timeout (for dtrace probes etc.)
+//
+// secvf-cli adds the prefix when --root or --stream is set; users pass the
+// raw command and let the flag drive routing.
+
+struct VMExec: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "exec",
+        abstract: "Execute a command in the guest via vsock (no SSH, no password)"
+    )
+
+    @OptionGroup var options: GlobalOptions
+
+    @Argument(help: "Name of the virtual machine")
+    var name: String
+
+    @Option(name: .shortAndLong, help: "Command to execute (required)")
+    var command: String
+
+    @Flag(name: .long, help: "Run as root instead of ai-sandbox-agent")
+    var root: Bool = false
+
+    @Flag(name: .long, help: "Long-running mode: no timeout, root privileges, streams output")
+    var stream: Bool = false
+
+    mutating func run() throws {
+        func fail(_ msg: String) {
+            if options.json {
+                JSONOutput(success: false, message: msg).print()
+            } else {
+                fputs("Error: \(msg)\n", stderr)
+            }
+        }
+
+        let vmManager = VMManagerBridge()
+        guard let vm = vmManager.findVMByName(name: name) else {
+            fail("VM not found: \(name)")
+            return
+        }
+        guard let idString = vm["id"] as? String else {
+            fail("VM record missing id")
+            return
+        }
+
+        let socketPath = "/tmp/secvf-exec-\(idString).sock"
+        guard FileManager.default.fileExists(atPath: socketPath) else {
+            fail(
+                "exec bridge not active for VM \(name) — is the VM running with a vsock device? Expected socket at \(socketPath)"
+            )
+            return
+        }
+
+        // Connect to the UDS.
+        let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else {
+            fail("socket() failed: \(String(cString: strerror(errno)))")
+            return
+        }
+        defer { close(fd) }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(socketPath.utf8CString)
+        let pathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
+        guard pathBytes.count <= pathCapacity else {
+            fail("socket path too long: \(socketPath)")
+            return
+        }
+        // Phase 1: copy path bytes into sun_path with exclusive access to
+        // that field only.
+        withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
+            sunPath.withMemoryRebound(to: CChar.self, capacity: pathCapacity) { dst in
+                pathBytes.withUnsafeBufferPointer { src in
+                    if let base = src.baseAddress { memcpy(dst, base, pathBytes.count) }
+                }
+            }
+        }
+
+        // Phase 2: connect, using a fresh whole-struct pointer so we don't
+        // overlap with phase 1's mutable access (Swift exclusivity rule).
+        let connResult: Int32 = withUnsafePointer(to: &addr) { aptr in
+            aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
+                Darwin.connect(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        guard connResult == 0 else {
+            fail("connect(\(socketPath)) failed: \(String(cString: strerror(errno)))")
+            return
+        }
+
+        // Build the wire command with prefix routing.
+        let wireCommand: String
+        if stream {
+            wireCommand = "STREAM " + command
+        } else if root {
+            wireCommand = "ROOT " + command
+        } else {
+            wireCommand = command
+        }
+        let payload = (wireCommand + "\n").data(using: .utf8) ?? Data()
+
+        // Write the command, then stream stdout back to our own stdout.
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
+        do { try handle.write(contentsOf: payload) } catch {
+            fail("write to socket failed: \(error.localizedDescription)")
+            return
+        }
+
+        // JSON mode buffers; default mode streams byte-for-byte so long-
+        // running probes (--stream) flow live.
+        if options.json {
+            var collected = Data()
+            while true {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }
+                collected.append(chunk)
+            }
+            let output = String(data: collected, encoding: .utf8) ?? ""
+            JSONOutput(success: true, data: ["stdout": output]).print()
+        } else {
+            let out = FileHandle.standardOutput
+            while true {
+                let chunk = handle.availableData
+                if chunk.isEmpty { break }
+                try? out.write(contentsOf: chunk)
             }
         }
     }
