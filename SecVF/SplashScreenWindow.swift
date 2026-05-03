@@ -14,6 +14,7 @@ class SplashScreenWindow: NSWindow {
     private var logoImageView: NSImageView!
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
+    private var statusLabel: NSTextField?
     private var fadeOutTimer: Timer?
     private var versionPulseTimer: Timer?
 
@@ -129,6 +130,7 @@ class SplashScreenWindow: NSWindow {
 
         // Version/Loading label - Soft white
         let versionLabel = NSTextField(labelWithString: "[ INITIALIZING SANDBOX ]")
+        self.statusLabel = versionLabel
         versionLabel.frame = NSRect(x: 0, y: 20, width: 500, height: 20)
         versionLabel.alignment = .center
         versionLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
@@ -136,12 +138,13 @@ class SplashScreenWindow: NSWindow {
         versionLabel.alphaValue = 0
         contentView.addSubview(versionLabel)
 
-        // Animate version label pulsing
-        versionPulseTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak versionLabel] _ in
-            guard let versionLabel = versionLabel else { return }
+        // Animate version label pulsing — capture self weakly so
+        // the timer doesn't prevent deallocation.
+        versionPulseTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let label = self?.statusLabel else { return }
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.5
-                versionLabel.animator().alphaValue = versionLabel.alphaValue == 0.3 ? 0.6 : 0.3
+                label.animator().alphaValue = label.alphaValue == 0.3 ? 0.6 : 0.3
             }
         }
     }
@@ -263,10 +266,7 @@ class SplashScreenWindow: NSWindow {
             }
         })
 
-        // Auto-close after 3 seconds
-        fadeOutTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.fadeOut() }
-        }
+        // No auto-close — caller controls dismissal via fadeOut().
     }
 
     private func pulseAnimation() {
@@ -285,6 +285,10 @@ class SplashScreenWindow: NSWindow {
                 })
             }
         })
+    }
+
+    func setStatusMessage(_ message: String) {
+        statusLabel?.stringValue = message
     }
 
     func fadeOut() {

@@ -75,6 +75,11 @@ class DistroVersionFetcher {
         versionCache.removeAll()
     }
 
+    /// Clear cache for a single distro (forces fresh fetch)
+    func clearCacheForDistro(_ distroID: String) {
+        versionCache.removeValue(forKey: distroID)
+    }
+
     // MARK: - Ubuntu Version Discovery
     // Structure: /releases/ -> list of versions -> /release/ -> ISO files
 

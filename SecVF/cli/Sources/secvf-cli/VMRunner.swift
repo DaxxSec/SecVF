@@ -63,8 +63,16 @@ class VMRunner: NSObject, VZVirtualMachineDelegate {
     // MARK: - VM Configuration
 
     private func createVMConfiguration() throws -> VZVirtualMachineConfiguration {
-        // Load metadata
+        // Try manifest.json first (AI Sandbox), then metadata.json (standard VMs)
+        let manifestPath = bundlePath + "/manifest.json"
         let metadataPath = bundlePath + "/metadata.json"
+
+        if let manifestData = FileManager.default.contents(atPath: manifestPath),
+           let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+           let vmType = manifest["vm_type"] as? String, vmType.contains("ai-sandbox") {
+            return try createAISandboxConfiguration(manifest: manifest)
+        }
+
         guard let metadataData = FileManager.default.contents(atPath: metadataPath),
               let metadata = try? JSONSerialization.jsonObject(with: metadataData) as? [String: Any] else {
             throw VMRunnerError.metadataNotFound
@@ -172,6 +180,91 @@ class VMRunner: NSObject, VZVirtualMachineDelegate {
         let graphicsDevice = VZVirtioGraphicsDeviceConfiguration()
         graphicsDevice.scanouts = [VZVirtioGraphicsScanoutConfiguration(widthInPixels: 1920, heightInPixels: 1080)]
         config.graphicsDevices = [graphicsDevice]
+
+        return config
+    }
+
+    private func createAISandboxConfiguration(manifest: [String: Any]) throws -> VZVirtualMachineConfiguration {
+        let config = VZVirtualMachineConfiguration()
+
+        // CPU + Memory from manifest
+        let cpuCount = manifest["cpu_count"] as? Int ?? 4
+        config.cpuCount = max(VZVirtualMachineConfiguration.minimumAllowedCPUCount,
+                             min(cpuCount, VZVirtualMachineConfiguration.maximumAllowedCPUCount))
+
+        let memGiB = UInt64(manifest["memory_gib"] as? Int ?? 8)
+        let memorySize = memGiB * 1_073_741_824
+        config.memorySize = max(VZVirtualMachineConfiguration.minimumAllowedMemorySize,
+                               min(memorySize, VZVirtualMachineConfiguration.maximumAllowedMemorySize))
+
+        // macOS boot loader
+        config.bootLoader = VZMacOSBootLoader()
+
+        // macOS platform — AI Sandbox uses different file names
+        let platform = VZMacPlatformConfiguration()
+
+        let hwModelPath = bundlePath + "/hardware-model.bin"
+        guard let hwModelData = FileManager.default.contents(atPath: hwModelPath),
+              let hwModel = VZMacHardwareModel(dataRepresentation: hwModelData) else {
+            throw VMRunnerError.hardwareModelNotFound
+        }
+        platform.hardwareModel = hwModel
+
+        let machineIdPath = bundlePath + "/machine-identifier.bin"
+        guard let machineIdData = FileManager.default.contents(atPath: machineIdPath),
+              let machineId = VZMacMachineIdentifier(dataRepresentation: machineIdData) else {
+            throw VMRunnerError.machineIdNotFound
+        }
+        platform.machineIdentifier = machineId
+
+        let auxPath = bundlePath + "/aux.img"
+        if FileManager.default.fileExists(atPath: auxPath) {
+            platform.auxiliaryStorage = VZMacAuxiliaryStorage(contentsOf: URL(fileURLWithPath: auxPath))
+        }
+
+        config.platform = platform
+
+        // Storage — disk.img (lowercase)
+        let diskPath = bundlePath + "/disk.img"
+        if FileManager.default.fileExists(atPath: diskPath) {
+            let diskAttachment = try VZDiskImageStorageDeviceAttachment(
+                url: URL(fileURLWithPath: diskPath), readOnly: false
+            )
+            if #available(macOS 15.0, *) {
+                config.storageDevices = [VZNVMExpressControllerDeviceConfiguration(attachment: diskAttachment)]
+            } else {
+                config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)]
+            }
+        }
+
+        // Network — NAT
+        let netDevice = VZVirtioNetworkDeviceConfiguration()
+        netDevice.attachment = VZNATNetworkDeviceAttachment()
+        config.networkDevices = [netDevice]
+
+        // vsock — required for exec bridge
+        config.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+
+        // Graphics
+        let graphicsDevice = VZMacGraphicsDeviceConfiguration()
+        graphicsDevice.displays = [VZMacGraphicsDisplayConfiguration(
+            widthInPixels: 1280, heightInPixels: 800, pixelsPerInch: 144
+        )]
+        config.graphicsDevices = [graphicsDevice]
+
+        // Input
+        config.keyboards = [VZUSBKeyboardConfiguration()]
+        config.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
+
+        // Audio
+        let audioDevice = VZVirtioSoundDeviceConfiguration()
+        let audioOutput = VZVirtioSoundDeviceOutputStreamConfiguration()
+        audioOutput.sink = VZHostAudioOutputStreamSink()
+        audioDevice.streams = [audioOutput]
+        config.audioDevices = [audioDevice]
+
+        // Memory balloon
+        config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
 
         return config
     }

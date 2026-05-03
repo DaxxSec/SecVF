@@ -367,6 +367,15 @@ class AISandboxMacVMInstaller {
         }
         try bundle.create()
 
+        // Clean up the bundle directory on any failure so the next attempt
+        // starts fresh without prompting "Replace existing bundle?".
+        var installSucceeded = false
+        defer {
+            if !installSucceeded {
+                try? FileManager.default.removeItem(at: bundle.url)
+            }
+        }
+
         // ── Preflight: aux storage flock ──────────────────────────────────────
         // VZ's `installConfig.validate()` will surface a generic "Invalid
         // virtual machine configuration / Failed to lock auxiliary storage"
@@ -382,14 +391,13 @@ class AISandboxMacVMInstaller {
         try Task.checkCancellation()  // honor task cancellation
 
         // ── Resolve restore image ─────────────────────────────────────────────
-        // Prefer a caller-provided local IPSW (skips the multi-GB download).
-        // Otherwise query Apple's CDN for the latest supported macOS image.
-        let restoreImage: VZMacOSRestoreImage
-        if let local = localIPSW, FileManager.default.fileExists(atPath: local.path) {
-            restoreImage = try await VZMacOSRestoreImage.image(from: local)
-        } else {
-            restoreImage = try await VZMacOSRestoreImage.latestSupported
+        // VZMacOSInstaller only accepts local file URLs — passing a network URL
+        // causes an immediate failure. Always require a pre-downloaded IPSW;
+        // the caller (createAISandboxVM) guards this before starting the task.
+        guard let localIPSW = localIPSW, FileManager.default.fileExists(atPath: localIPSW.path) else {
+            throw AISandboxVMError.noLocalIPSW
         }
+        let restoreImage = try await VZMacOSRestoreImage.image(from: localIPSW)
 
         try Task.checkCancellation()
 
@@ -464,9 +472,10 @@ class AISandboxMacVMInstaller {
         // calls / completion handlers all hop off main while suspended; we
         // come back to main when resumed, which is what VZ wants.
         let vm = VZVirtualMachine(configuration: installConfig)
+        // Use localIPSW directly — VZMacOSInstaller requires a local file URL.
         let installer = VZMacOSInstaller(
             virtualMachine: vm,
-            restoringFromImageAt: restoreImage.url
+            restoringFromImageAt: localIPSW
         )
 
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
@@ -478,11 +487,19 @@ class AISandboxMacVMInstaller {
                 obs?.invalidate()
                 switch result {
                 case .success: cont.resume()
-                case .failure(let err): cont.resume(throwing: err)
+                case .failure(let err):
+                    // Translate AMRestore errors (buried under VZErrorDomain 10007)
+                    // into an actionable message instead of the raw error chain.
+                    if Self.isAMRestoreError(err) {
+                        cont.resume(throwing: AISandboxVMError.ipswIncompatibleOrCorrupt)
+                    } else {
+                        cont.resume(throwing: err)
+                    }
                 }
             }
         }
 
+        installSucceeded = true
         return bundle
     }
 
@@ -516,6 +533,21 @@ class AISandboxMacVMInstaller {
         // The fd close in `defer` already does this; flock(LOCK_UN) is
         // belt-and-suspenders for clarity.
         _ = flock(fd, LOCK_UN)
+    }
+
+    /// Returns true if the given Error is a VZMacOSInstaller failure caused by
+    /// the underlying AMRestore engine (com.apple.MobileDevice.MobileRestore).
+    /// This typically means the IPSW is stale, corrupted, or incompatible with
+    /// the current host. The fix is to re-download via Tools → Download macOS IPSW.
+    private static func isAMRestoreError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == VZErrorDomain, ns.code == 10007 else { return false }
+        var current: NSError? = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+        while let e = current {
+            if e.domain == "com.apple.MobileDevice.MobileRestore" { return true }
+            current = e.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 
     /// Returns true if the given Error is VZ's wrap of POSIX EAGAIN on aux
@@ -564,8 +596,10 @@ class AISandboxMacVMInstaller {
 
     // ── Seal the base bundle ──────────────────────────────────────────────────
     static func sealBundle(_ bundle: AISandboxVMBundle) throws {
-        // Write manifest
+        // Write manifest — include a stable id + name so the CLI can address this bundle
         let manifest: [String: Any] = [
+            "id":        UUID().uuidString,
+            "name":      "ai-sandbox-base-v1",
             "vm_type":   "ai-sandbox-macos-base",
             "version":   "1.0",
             "sealed_at": ISO8601DateFormatter().string(from: Date()),
@@ -661,6 +695,8 @@ enum AISandboxVMError: LocalizedError {
     case diskCreationFailed
     case socketDeviceNotFound
     case provisionScriptMissing
+    case noLocalIPSW
+    case ipswIncompatibleOrCorrupt
 
     var errorDescription: String? {
         switch self {
@@ -672,6 +708,8 @@ enum AISandboxVMError: LocalizedError {
         case .diskCreationFailed:          return "Could not create disk image file"
         case .socketDeviceNotFound:        return "vsock device not found or VM not running"
         case .provisionScriptMissing:      return "provision-macos-vm.sh not found in app bundle resources"
+        case .noLocalIPSW:                 return "No local IPSW found — use Tools → Download macOS IPSW first"
+        case .ipswIncompatibleOrCorrupt:   return "The cached IPSW is incompatible or corrupted. Use Tools → Download macOS IPSW to download a fresh copy, then try again."
         }
     }
 }

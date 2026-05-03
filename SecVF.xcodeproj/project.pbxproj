@@ -26,10 +26,11 @@
 		AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBCCCCBBCCCCCCCCBBCCCBBC /* ISOCacheManager.swift */; };
 		AADDDDAADDDDDDDDAADDDDAA /* PacketCaptureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBDDDDBBDDDDDDDDBBDDDDBB /* PacketCaptureManager.swift */; };
 		AAEEEEAAEEEEEEEEAAEEEEAA /* PacketAnalysisWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEEEEBBEEEEEEEEBBEEEEEE /* PacketAnalysisWindowController.swift */; };
+		AISBT002AISBT002AISBT002 /* AISandboxInstallTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */; };
 		ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ALERT001ALERT001ALERT001 /* AlertPresenter.swift */; };
 		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
+		AVFP002AVFP002AVFP002002 /* AVFPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AVFP001AVFP001AVFP001001 /* AVFPaths.swift */; };
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
-		SECPT002SECPT002SECPT002 /* SecurityPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */; };
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
@@ -41,10 +42,9 @@
 		DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */ = {isa = PBXBuildFile; fileRef = DSTJ001DSTJ001DSTJ001001 /* distros.json */; };
 		DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */; };
 		FF46DBDE2FA55401000AB30D /* AISandboxMacVMConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */; };
-		AISBT002AISBT002AISBT002 /* AISandboxInstallTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */; };
-		AVFP002AVFP002AVFP002002 /* AVFPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AVFP001AVFP001AVFP001001 /* AVFPaths.swift */; };
 		FF46DBE12FA55451000AB30D /* LogRotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBDF2FA55451000AB30D /* LogRotation.swift */; };
 		FF46DBE22FA55451000AB30D /* VsockExecBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */; };
+		FF81F47D2FA7DF0300AADEEC /* IPSWDownloadTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF81F47C2FA7DF0300AADEEC /* IPSWDownloadTracker.swift */; };
 		LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */; };
 		NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */; };
 		NSPR002NSPR002NSPR002002 /* NetworkSwitchProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */; };
@@ -53,6 +53,7 @@
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
 		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
+		SECPT002SECPT002SECPT002 /* SecurityPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */; };
 		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
 		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
 /* End PBXBuildFile section */
@@ -78,8 +79,10 @@
 		8FF8298E27500C070037FA83 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8FF8299127500C070037FA83 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
 		8FF8299327500C070037FA83 /* SecVF.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SecVF.entitlements; sourceTree = "<group>"; };
+		AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxInstallTracker.swift; sourceTree = "<group>"; };
 		ALERT001ALERT001ALERT001 /* AlertPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlertPresenter.swift; sourceTree = "<group>"; };
 		APPCO001APPCO001APPCO001 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
+		AVFP001AVFP001AVFP001001 /* AVFPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVFPaths.swift; sourceTree = "<group>"; };
 		BB1111BB11111111BB111BB1 /* VMConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfiguration.swift; sourceTree = "<group>"; };
 		BB2222BB22222222BB222BB2 /* VMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManager.swift; sourceTree = "<group>"; };
 		BB3333BB33333333BB333BB3 /* VMLibraryWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMLibraryWindowController.swift; sourceTree = "<group>"; };
@@ -96,7 +99,6 @@
 		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
 		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
-		SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityPrimitivesTests.swift; sourceTree = "<group>"; };
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
@@ -108,10 +110,9 @@
 		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxMacVMConfiguration.swift; sourceTree = "<group>"; };
-		AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxInstallTracker.swift; sourceTree = "<group>"; };
-		AVFP001AVFP001AVFP001001 /* AVFPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVFPaths.swift; sourceTree = "<group>"; };
 		FF46DBDF2FA55451000AB30D /* LogRotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogRotation.swift; sourceTree = "<group>"; };
 		FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VsockExecBridge.swift; sourceTree = "<group>"; };
+		FF81F47C2FA7DF0300AADEEC /* IPSWDownloadTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IPSWDownloadTracker.swift; sourceTree = "<group>"; };
 		LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
 		NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkProtocolColors.swift; sourceTree = "<group>"; };
 		NSPR001NSPR001NSPR001001 /* NetworkSwitchProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkSwitchProtocol.swift; sourceTree = "<group>"; };
@@ -120,6 +121,7 @@
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
+		SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityPrimitivesTests.swift; sourceTree = "<group>"; };
 		UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTTypeExtensions.swift; sourceTree = "<group>"; };
 		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -206,6 +208,7 @@
 				8FF8299027500C070037FA83 /* MainMenu.xib */,
 				BB5555BB55555555BB555BB5 /* VMLibraryWindow.xib */,
 				8FF8299327500C070037FA83 /* SecVF.entitlements */,
+				FF81F47C2FA7DF0300AADEEC /* IPSWDownloadTracker.swift */,
 			);
 			path = SecVF;
 			sourceTree = "<group>";
@@ -396,6 +399,7 @@
 				8C487CE62ED3D75C00A90BAF /* ScriptsUSBManager.swift in Sources */,
 				AA8888AA88888888AA888AA8 /* LogViewerWindowController.swift in Sources */,
 				AA9999AA99999999AA999AA9 /* SplashScreenWindow.swift in Sources */,
+				FF81F47D2FA7DF0300AADEEC /* IPSWDownloadTracker.swift in Sources */,
 				AAAAAAAAAAAAAAAAAAAAAAAA /* VirtualNetworkSwitch.swift in Sources */,
 				AABBBBAABBBBBBBBAAABBBAA /* ISOCacheManager.swift in Sources */,
 				AADDDDAADDDDDDDDAADDDDAA /* PacketCaptureManager.swift in Sources */,
