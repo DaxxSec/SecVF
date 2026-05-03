@@ -44,9 +44,29 @@ class MacOSVMInstaller: NSObject {
     private var lastProgressUpdate: Date?
     private var lastBytesWritten: Int64 = 0
     private var downloadStartTime: Date?
+    // Held so we can call finishTasksAndInvalidate(); URLSession strongly retains its
+    // delegate, so without invalidation the installer leaks for the life of the process.
+    private var session: URLSession?
+    // Single-fire guard. didFinishDownloadingTo and didCompleteWithError can both fire
+    // on the same task; without this the completion handler ran twice and the caller
+    // would race a second VM install / cleanup against the first.
+    private var completionFired = false
 
     var progressHandler: ((Double, String) -> Void)?
     var completionHandler: ((Result<URL, Error>) -> Void)?
+
+    private func fireCompletion(_ result: Result<URL, Error>) {
+        guard !completionFired else { return }
+        completionFired = true
+        let handler = completionHandler
+        completionHandler = nil
+        handler?(result)
+    }
+
+    private func invalidateSession() {
+        session?.finishTasksAndInvalidate()
+        session = nil
+    }
 
     // SECURITY: Whitelist of approved Apple CDN domains for IPSW downloads
     // These are the official Apple Content Delivery Network domains
@@ -61,8 +81,9 @@ class MacOSVMInstaller: NSObject {
         super.init()
     }
 
-    // SECURITY: Validate that the URL is from an approved Apple CDN
-    private func validateDownloadURL(_ url: URL) -> Bool {
+    // SECURITY: Validate that the URL is from an approved Apple CDN.
+    // Internal (not private) so unit tests can exercise it directly.
+    func validateDownloadURL(_ url: URL) -> Bool {
         // Ensure HTTPS is used
         guard url.scheme == "https" else {
             print("SECURITY: Rejected non-HTTPS URL: \(url)")
@@ -184,12 +205,26 @@ class MacOSVMInstaller: NSObject {
             return nil
         }
 
-        // Look for any .ipsw file
+        // Look for any .ipsw file. Skip placeholders / truncated downloads
+        // by gating on a minimum size — a partial IPSW left behind by a
+        // crashed/canceled download would otherwise be returned here on the
+        // next boot and silently fed into VZMacOSRestoreImage. Apple's own
+        // signature validation catches this when actually used, but failing
+        // earlier with a clearer error is much better UX. Min size mirrors
+        // ISOCacheManager.getCachedImage's >1MB placeholder gate; real IPSWs
+        // are 12–15 GB.
+        let minIPSWSizeBytes: Int64 = 1_000_000  // 1 MB
         for file in contents {
             if file.hasSuffix(".ipsw") {
                 let ipswPath = directory + file
-                if FileManager.default.fileExists(atPath: ipswPath) {
+                guard FileManager.default.fileExists(atPath: ipswPath) else { continue }
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: ipswPath),
+                   let size = attrs[.size] as? Int64,
+                   size >= minIPSWSizeBytes {
                     return URL(fileURLWithPath: ipswPath)
+                } else {
+                    NSLog("[IPSW] Ignoring truncated/placeholder cached IPSW: %@", ipswPath)
+                    // Don't auto-delete — let the user decide via Tools menu.
                 }
             }
         }
@@ -237,8 +272,13 @@ class MacOSVMInstaller: NSObject {
         config.networkServiceType = .responsiveData // Hint to OS: prioritize throughput
         config.httpMaximumConnectionsPerHost = 8 // Allow more concurrent connections to CDN
 
-        // Use background queue for delegate to avoid blocking main thread (which is blocked by modal dialog)
+        // Use background queue for delegate to avoid blocking main thread (which is blocked by modal dialog).
+        // Store the session so we can invalidate it on completion — URLSession holds a strong ref to its
+        // delegate (us) until finishTasksAndInvalidate() is called.
         let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        self.session = session
+        // Reset single-fire guard for this download attempt.
+        completionFired = false
         NSLog("[IPSW] Creating download task...")
         downloadTask = session.downloadTask(with: url)
 
@@ -282,11 +322,11 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
 
             NSLog("[IPSW] Successfully downloaded IPSW to: %@", destinationURL.path)
             progressHandler?(1.0, "Download complete!")
-            completionHandler?(.success(destinationURL))
+            fireCompletion(.success(destinationURL))
 
         } catch {
             NSLog("[IPSW] Failed to move downloaded file: %@", error.localizedDescription)
-            completionHandler?(.failure(error))
+            fireCompletion(.failure(error))
         }
     }
 
@@ -294,10 +334,14 @@ extension MacOSVMInstaller: URLSessionDownloadDelegate {
                    didCompleteWithError error: Error?) {
         if let error = error {
             NSLog("[IPSW] Download failed with error: %@", error.localizedDescription)
-            completionHandler?(.failure(error))
+            fireCompletion(.failure(error))
         } else {
             NSLog("[IPSW] Download task completed successfully")
         }
+        // Always invalidate the session at task end. didFinishDownloadingTo fires the
+        // completion handler on success and this method always runs after that, so this
+        // is the right place to break the URLSession→delegate retain cycle.
+        invalidateSession()
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,

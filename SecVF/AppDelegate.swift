@@ -9,7 +9,7 @@ The app delegate that sets up and starts the virtual machine.
 
 @main
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineDelegate, NSWindowDelegate {
 
     // Multi-VM architecture - manage separate windows for each running VM
     private var vmWindows: [UUID: NSWindow] = [:]
@@ -1082,6 +1082,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             virtualMachineConfiguration.consoleDevices = [createSpiceAgentConsoleDeviceConfiguration()]
         }
 
+        // Add a virtio socket device (vsock) only for macOS guests — that's
+        // where the AI sandbox exec agent listens on port 2222. Linux VMs in
+        // SecVF (kali router etc.) don't currently use vsock, and adding the
+        // device unconditionally caused VM-startup hangs in testing. Limit to
+        // macOS for now; revisit if a Linux-side use case appears.
+        if isMacOS {
+            virtualMachineConfiguration.socketDevices = [VZVirtioSocketDeviceConfiguration()]
+            NSLog("[VM] Added virtio socket device (vsock) for host-guest IPC")
+        }
+
         NSLog("[VM] Validating virtual machine configuration...")
         do {
             try virtualMachineConfiguration.validate()
@@ -1171,6 +1181,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             // SECURITY: Start security monitoring for this VM
             VMSecurityMonitor.shared.startMonitoring(vm: vmConfig, virtualMachine: virtualMachine)
 
+            // Expose the AI Sandbox vsock exec channel as a UDS at
+            // /tmp/secvf-exec-<vmid>.sock so cross-process / cross-user
+            // clients (e.g. ai-mon's SecVFTracer, secvf-cli vm exec) can
+            // drive the guest. No-op for VMs without a vsock device.
+            VsockExecBridgeManager.shared.startBridge(
+                vmId: vmConfig.id, vmName: vmConfig.name, vm: virtualMachine
+            )
+
             let needsInstall = self.needsInstallFlags[vmId] ?? false
 
             // For macOS installation, use the installer instead of manually starting the VM
@@ -1197,6 +1215,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
                     VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
                     // Stop security monitoring on failure
                     VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+                    VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
                     // Disconnect from virtual switch on failure
                     if vmConfig.networkConfig.mode == .virtual {
                         VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
@@ -1243,6 +1262,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Clean up any stray windows from previous sessions (macOS window restoration)
         closeAllVMWindows()
+
+        // Prune old logs and rotate the audit log on launch — bounded retention
+        // for accumulated network/security/error files in ~/.avf/logs/.
+        LogRotation.runAtLaunch()
 
         // Setup Monitoring menu
         setupMonitoringMenu()
@@ -1406,6 +1429,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         )
         rebuildISOItem.target = self
         toolsMenu.addItem(rebuildISOItem)
+
+        toolsMenu.addItem(NSMenuItem.separator())
+
+        // Download macOS IPSW (one-time cache for any macOS VM creation flow)
+        let downloadIPSWItem = NSMenuItem(
+            title: "Download macOS IPSW…",
+            action: #selector(downloadMacOSIPSW),
+            keyEquivalent: ""
+        )
+        downloadIPSWItem.target = self
+        toolsMenu.addItem(downloadIPSWItem)
+
+        // Create AI Sandbox VM (programmatic AISandboxMacVMInstaller path)
+        let createSandboxItem = NSMenuItem(
+            title: "Create AI Sandbox VM…",
+            action: #selector(createAISandboxVM),
+            keyEquivalent: ""
+        )
+        createSandboxItem.target = self
+        toolsMenu.addItem(createSandboxItem)
 
         // Create top-level menu item
         let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
@@ -1820,6 +1863,286 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
         }
     }
 
+    // MARK: - AI Sandbox VM creation
+
+    /// Build a new AI Sandbox base bundle programmatically. Reuses any
+    /// IPSW already in `~/.avf/MacOS/` (avoids 13 GB redownload). Runs
+    /// install + provision + seal in the background and surfaces progress
+    /// + completion alerts to the user.
+    @objc private func createAISandboxVM() {
+        // Confirm with the user — this takes 30-60 min and is destructive
+        // if a base bundle already exists.
+        let baseBundleURL = AISandboxDefaults.baseBundle
+        let bundleExists = FileManager.default.fileExists(atPath: baseBundleURL.path)
+
+        let confirm = NSAlert()
+        if bundleExists {
+            confirm.messageText = "Replace existing AI Sandbox VM?"
+            confirm.informativeText = """
+            A base bundle already exists at:
+                \(baseBundleURL.path)
+
+            "Delete & Recreate" will remove it (including ~70 GB of disk.img)
+            and start a fresh install.
+            """
+            confirm.alertStyle = .warning
+            confirm.addButton(withTitle: "Delete & Recreate")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+
+            // Remove the stale bundle. We do this synchronously here on main
+            // — files are local, fast even at 70 GB sparse since most of
+            // disk.img is unused.
+            do {
+                try FileManager.default.removeItem(at: baseBundleURL)
+                NSLog("[AISandbox] Removed stale bundle at %@", baseBundleURL.path)
+            } catch {
+                showAlert(
+                    title: "Could not remove existing bundle",
+                    message: "\(error.localizedDescription)\n\nManually run:\n  rm -rf \(baseBundleURL.path)\n\nthen try again."
+                )
+                return
+            }
+        } else {
+            confirm.messageText = "Create AI Sandbox VM?"
+            confirm.informativeText = """
+            Builds a new AI Sandbox base bundle at:
+                \(baseBundleURL.path)
+
+            This will:
+              1. Install macOS via VZMacOSInstaller (uses cached IPSW if present)
+              2. Boot the guest and run provision-macos-vm.sh via vsock
+              3. Seal the bundle as the immutable base for session VMs
+
+            Total time: ~30-60 minutes. The host stays usable.
+            """
+            confirm.alertStyle = .informational
+            confirm.addButton(withTitle: "Create")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        // Look for a cached IPSW to skip the download.
+        let cachedIPSW = locateCachedIPSW()
+        if let ipsw = cachedIPSW {
+            NSLog("[AISandbox] Reusing cached IPSW: %@", ipsw.path)
+        } else {
+            NSLog("[AISandbox] No cached IPSW found — will download from Apple CDN")
+        }
+
+        // Drive the tracker singleton — VMLibraryWindowController watches it
+        // and renders an "installing" entry in the Running VMs sidebar.
+        AISandboxInstallTracker.shared.begin()
+
+        Task { [weak self] in
+            do {
+                // Phase 1: install
+                let bundle = try await AISandboxMacVMInstaller.downloadAndInstall(
+                    localIPSW: cachedIPSW,
+                    progress: { fraction in
+                        DispatchQueue.main.async {
+                            AISandboxInstallTracker.shared.updateInstallFraction(fraction)
+                        }
+                    }
+                )
+
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.provisioning)
+                }
+                // Phase 2: provision
+                try await AISandboxMacVMInstaller.provisionBundle(bundle)
+
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.sealing)
+                }
+                // Phase 3: seal
+                try AISandboxMacVMInstaller.sealBundle(bundle)
+
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.finished)
+                    self?.showAlert(
+                        title: "AI Sandbox VM Ready",
+                        message: """
+                        Base bundle sealed at:
+                            \(bundle.url.path)
+
+                        Use AISandboxVMSession to clone + boot a session VM.
+                        """
+                    )
+                    AISandboxInstallTracker.shared.reset()
+                }
+            } catch {
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.fail(with: error.localizedDescription)
+                    self?.showAlert(
+                        title: "AI Sandbox VM creation failed",
+                        message: "\(error.localizedDescription)\n\nFull: \(String(describing: error))"
+                    )
+                    AISandboxInstallTracker.shared.reset()
+                }
+            }
+        }
+    }
+
+    /// Tools → Download macOS IPSW. One-time pull of the latest Apple-supported
+    /// IPSW into `~/.avf/MacOS/`. Subsequent macOS VM creation flows
+    /// (regular + AI Sandbox) reuse the cached file and skip the multi-GB
+    /// re-download.
+    @objc private func downloadMacOSIPSW() {
+        Task { @MainActor in
+            let restoreImage: VZMacOSRestoreImage
+            do {
+                restoreImage = try await VZMacOSRestoreImage.latestSupported
+            } catch {
+                showAlert(
+                    title: "Could not query Apple for the latest IPSW",
+                    message: error.localizedDescription
+                )
+                return
+            }
+
+            let osv = restoreImage.operatingSystemVersion
+            let versionStr = "\(osv.majorVersion).\(osv.minorVersion)\(osv.patchVersion > 0 ? ".\(osv.patchVersion)" : "")"
+            let buildStr = restoreImage.buildVersion
+            let filename = "UniversalMac_\(versionStr)_\(buildStr)_Restore.ipsw"
+
+            let macOSDir = URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent(".avf/MacOS", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: macOSDir, withIntermediateDirectories: true
+            )
+            let destURL = macOSDir.appendingPathComponent(filename)
+
+            // Confirm + handle existing cache.
+            if FileManager.default.fileExists(atPath: destURL.path) {
+                let alert = NSAlert()
+                alert.messageText = "IPSW already cached"
+                alert.informativeText = """
+                \(filename) is already at:
+                    \(destURL.path)
+
+                Replace it with a fresh download?
+                """
+                alert.addButton(withTitle: "Replace")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                try? FileManager.default.removeItem(at: destURL)
+            } else {
+                let alert = NSAlert()
+                alert.messageText = "Download \(filename)?"
+                alert.informativeText = """
+                Source: Apple (\(restoreImage.url.absoluteString))
+                Destination: \(destURL.path)
+
+                Size: ~13-16 GB. Time depends on your connection.
+                """
+                alert.addButton(withTitle: "Download")
+                alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+
+            // Progress alert (non-blocking sheet on the library window when
+            // available — the caller stays usable).
+            let progressAlert = NSAlert()
+            progressAlert.messageText = "Downloading macOS IPSW"
+            progressAlert.informativeText = "\(filename) — 0%"
+            progressAlert.alertStyle = .informational
+            progressAlert.addButton(withTitle: "Run in Background")
+            let progressBar = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 360, height: 16))
+            progressBar.style = .bar
+            progressBar.isIndeterminate = false
+            progressBar.minValue = 0
+            progressBar.maxValue = 1
+            progressAlert.accessoryView = progressBar
+            let onWindow = libraryWindowController?.window
+            if let win = onWindow {
+                progressAlert.beginSheetModal(for: win) { _ in /* dismissed */ }
+            }
+
+            // Download via URLSession + KVO on Progress.
+            do {
+                try await downloadFile(
+                    from: restoreImage.url,
+                    to: destURL,
+                    progress: { fraction in
+                        progressBar.doubleValue = fraction
+                        progressAlert.informativeText = "\(filename) — \(Int(fraction * 100))%"
+                    }
+                )
+                if let win = onWindow {
+                    win.endSheet(progressAlert.window)
+                }
+                showAlert(
+                    title: "IPSW Downloaded",
+                    message: "Saved to:\n    \(destURL.path)\n\nNew macOS VMs will reuse this without re-downloading."
+                )
+            } catch {
+                if let win = onWindow {
+                    win.endSheet(progressAlert.window)
+                }
+                showAlert(
+                    title: "Download failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    /// URLSession download with progress KVO. Moves the temp file into place
+    /// atomically on success.
+    @MainActor
+    private func downloadFile(
+        from source: URL,
+        to destination: URL,
+        progress: @escaping (Double) -> Void
+    ) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let task = URLSession.shared.downloadTask(with: source) { tmpURL, _, err in
+                if let err = err {
+                    cont.resume(throwing: err)
+                    return
+                }
+                guard let tmp = tmpURL else {
+                    cont.resume(throwing: NSError(domain: "downloadFile", code: 0,
+                        userInfo: [NSLocalizedDescriptionKey: "no temp URL from URLSession"]))
+                    return
+                }
+                do {
+                    try? FileManager.default.removeItem(at: destination)
+                    try FileManager.default.moveItem(at: tmp, to: destination)
+                    cont.resume()
+                } catch {
+                    cont.resume(throwing: error)
+                }
+            }
+            // KVO on the task's progress fires off-main; hop back to update UI.
+            let observation = task.progress.observe(\.fractionCompleted, options: [.new]) { p, _ in
+                let f = p.fractionCompleted
+                DispatchQueue.main.async { progress(f) }
+            }
+            // Keep observation alive until the task finishes.
+            task.resume()
+            // We can't easily dispose `observation` without keeping a ref;
+            // letting it drop with the task is fine — it stops firing once
+            // the underlying NSProgress is released alongside the task.
+            _ = observation
+        }
+    }
+
+    /// Looks for a cached macOS IPSW under `~/.avf/MacOS/` — if found,
+    /// `AISandboxMacVMInstaller.downloadAndInstall` will use it and skip
+    /// the Apple CDN download.
+    private func locateCachedIPSW() -> URL? {
+        let macOSDir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent(".avf/MacOS", isDirectory: true)
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: macOSDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+        return entries.first(where: { $0.pathExtension.lowercased() == "ipsw" })
+    }
+
     private func showAlert(title: String, message: String) {
         DispatchQueue.main.async {
             let alert = NSAlert()
@@ -1935,6 +2258,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
             // 3. Stop security monitoring
             VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+            VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
 
             // 4. Update status
             VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
@@ -2013,6 +2337,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // 3. Stop security monitoring
         VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+        VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
 
         // 4. Update status
         VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
@@ -2060,6 +2385,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             // 3. Stop security monitoring
             if let config = vmConfig {
                 VMSecurityMonitor.shared.stopMonitoring(vmID: config.id)
+                VsockExecBridgeManager.shared.stopBridge(vmId: config.id)
                 VMManager.shared.updateVMStatus(config, status: .stopped)
             }
 
@@ -2178,6 +2504,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
 
         // SECURITY: Stop security monitoring
         VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+        VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
 
         // NETWORK: Disconnect from virtual switch if in virtual network mode
         if vmConfig.networkConfig.mode == .virtual {

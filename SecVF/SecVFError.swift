@@ -50,6 +50,9 @@ enum SecVFError: LocalizedError {
     case networkConfigurationFailed(reason: String)
     case virtualSwitchConnectionFailed
 
+    // MARK: - ISO Verification Errors
+    case checksumUnavailable(distro: String, reason: String)
+
     // MARK: - Graphics Errors
     case graphicsConfigurationFailed
 
@@ -130,6 +133,10 @@ enum SecVFError: LocalizedError {
         case .virtualSwitchConnectionFailed:
             return "Failed to connect to virtual network switch"
 
+        // ISO Verification
+        case .checksumUnavailable(let distro, let reason):
+            return "SECURITY: SHA256 checksum unavailable for \(distro) — refusing to use unverified ISO (\(reason))"
+
         // Graphics
         case .graphicsConfigurationFailed:
             return "Failed to configure graphics device"
@@ -172,6 +179,8 @@ enum SecVFError: LocalizedError {
             return "Only use scripts from trusted locations within your home directory or app bundle."
         case .scriptsDiskCreationFailed, .scriptsISOCreationFailed:
             return "Check that you have write permissions to ~/.avf and sufficient disk space."
+        case .checksumUnavailable:
+            return "Wait for the official mirror's checksum file to come back online, or pick a distro version whose checksum can be fetched. Do not boot an unverified ISO."
         default:
             return nil
         }

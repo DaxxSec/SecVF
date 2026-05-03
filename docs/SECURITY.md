@@ -98,7 +98,103 @@ macOS IPSW downloads implement multi-layer security:
 
 See `MacOSVMInstaller.swift` security header for complete details.
 
-### 6. **Entitlements & Sandboxing**
+### 6. **AI Sandbox Exec Channel** (vsock + UDS bridge)
+
+The AI Sandbox guest VM (`AISandboxMacVMConfiguration`) ships with a vsock
+exec agent at port 2222 inside the guest, plus a host-side bridge that
+exposes that channel as a Unix domain socket at `/tmp/secvf-exec-<UUID>.sock`
+so cross-process clients (e.g. `secvf-cli vm exec`, ai-mon's SecVFTracer)
+can drive the guest.
+
+This is a deliberate trust boundary, defended by **three layered controls**:
+
+#### A. Host-side peer authentication (`VsockExecBridge`)
+
+The UDS is mode `0666` so any local user can `connect()`, but the bridge
+calls `getpeereid()` on each accept and refuses the connection if the
+peer's uid is not on an allowlist:
+
+- Default allowlist: only the user running SecVF.app.
+- Opt-in additions: users (numeric uid or username) listed in
+  `~/.avf/config/exec-bridge-allowlist`, one per line, comments `#`.
+- Reload on every connection — config edits take effect immediately.
+
+Refused connections see `secvf-exec-bridge: uid N not in allowlist` and
+the bridge logs the event via `NSLog`.
+
+#### B. Guest-side mode-prefix routing (`ai-sandbox-exec-handler.sh`)
+
+The exec agent in the guest reads one command line per connection and
+routes by prefix:
+
+| Prefix     | User                | Timeout | Use case                          |
+| ---------- | ------------------- | ------- | --------------------------------- |
+| (none)     | `ai-sandbox-agent`  | 120 s   | Default — sandbox-confined exec   |
+| `ROOT `    | `root`              | 120 s   | Setup, introspection, `ps`/`lsof` |
+| `STREAM `  | `root`              | none    | Long-lived observability probes   |
+
+Default mode runs as a non-admin user (`uid 601`) with a 120 s ceiling —
+that's the right shape for general agent commands. ROOT and STREAM are
+elevated and should only be reached over an authenticated channel.
+
+#### C. Guest-side STREAM binary whitelist
+
+Even if the host-side gate ever fails open, STREAM mode is restricted to
+a small set of observability binaries:
+
+```
+dtrace fs_usage ktrace top vm_stat memory_pressure sysctl tail log
+```
+
+Anything else in STREAM exits with code 64 and a rejection message. So
+the worst-case outcome of a bridge auth bypass is an attacker running
+`top` as root inside an already-compromised guest — not arbitrary code
+execution.
+
+#### Trust model summary
+
+| Actor                              | Can reach the guest?                          |
+| ---------------------------------- | --------------------------------------------- |
+| Process running as the SecVF user  | Yes — full exec, default                      |
+| Process running as another local user, on the allowlist | Yes — full exec, opt-in   |
+| Process running as another local user, NOT on the allowlist | No — bridge refuses    |
+| Remote attacker over the network   | No — UDS is local-only                        |
+| Compromised guest (privilege gain) | n/a — already inside the sandbox; controls do not apply outward |
+
+#### What this channel deliberately allows
+
+- `secvf-cli vm exec OpenClawVM --command 'ps -A'` — list guest processes
+- `secvf-cli vm exec OpenClawVM --root --command 'lsof -p $PID -d 1,2'` — privileged introspection
+- `secvf-cli vm exec OpenClawVM --stream --command 'dtrace -p $PID -s writemon.d'` — live syscall capture for ai-mon
+
+#### Cross-user reminder
+
+If you add another user to the allowlist, you grant them the ability to
+run `dtrace`/`ps`/etc. inside the guest as root. They can read anything
+the guest has. They CANNOT use this channel to gain privileges on the
+host — the bridge proxies bytes, it doesn't run host-side commands.
+
+### 7. **VirtioFS Workspace Direction**
+
+The AI Sandbox guest mounts three host directories via VirtioFS:
+
+| Guest path     | Host path                          | Mode | Purpose                        |
+| -------------- | ---------------------------------- | ---- | ------------------------------ |
+| `/workspace`   | `~/ai-sandbox-workspace/`          | rw   | Agent's writable workspace     |
+| `/sessions-ro` | `~/.avf/AISandbox/sessions/`       | ro   | Prior session history          |
+| `/anchor-ro`   | `~/ai-sandbox-workspace/anchor/`   | ro   | Identity anchor (immutable)    |
+
+**`/workspace` is the only path the guest can write to host-visible
+storage.** A compromised guest can drop files there. Host-side processes
+that consume `/workspace` content (analysis tools, scripts, etc.) MUST
+treat its contents as untrusted input — same threat model as a download
+from the internet.
+
+The dtrace telemetry JSONL files (`dtrace-exec.jsonl`, etc.) are written
+into `/workspace/.csirt-telemetry/` by the guest; consumers on the host
+should sanity-check structure before parsing.
+
+### 8. **Entitlements & Sandboxing**
 
 Required entitlements (`SecVF.entitlements`):
 ```xml
@@ -112,6 +208,31 @@ Required entitlements (`SecVF.entitlements`):
 - ❌ No camera/microphone access (except guest VM audio)
 - ❌ No shared folder capabilities
 - ❌ No automatic login items
+
+### 9. **Log Retention & PII Considerations**
+
+SecVF writes three log streams to `~/.avf/logs/`:
+
+| File                            | Contents                                    | PII Risk |
+| ------------------------------- | ------------------------------------------- | -------- |
+| `network-YYYY-MM-DD.log`        | L2 metadata: MACs, EtherType, sizes         | Low — metadata only, no payloads |
+| `security-YYYY-MM-DD.log`       | VM lifecycle, fs events, guest stats alerts | Low — VM names + thresholds |
+| `error-audit.log`               | Typed error chain w/ paths                  | Medium — may include filesystem paths from the running user's home |
+
+**No payload bodies are logged by default.** Packet payloads only land on
+disk if you explicitly start a tshark capture (the `Capture` tab), in
+which case they're written under `/var/captures/` inside the Kali router
+VM (not the host). PCAP files there contain everything the guests sent
+over the virtual switch.
+
+**Retention is currently unbounded.** Old log files accumulate in
+`~/.avf/logs/`. Review and prune periodically; the `.bundle/` and
+captured PCAP directories deserve the same treatment.
+
+If you use ai-mon alongside SecVF and have IP enrichment enabled,
+ai-mon's `~/.cache/ai-mon/ipinfo.json` contains every public IP a
+tracked AI process touched, with a one-week TTL. ipinfo.io itself logs
+the lookup on their side. Use `ai-mon --no-enrich` to disable.
 
 ## Best Practices for Malware Analysis
 
@@ -187,6 +308,9 @@ Required entitlements (`SecVF.entitlements`):
 ❌ **Social engineering** - User copying files between host/guest
 ❌ **Clipboard exfiltration** - If spice-vdagent is installed
 ❌ **Display spoofing** - Sophisticated malware may fake VM display
+❌ **Privileged peers on the exec-bridge allowlist** - any uid you authorize for `/tmp/secvf-exec-*.sock` can drive the guest as root via STREAM mode (within the binary whitelist). Curate the allowlist deliberately.
+❌ **A compromised guest dropping artifacts into `/workspace`** - by design, the workspace is rw. Host-side consumers must treat workspace contents as untrusted.
+❌ **Unauthenticated DistributedNotificationCenter for CLI ops (KNOWN GAP).** SecVF.app's CLI lifecycle handlers (`com.secvf.cli.start` / `.stop` / `.force-stop`) listen on `DistributedNotificationCenter` without authenticating the poster. Any local process on the machine can post these notifications and the app will act on them — start a VM by name, stop a running VM, force-stop one mid-analysis. **Impact**: VM-state tampering by any local user (not RCE; not host privilege escalation). **Workaround until fixed**: keep the analysis Mac single-tenant when running SecVF, or accept the risk on multi-user setups. **Planned fix**: migrate CLI lifecycle ops to the authenticated UDS bridge that the AI Sandbox exec channel already uses, then drop the DistributedNotificationCenter handlers.
 
 ## Incident Response
 
@@ -210,6 +334,16 @@ Required entitlements (`SecVF.entitlements`):
    ```bash
    ps aux | grep -v grep | grep -i malware
    lsof | grep <VM-bundle-path>
+   ```
+
+5. **Inspect cross-process bridges and the workspace**
+   ```bash
+   # Live exec bridges — should match running VMs.
+   ls -la /tmp/secvf-exec-*.sock
+   # Anything dropped into the writable host-mounted workspace by the guest.
+   ls -laR ~/ai-sandbox-workspace/
+   # Who has been allowed to drive the bridge?
+   cat ~/.avf/config/exec-bridge-allowlist 2>/dev/null
    ```
 
 5. **If breach confirmed**

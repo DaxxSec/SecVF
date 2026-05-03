@@ -73,7 +73,7 @@ final class VirtualNetworkSwitchTests: XCTestCase {
         // Test Router description
         config.mode = .virtual
         config.isRouter = true
-        XCTAssertEqual(config.description, "Virtual Network Router")
+        XCTAssertEqual(config.description, "Router (Dual-NIC: Switch + NAT)")
 
         // Test Client with router description
         config.mode = .virtual
@@ -101,7 +101,7 @@ final class VirtualNetworkSwitchTests: XCTestCase {
         // Then
         XCTAssertTrue(linuxConfig.networkConfig.isRouter)
         XCTAssertEqual(linuxConfig.networkConfig.mode, .virtual)
-        XCTAssertEqual(linuxConfig.networkConfig.description, "Virtual Network Router")
+        XCTAssertEqual(linuxConfig.networkConfig.description, "Router (Dual-NIC: Switch + NAT)")
     }
 
     func testMacOSVMConfiguredWithRouter() {
@@ -275,8 +275,8 @@ final class VirtualNetworkSwitchTests: XCTestCase {
         // Then - Both should be configured as routers
         XCTAssertTrue(router1.networkConfig.isRouter)
         XCTAssertTrue(router2.networkConfig.isRouter)
-        XCTAssertEqual(router1.networkConfig.description, "Virtual Network Router")
-        XCTAssertEqual(router2.networkConfig.description, "Virtual Network Router")
+        XCTAssertEqual(router1.networkConfig.description, "Router (Dual-NIC: Switch + NAT)")
+        XCTAssertEqual(router2.networkConfig.description, "Router (Dual-NIC: Switch + NAT)")
     }
 
     func testClientVMsSplitBetweenRouters() {
