@@ -59,22 +59,43 @@ class PacketCaptureManager {
 
     // MARK: - Combine Publishers (reactive updates)
 
+    // Publishers below all `.receive(on: DispatchQueue.main)` at the publisher
+    // boundary. The internal subjects fire on whichever queue called `send()`
+    // (often `captureQueue`/`parseQueue`), and SwiftUI / AppKit subscribers
+    // that update views must be hopped to main. Rather than make every
+    // subscriber remember to add the hop, we apply it once here.
+
     /// Publisher that emits each captured packet as it arrives
     private let packetSubject = PassthroughSubject<CapturedPacket, Never>()
     var packetsPublisher: AnyPublisher<CapturedPacket, Never> {
-        packetSubject.eraseToAnyPublisher()
+        packetSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
     /// Publisher that emits protocol statistics updates
     private let statsSubject = PassthroughSubject<[ProtocolCount], Never>()
     var protocolStatsPublisher: AnyPublisher<[ProtocolCount], Never> {
-        statsSubject.eraseToAnyPublisher()
+        statsSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 
     /// Publisher that emits capture state changes (true = capturing, false = stopped)
     private let captureStateSubject = CurrentValueSubject<Bool, Never>(false)
     var captureStatePublisher: AnyPublisher<Bool, Never> {
-        captureStateSubject.eraseToAnyPublisher()
+        captureStateSubject.receive(on: DispatchQueue.main).eraseToAnyPublisher()
+    }
+
+    // Bounded ring buffer of recent tshark stderr lines. Previously dumped
+    // to FileHandle.nullDevice, which made "capture panel is empty" bug
+    // reports nearly impossible to diagnose. We keep the last ~64 lines so
+    // they can be surfaced with `getRecentTsharkErrors()` (and to os_log).
+    private static let maxStderrLines = 64
+    private let stderrLock = NSLock()
+    private var recentTsharkStderr: [String] = []
+    private var tsharkStderrPipe: Pipe?
+
+    func getRecentTsharkErrors() -> [String] {
+        stderrLock.lock()
+        defer { stderrLock.unlock() }
+        return recentTsharkStderr
     }
 
     // Capture state
@@ -175,18 +196,34 @@ class PacketCaptureManager {
             "--no-duplicate-keys" // Prevent duplicate JSON keys
         ]
 
-        // Setup output pipe
+        // Setup output pipe + stderr ring buffer. Discarding tshark stderr
+        // wholesale used to make "capture panel is empty" tickets effectively
+        // undebuggable (item 18 of code review). We now keep the last 64
+        // stderr lines and emit each to os_log.
         let outputPipe = Pipe()
+        let errorPipe = Pipe()
         process.standardOutput = outputPipe
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errorPipe
 
         tsharkOutputPipe = outputPipe
+        tsharkStderrPipe = errorPipe
 
         // Handle tshark JSON output
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
             self?.parseTsharkOutput(data)
+        }
+
+        // Handle tshark stderr — log + retain in ring buffer.
+        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty,
+                  let text = String(data: data, encoding: .utf8) else { return }
+            for rawLine in text.split(whereSeparator: { $0.isNewline }) {
+                let line = String(rawLine)
+                self?.appendTsharkStderr(line)
+            }
         }
 
         // Handle process termination
@@ -252,6 +289,16 @@ class PacketCaptureManager {
         handleCaptureStop()
     }
 
+    private func appendTsharkStderr(_ line: String) {
+        os_log("%{public}@", log: logger, type: .error, "[tshark stderr] \(line)")
+        stderrLock.lock()
+        recentTsharkStderr.append(line)
+        if recentTsharkStderr.count > Self.maxStderrLines {
+            recentTsharkStderr.removeFirst(recentTsharkStderr.count - Self.maxStderrLines)
+        }
+        stderrLock.unlock()
+    }
+
     private func handleCaptureStop() {
         guard isCapturing else { return }
         isCapturing = false
@@ -259,6 +306,8 @@ class PacketCaptureManager {
         // Clear output handler
         tsharkOutputPipe?.fileHandleForReading.readabilityHandler = nil
         tsharkOutputPipe = nil
+        tsharkStderrPipe?.fileHandleForReading.readabilityHandler = nil
+        tsharkStderrPipe = nil
         tsharkProcess = nil
 
         // Remove FIFO
@@ -283,6 +332,8 @@ class PacketCaptureManager {
         tsharkProcess?.terminate()
         tsharkProcess = nil
         tsharkOutputPipe = nil
+        tsharkStderrPipe?.fileHandleForReading.readabilityHandler = nil
+        tsharkStderrPipe = nil
     }
 
     // MARK: - Packet Capture (called from VirtualNetworkSwitch)

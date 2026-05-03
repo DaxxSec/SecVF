@@ -48,10 +48,20 @@ class VirtualSwitchPort {
     var lastRateLimitReset: Date = Date()
     var broadcastCountLastSecond: Int = 0
 
+    // Per-port serial write queue. Without this, sendPacket() would block the global
+    // switchQueue on every write, so a single slow or wedged guest (recv buffer full)
+    // would stall MAC learning and packet forwarding for every other guest, and a
+    // disconnectPortSync from the main thread would deadlock-wait behind the write.
+    let writeQueue: DispatchQueue
+
     init(vmId: UUID, vmName: String, socketPath: String) {
         self.vmId = vmId
         self.vmName = vmName
         self.socketPath = socketPath
+        self.writeQueue = DispatchQueue(
+            label: "com.secvf.virtualswitch.port.\(vmId.uuidString)",
+            qos: .userInitiated
+        )
     }
 }
 
@@ -73,6 +83,22 @@ class VirtualNetworkSwitch {
     private var totalPacketsBroadcast: UInt64 = 0
 
     private var isRunning = false
+
+    /// Threat-model default: a guest spoofing another's MAC is hostile and
+    /// the packet is dropped. Logging-only was the previous behaviour and
+    /// fundamentally incompatible with this app's stated threat model
+    /// ("hostile guest"). Set to `false` to fall back to log-only — useful
+    /// for debugging benign MAC reassignments after a guest reboot, but
+    /// should not be the default.
+    var dropOnMACSpoof: Bool = true
+
+    /// Per-port socket buffer size. macOS defaults SO_SNDBUF/SO_RCVBUF on a
+    /// SOCK_DGRAM socketpair to ~8 KB, smaller than the 9000-byte jumbo
+    /// frame limit accepted by validatePacket. The kernel silently drops
+    /// frames between the buffer size and the validator's limit, so we
+    /// raise both buffers to comfortably cover jumbo + several queued frames.
+    /// 256 KB is well within macOS's per-socket SO_SNDBUF/SO_RCVBUF maximums.
+    private static let socketBufferBytes: Int32 = 256 * 1024
 
     private init() {
         setupSwitch()
@@ -101,20 +127,7 @@ class VirtualNetworkSwitch {
 
             // Disconnect all ports INLINE (don't call disconnectPort which queues more async work)
             for (_, port) in self.ports {
-                port.isConnected = false
-
-                // Clear handler to stop receiving
-                port.readHandle?.readabilityHandler = nil
-
-                // DON'T explicitly close() - causes EXC_BAD_ACCESS if handler is still running
-                // FileHandle was created with closeOnDealloc: true, so just clear references
-                port.readHandle = nil
-                port.writeHandle = nil
-
-                // Remove from MAC table
-                if let mac = port.macAddress {
-                    self.macTable.removeValue(forKey: mac)
-                }
+                self.tearDownPortInline(port)
             }
 
             self.ports.removeAll()
@@ -123,6 +136,21 @@ class VirtualNetworkSwitch {
 
             self.log("Virtual switch shutdown complete")
         }
+    }
+
+    /// Shared per-port teardown used by shutdown() and performDisconnect().
+    /// Must be called on switchQueue. Mirrors performDisconnect's invariants:
+    /// cancel any NWConnection, drop the readability handler, do NOT close()
+    /// the FileHandle (closeOnDealloc handles that), remove from MAC table.
+    private func tearDownPortInline(_ port: VirtualSwitchPort) {
+        port.connection?.cancel()
+        port.isConnected = false
+        port.readHandle?.readabilityHandler = nil
+        if let mac = port.macAddress {
+            macTable.removeValue(forKey: mac)
+        }
+        port.readHandle = nil
+        port.writeHandle = nil
     }
 
     // MARK: - Port Management
@@ -150,6 +178,24 @@ class VirtualNetworkSwitch {
 
             let switchFd = fds[0]  // Switch side
             let vmFd = fds[1]      // VM side
+
+            // Tune SO_SNDBUF/SO_RCVBUF on both ends to comfortably hold a
+            // jumbo (9000-byte) frame plus headroom. The default ~8 KB on
+            // macOS SOCK_DGRAM socketpairs would silently drop frames whose
+            // size sits between the buffer cap and validatePacket's 9000-byte
+            // limit (item 17 of code review). Failures are logged but
+            // non-fatal — a smaller buffer still works for sub-MTU traffic.
+            var bufBytes = Self.socketBufferBytes
+            let setBuf: (Int32, Int32, String) -> Void = { fd, opt, name in
+                if setsockopt(fd, SOL_SOCKET, opt, &bufBytes, socklen_t(MemoryLayout<Int32>.size)) != 0 {
+                    NSLog("[VirtualSwitch] setsockopt %@ on fd %d failed: %s",
+                          name, fd, strerror(errno))
+                }
+            }
+            setBuf(switchFd, SO_SNDBUF, "SO_SNDBUF")
+            setBuf(switchFd, SO_RCVBUF, "SO_RCVBUF")
+            setBuf(vmFd, SO_SNDBUF, "SO_SNDBUF")
+            setBuf(vmFd, SO_RCVBUF, "SO_RCVBUF")
 
             // Create FileHandle for the switch side
             // This socket is bidirectional - we can both read and write on it
@@ -190,33 +236,18 @@ class VirtualNetworkSwitch {
     }
 
     /// Shared disconnect implementation. Must be called on switchQueue.
+    /// Uses tearDownPortInline so shutdown() and disconnect produce identical
+    /// teardown — previously these diverged (shutdown was missing the
+    /// connection.cancel() call from this path).
     private func performDisconnect(vmId: UUID) {
-        // Use removeValue for atomic check-and-remove to prevent double processing
+        // Use removeValue for atomic check-and-remove to prevent double processing.
+        // Any in-flight readability handler is blocked on switchQueue.sync so
+        // it will see the port removed and bail out safely. Don't explicitly
+        // close() the FileHandle — it was created with closeOnDealloc: true.
         guard let port = ports.removeValue(forKey: vmId) else {
-            // Already disconnected (race with readabilityHandler or shutdown)
             return
         }
-
-        port.connection?.cancel()
-        port.isConnected = false
-
-        // Clear handler to stop receiving - this prevents further callbacks.
-        // Any in-flight handler is blocked on switchQueue.sync (which we hold),
-        // so it will see the port removed and bail out safely.
-        port.readHandle?.readabilityHandler = nil
-
-        // Remove from MAC table
-        if let mac = port.macAddress {
-            macTable.removeValue(forKey: mac)
-        }
-
-        // DON'T explicitly close() - the FileHandle was created with closeOnDealloc: true
-        // Just clear our references and let ARC handle cleanup. Any in-flight readability
-        // handler still holds a strong ref via its closure parameter, keeping the FileHandle
-        // alive until the handler completes.
-        port.readHandle = nil
-        port.writeHandle = nil
-
+        tearDownPortInline(port)
         log("VM disconnected from virtual switch: \(port.vmName) [Remaining ports: \(ports.count)]")
     }
 
@@ -267,10 +298,16 @@ class VirtualNetworkSwitch {
         let srcMAC = data[6..<12].map { String(format: "%02x", $0) }.joined(separator: ":")
         let etherType = UInt16(data[12]) << 8 | UInt16(data[13])
 
-        // SECURITY: Detect MAC spoofing
+        // SECURITY: Detect MAC spoofing. The conservative default for a
+        // hostile-guest threat model is to drop the offending frame; the
+        // legitimate "MAC changed after reboot" case is rare and the guest
+        // can recover by sending from a different (unclaimed) MAC. Toggle
+        // `dropOnMACSpoof` to false on the switch instance for log-only.
         if detectMACSpoof(srcMAC: srcMAC, vmId: fromVM) {
-            // Log but continue - MAC changes can be legitimate (VM reboot, network config)
-            // In a stricter implementation, we could drop the packet here
+            if dropOnMACSpoof {
+                log("SECURITY: Dropping spoofed packet (srcMAC: \(srcMAC), fromVM: \(fromVM))", type: .error)
+                return
+            }
         }
 
         // Update statistics and check rate limits
@@ -345,22 +382,38 @@ class VirtualNetworkSwitch {
     }
 
     private func sendPacket(data: Data, toPort port: VirtualSwitchPort) {
+        // Snapshot write handle while we hold switchQueue (the caller's serial context).
+        // Dispatch the actual write to the port's own serial queue so a slow guest
+        // (full recv buffer) cannot wedge switchQueue and stall every other port.
         guard let writeHandle = port.writeHandle, port.isConnected else {
             log("Cannot send packet - port not connected or no write handle for \(port.vmName)", type: .error)
             return
         }
 
-        do {
-            // Write the packet data to the socket
-            try writeHandle.write(contentsOf: data)
+        let vmId = port.vmId
+        let vmName = port.vmName
+        let byteCount = UInt64(data.count)
 
-            // Update statistics
-            port.packetsSent += 1
-            port.bytesSent += UInt64(data.count)
-
-            log("Sent \(data.count) bytes to \(port.vmName)", type: .debug)
-        } catch {
-            log("Failed to send packet to \(port.vmName): \(error.localizedDescription)", type: .error)
+        port.writeQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                try writeHandle.write(contentsOf: data)
+                // Statistics and per-port state mutations must run back on switchQueue
+                // (where every other access to ports[]/port fields happens).
+                self.switchQueue.async {
+                    if let p = self.ports[vmId], p.isConnected {
+                        p.packetsSent += 1
+                        p.bytesSent += byteCount
+                    }
+                }
+                self.log("Sent \(byteCount) bytes to \(vmName)", type: .debug)
+            } catch {
+                // A write failure means this port is wedged or gone. Disconnect it
+                // rather than silently logging — leaving it in `ports` would mean
+                // every future broadcast tries (and fails) to write to it again.
+                self.log("Failed to send packet to \(vmName): \(error.localizedDescription) — disconnecting port", type: .error)
+                self.disconnectPort(vmId: vmId)
+            }
         }
     }
 
@@ -471,8 +524,9 @@ class VirtualNetworkSwitch {
 
     // MARK: - Security Validation
 
-    /// Validates packet contents for security threats
-    private func validatePacket(data: Data, fromVM: UUID) -> Bool {
+    /// Validates packet contents for security threats.
+    /// Internal (not private) so unit tests can exercise it directly.
+    func validatePacket(data: Data, fromVM: UUID) -> Bool {
         // Check for minimum Ethernet frame size
         guard data.count >= 14 else {
             if let port = ports[fromVM] {
@@ -492,8 +546,10 @@ class VirtualNetworkSwitch {
         return true
     }
 
-    /// Detects potential MAC spoofing
-    private func detectMACSpoof(srcMAC: String, vmId: UUID) -> Bool {
+    /// Detects potential MAC spoofing.
+    /// Internal (not private) so unit tests can exercise it directly. Tests
+    /// arrange the macTable + ports state via the public API (connectVM).
+    func detectMACSpoof(srcMAC: String, vmId: UUID) -> Bool {
         // Check if this MAC is already learned from a different VM
         if let learnedVMId = macTable[srcMAC], learnedVMId != vmId {
             if let attackerPort = ports[vmId], let victimPort = ports[learnedVMId] {

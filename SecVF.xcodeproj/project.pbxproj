@@ -29,6 +29,7 @@
 		ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ALERT001ALERT001ALERT001 /* AlertPresenter.swift */; };
 		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
+		SECPT002SECPT002SECPT002 /* SecurityPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */; };
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
@@ -40,6 +41,8 @@
 		DSTJ002DSTJ002DSTJ002002 /* distros.json in Resources */ = {isa = PBXBuildFile; fileRef = DSTJ001DSTJ001DSTJ001001 /* distros.json */; };
 		DVFT002DVFT002DVFT002002 /* DistroVersionFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = DVFT001DVFT001DVFT001001 /* DistroVersionFetcher.swift */; };
 		FF46DBDE2FA55401000AB30D /* AISandboxMacVMConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */; };
+		AISBT002AISBT002AISBT002 /* AISandboxInstallTracker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */; };
+		AVFP002AVFP002AVFP002002 /* AVFPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AVFP001AVFP001AVFP001001 /* AVFPaths.swift */; };
 		FF46DBE12FA55451000AB30D /* LogRotation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBDF2FA55451000AB30D /* LogRotation.swift */; };
 		FF46DBE22FA55451000AB30D /* VsockExecBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */; };
 		LAYCO002LAYCO002LAYCO002 /* LayoutConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */; };
@@ -93,6 +96,7 @@
 		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
 		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
+		SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityPrimitivesTests.swift; sourceTree = "<group>"; };
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
@@ -104,6 +108,8 @@
 		E489E24B87B74AAC6D64B249 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		EE2222EE22222222EE222EE2 /* SecVFTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SecVFTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxMacVMConfiguration.swift; sourceTree = "<group>"; };
+		AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxInstallTracker.swift; sourceTree = "<group>"; };
+		AVFP001AVFP001AVFP001001 /* AVFPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVFPaths.swift; sourceTree = "<group>"; };
 		FF46DBDF2FA55451000AB30D /* LogRotation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogRotation.swift; sourceTree = "<group>"; };
 		FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VsockExecBridge.swift; sourceTree = "<group>"; };
 		LAYCO001LAYCO001LAYCO001 /* LayoutConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstants.swift; sourceTree = "<group>"; };
@@ -168,6 +174,8 @@
 				CSERR001CSERR001CSERR001 /* SecVFError.swift */,
 				CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */,
 				FF46DBDD2FA55401000AB30D /* AISandboxMacVMConfiguration.swift */,
+				AISBT001AISBT001AISBT001 /* AISandboxInstallTracker.swift */,
+				AVFP001AVFP001AVFP001001 /* AVFPaths.swift */,
 				FF46DBDF2FA55451000AB30D /* LogRotation.swift */,
 				FF46DBE02FA55451000AB30D /* VsockExecBridge.swift */,
 				DSTC001DSTC001DSTC001001 /* DistroConfiguration.swift */,
@@ -229,6 +237,7 @@
 				DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */,
 				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
 				DD6666DD66666666DD666DD6 /* IntegrationTests.swift */,
+				SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */,
 			);
 			name = SecVFTests;
 			path = SecVF/Tests;
@@ -359,6 +368,8 @@
 				ALERT002ALERT002ALERT002 /* AlertPresenter.swift in Sources */,
 				APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */,
 				FF46DBDE2FA55401000AB30D /* AISandboxMacVMConfiguration.swift in Sources */,
+				AISBT002AISBT002AISBT002 /* AISandboxInstallTracker.swift in Sources */,
+				AVFP002AVFP002AVFP002002 /* AVFPaths.swift in Sources */,
 				CSERR002CSERR002CSERR002 /* SecVFError.swift in Sources */,
 				CHKF002CHKF002CHKF002002 /* ChecksumFetcher.swift in Sources */,
 				DSTC002DSTC002DSTC002002 /* DistroConfiguration.swift in Sources */,
@@ -402,6 +413,7 @@
 				CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */,
 				CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */,
 				CC6666CC66666666CC666CC6 /* IntegrationTests.swift in Sources */,
+				SECPT002SECPT002SECPT002 /* SecurityPrimitivesTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

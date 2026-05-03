@@ -275,7 +275,9 @@ final class VMConfigurationTests: XCTestCase {
         let description = networkConfig.description
 
         // Then
-        XCTAssertEqual(description, "Virtual Network Router")
+        // Description was updated in 9a0f401 to reflect the dual-NIC layout
+        // (router VM has both a switch leg and a NAT leg).
+        XCTAssertEqual(description, "Router (Dual-NIC: Switch + NAT)")
     }
 
     func testVirtualNetworkConfigDescriptionClient() {
