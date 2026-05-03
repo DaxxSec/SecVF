@@ -421,7 +421,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
         NSLog("[CLI] Start VM requested: \(vmName)")
 
-        // Find VM by name from VMManager
+        // Check if this is an AI Sandbox VM by scanning ~/.avf/AISandbox/
+        let aiSandboxRoot = NSHomeDirectory() + "/.avf/AISandbox"
+        let candidatePaths = [
+            aiSandboxRoot + "/\(vmName).bundle",
+            aiSandboxRoot + "/sessions/\(vmName).bundle"
+        ]
+        let isAISandbox = candidatePaths.contains { FileManager.default.fileExists(atPath: $0) }
+
+        if isAISandbox {
+            NSLog("[CLI] Routing AI Sandbox VM through bootAISandboxSession()")
+            DispatchQueue.main.async { [weak self] in
+                self?.bootAISandboxSession()
+            }
+            return
+        }
+
+        // Standard VM path — find in VMManager
         let allVMs = VMManager.shared.virtualMachines
 
         guard let vm = allVMs.first(where: { $0.name == vmName }) else {
@@ -1276,13 +1292,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // Setup Monitoring menu
         setupMonitoringMenu()
 
-        // Show splash screen
+        // Show splash screen and refresh distro versions
         showSplashScreen()
-
-        // Show the VM library window after splash
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-            self.showLibraryWindow()
-        }
+        refreshDistroVersionsOnStartup()
     }
 
     private func closeAllVMWindows() {
@@ -1309,8 +1321,53 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     private func showSplashScreen() {
         splashScreen = SplashScreenWindow()
         splashScreen?.orderFront(nil) // Don't make it key since it can't become key
+        // Don't auto-close — refreshDistroVersionsOnStartup will dismiss it.
+    }
 
-        // Splash screen will close itself and deallocate naturally
+    private func refreshDistroVersionsOnStartup() {
+        splashScreen?.setStatusMessage("[ CHECKING DISTRO VERSIONS ]")
+
+        // Safety timeout — show the library even if version checks hang
+        var dismissed = false
+        let dismissSplash = { [weak self] in
+            guard !dismissed else { return }
+            dismissed = true
+            self?.splashScreen?.fadeOut()
+            // Don't nil splashScreen here — fadeOut() runs a 0.5s animation.
+            // Releasing the window mid-animation causes EXC_BAD_ACCESS.
+            // The window closes itself at the end of fadeOut; nil the ref after.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                self?.splashScreen = nil
+            }
+            self?.showLibraryWindow()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+            if !dismissed {
+                NSLog("[DistroRefresh] Timed out — dismissing splash")
+                dismissSplash()
+            }
+        }
+
+        DistroConfigurationManager.shared.refreshDistroVersions(
+            progress: { [weak self] distroName, status in
+                self?.splashScreen?.setStatusMessage("[ \(distroName): \(status) ]")
+            },
+            completion: { [weak self] updated, errors in
+                if updated.isEmpty {
+                    self?.splashScreen?.setStatusMessage("[ ALL DISTROS CURRENT ]")
+                } else {
+                    self?.splashScreen?.setStatusMessage("[ UPDATED \(updated.count) DISTRO\(updated.count == 1 ? "" : "S") ]")
+                    for u in updated { NSLog("[DistroRefresh] Updated: %@", u) }
+                }
+                for e in errors { NSLog("[DistroRefresh] Error: %@", e) }
+
+                // Brief pause so user can read the final status, then dismiss
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    dismissSplash()
+                }
+            }
+        )
     }
 
     // MARK: - Monitoring Menu Setup
@@ -1455,6 +1512,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         )
         createSandboxItem.target = self
         toolsMenu.addItem(createSandboxItem)
+
+        // Boot AI Sandbox (clone base → session, boot, show window)
+        let bootSandboxItem = NSMenuItem(
+            title: "Boot AI Sandbox",
+            action: #selector(bootAISandboxSession),
+            keyEquivalent: ""
+        )
+        bootSandboxItem.target = self
+        toolsMenu.addItem(bootSandboxItem)
 
         // Create top-level menu item
         let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
@@ -1937,17 +2003,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             guard confirm.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        // Look for a cached IPSW to skip the download.
-        let cachedIPSW = locateCachedIPSW()
-        if let ipsw = cachedIPSW {
-            NSLog("[AISandbox] Reusing cached IPSW: %@", ipsw.path)
-        } else {
-            NSLog("[AISandbox] No cached IPSW found — will download from Apple CDN")
+        // Require a cached IPSW — VZMacOSInstaller only accepts local file URLs.
+        // Use Tools → Download macOS IPSW to cache one, then try again.
+        guard let cachedIPSW = locateCachedIPSW() else {
+            showAlert(
+                title: "No macOS IPSW Found",
+                message: """
+                A macOS restore image (.ipsw) is required to build the AI Sandbox VM.
+
+                Use Tools → Download macOS IPSW to download one first, then try again.
+                """
+            )
+            return
         }
+        NSLog("[AISandbox] Reusing cached IPSW: %@", cachedIPSW.path)
 
         // Drive the tracker singleton — VMLibraryWindowController watches it
         // and renders an "installing" entry in the Running VMs sidebar.
         AISandboxInstallTracker.shared.begin()
+        AISandboxInstallTracker.shared.log("Starting AI Sandbox build")
+        AISandboxInstallTracker.shared.log("IPSW: \(cachedIPSW.lastPathComponent)")
+        AISandboxInstallTracker.shared.log("Bundle: \(AISandboxDefaults.baseBundle.path)")
 
         let task = Task { [weak self] in
             defer {
@@ -1961,30 +2037,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             }
             do {
                 // Phase 1: install
+                var lastLoggedPct = -1
                 let bundle = try await AISandboxMacVMInstaller.downloadAndInstall(
                     localIPSW: cachedIPSW,
                     progress: { fraction in
                         DispatchQueue.main.async {
                             AISandboxInstallTracker.shared.updateInstallFraction(fraction)
+                            // Log every 5% milestone to Tasks tab
+                            let pct = Int(fraction * 100)
+                            let bucket = (pct / 5) * 5
+                            if bucket != lastLoggedPct {
+                                lastLoggedPct = bucket
+                                AISandboxInstallTracker.shared.log("VZMacOSInstaller: \(pct)%")
+                            }
                         }
                     }
                 )
-
-                try Task.checkCancellation()
                 await MainActor.run {
-                    AISandboxInstallTracker.shared.setPhase(.provisioning)
+                    AISandboxInstallTracker.shared.log("macOS install complete")
                 }
-                // Phase 2: provision
-                try await AISandboxMacVMInstaller.provisionBundle(bundle)
 
                 try Task.checkCancellation()
                 await MainActor.run {
                     AISandboxInstallTracker.shared.setPhase(.sealing)
+                    AISandboxInstallTracker.shared.log("Sealing base bundle…")
                 }
-                // Phase 3: seal
+                // Phase 2: seal
+                // Note: vsock-based provisioning (provisionBundle) is skipped here
+                // because the fresh macOS install has no vsock agent running.
+                // Boot the VM manually and call AISandboxMacVMInstaller.provisionBundle
+                // once the guest is configured with a vsock listener on port 2222.
                 try AISandboxMacVMInstaller.sealBundle(bundle)
 
                 await MainActor.run {
+                    AISandboxInstallTracker.shared.log("Bundle sealed at \(bundle.url.path)")
                     AISandboxInstallTracker.shared.setPhase(.finished)
                     self?.showAlert(
                         title: "AI Sandbox VM Ready",
@@ -1992,7 +2078,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                         Base bundle sealed at:
                             \(bundle.url.path)
 
-                        Use AISandboxVMSession to clone + boot a session VM.
+                        Use Tools → Boot AI Sandbox to launch a session VM.
+                        Each session is an APFS clone of the base — fast and disposable.
                         """
                     )
                     AISandboxInstallTracker.shared.reset()
@@ -2000,11 +2087,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             } catch is CancellationError {
                 NSLog("[AISandbox] Install cancelled (likely superseded by a later click)")
                 await MainActor.run {
+                    AISandboxInstallTracker.shared.log("Cancelled.")
                     AISandboxInstallTracker.shared.fail(with: "cancelled")
                     AISandboxInstallTracker.shared.reset()
                 }
             } catch {
                 await MainActor.run {
+                    AISandboxInstallTracker.shared.log("Error: \(error.localizedDescription)")
                     AISandboxInstallTracker.shared.fail(with: error.localizedDescription)
                     self?.showAlert(
                         title: "AI Sandbox VM creation failed",
@@ -2033,6 +2122,111 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // unconditionally cancels-and-replaces, which handles both stale
         // and live cases. Leaving this as a no-op keeps the surface stable
         // in case we want stricter semantics later.
+    }
+
+    // MARK: - Boot AI Sandbox Session
+
+    /// Active sandbox session — retained so the VM stays alive.
+    private var activeSandboxSession: AISandboxVMSession?
+    /// Stable UUID assigned to the active sandbox session for exec bridge addressing.
+    private var activeSandboxVMId: UUID?
+
+    /// Tools → Boot AI Sandbox. Clones the base bundle (APFS CoW), boots
+    /// the session VM, and shows it in a new window.
+    @objc private func bootAISandboxSession() {
+        let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
+        guard baseBundle.exists else {
+            showAlert(
+                title: "AI Sandbox Base Not Found",
+                message: "No base bundle at:\n    \(AISandboxDefaults.baseBundle.path)\n\nUse Tools → Create AI Sandbox VM to build one first."
+            )
+            return
+        }
+
+        // If a session is already running, bring its window forward
+        if let existing = activeSandboxSession, existing.vm?.state == .running || existing.vm?.state == .starting {
+            for window in NSApp.windows where window.title.contains("AI Sandbox") {
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
+        }
+
+        Task { @MainActor in
+            let session = AISandboxVMSession()
+            NSLog("[AISandbox] Cloning base → session %@", session.sessionID)
+
+            do {
+                try session.cloneBase()
+                NSLog("[AISandbox] Clone complete: %@", session.bundleURL.path)
+
+                // Build VZ config from the cloned session bundle
+                let bundle = AISandboxVMBundle(url: session.bundleURL)
+                let sandboxConfig = try AISandboxMacVMConfiguration(bundle: bundle)
+                let machine = VZVirtualMachine(configuration: sandboxConfig.configuration)
+                session.vm = machine
+
+                // Create window
+                let window = NSWindow(
+                    contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+                    styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.title = "SecVF - AI Sandbox [\(session.sessionID)]"
+                window.delegate = self
+
+                let vmView = VZVirtualMachineView()
+                vmView.frame = window.contentView!.bounds
+                vmView.autoresizingMask = [.width, .height]
+                vmView.virtualMachine = machine
+                if #available(macOS 14.0, *) {
+                    vmView.automaticallyReconfiguresDisplay = true
+                }
+                window.contentView?.addSubview(vmView)
+
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+
+                self.activeSandboxSession = session
+                let sandboxVMId = UUID()
+                self.activeSandboxVMId = sandboxVMId
+
+                // Write the UUID into the session manifest so the CLI can find it
+                let manifestURL = session.bundleURL.appendingPathComponent("manifest.json")
+                if var manifest = try? JSONSerialization.jsonObject(
+                    with: Data(contentsOf: manifestURL)) as? [String: Any] {
+                    manifest["id"] = sandboxVMId.uuidString
+                    manifest["name"] = "ai-sandbox-exec-\(session.sessionID)"
+                    if let updated = try? JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted) {
+                        try? updated.write(to: manifestURL)
+                    }
+                }
+
+                NSLog("[AISandbox] Starting session VM (id=%@)…", sandboxVMId.uuidString)
+                try await machine.start()
+                NSLog("[AISandbox] Session VM running")
+
+                // Start the vsock exec bridge so `secvf-cli vm exec` can reach this VM
+                VsockExecBridgeManager.shared.startBridge(
+                    vmId: sandboxVMId,
+                    vmName: "ai-sandbox-exec-\(session.sessionID)",
+                    vm: machine
+                )
+            } catch {
+                NSLog("[AISandbox] Boot failed: %@", error.localizedDescription)
+                // Clean up failed session
+                if let vmId = self.activeSandboxVMId {
+                    VsockExecBridgeManager.shared.stopBridge(vmId: vmId)
+                }
+                self.activeSandboxVMId = nil
+                try? await session.destroy()
+                showAlert(
+                    title: "AI Sandbox Boot Failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
     }
 
     /// Tools → Download macOS IPSW. One-time pull of the latest Apple-supported
@@ -2092,45 +2286,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
             }
 
-            // Progress alert (non-blocking sheet on the library window when
-            // available — the caller stays usable).
-            let progressAlert = NSAlert()
-            progressAlert.messageText = "Downloading macOS IPSW"
-            progressAlert.informativeText = "\(filename) — 0%"
-            progressAlert.alertStyle = .informational
-            progressAlert.addButton(withTitle: "Run in Background")
-            let progressBar = NSProgressIndicator(frame: NSRect(x: 0, y: 0, width: 360, height: 16))
-            progressBar.style = .bar
-            progressBar.isIndeterminate = false
-            progressBar.minValue = 0
-            progressBar.maxValue = 1
-            progressAlert.accessoryView = progressBar
-            let onWindow = libraryWindowController?.window
-            if let win = onWindow {
-                progressAlert.beginSheetModal(for: win) { _ in /* dismissed */ }
-            }
+            // Track progress in the Tasks tab instead of a blocking alert sheet.
+            let tracker = IPSWDownloadTracker.shared
+            tracker.begin(filename: filename, expectedBytes: 0)
+            tracker.log("Starting IPSW download")
+            tracker.log("Source: \(restoreImage.url.absoluteString)")
+            tracker.log("Destination: \(destURL.path)")
 
-            // Download via URLSession + KVO on Progress.
             do {
                 try await downloadFile(
                     from: restoreImage.url,
                     to: destURL,
-                    progress: { fraction in
-                        progressBar.doubleValue = fraction
-                        progressAlert.informativeText = "\(filename) — \(Int(fraction * 100))%"
+                    progress: { received, total in
+                        tracker.updateProgress(received: received, total: total)
                     }
                 )
-                if let win = onWindow {
-                    win.endSheet(progressAlert.window)
-                }
+                tracker.log("Download complete — \(destURL.lastPathComponent)")
+                tracker.complete()
                 showAlert(
                     title: "IPSW Downloaded",
                     message: "Saved to:\n    \(destURL.path)\n\nNew macOS VMs will reuse this without re-downloading."
                 )
             } catch {
-                if let win = onWindow {
-                    win.endSheet(progressAlert.window)
-                }
+                tracker.log("Download failed: \(error.localizedDescription)")
+                tracker.fail(with: error.localizedDescription)
                 showAlert(
                     title: "Download failed",
                     message: error.localizedDescription
@@ -2139,47 +2318,109 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         }
     }
 
-    /// URLSession download with progress KVO. Moves the temp file into place
-    /// atomically on success.
+    /// URLSession download with delegate-based progress. The KVO approach
+    /// was broken: the observation was deallocated immediately, and Apple's
+    /// CDN may omit Content-Length which leaves fractionCompleted at 0.
+    /// This delegate gets `didWriteData` callbacks that always fire.
     @MainActor
     private func downloadFile(
         from source: URL,
         to destination: URL,
-        progress: @escaping (Double) -> Void
+        progress: @escaping (_ receivedBytes: Int64, _ totalBytes: Int64) -> Void
     ) async throws {
+        let delegate = DownloadDelegate(destination: destination, progress: progress)
+        let session = URLSession(
+            configuration: .default,
+            delegate: delegate,
+            delegateQueue: nil  // use system serial queue
+        )
+        defer { session.finishTasksAndInvalidate() }
+
+        let task = session.downloadTask(with: source)
+        task.resume()
+
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let task = URLSession.shared.downloadTask(with: source) { tmpURL, _, err in
-                if let err = err {
-                    cont.resume(throwing: err)
-                    return
+            delegate.continuation = cont
+        }
+    }
+}
+
+// MARK: - DownloadDelegate
+
+private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    let destination: URL
+    let progress: (_ received: Int64, _ total: Int64) -> Void
+    var continuation: CheckedContinuation<Void, Error>?
+    private var lastLoggedPct = -1
+
+    init(destination: URL, progress: @escaping (_ received: Int64, _ total: Int64) -> Void) {
+        self.destination = destination
+        self.progress = progress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        let total = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
+        DispatchQueue.main.async {
+            self.progress(totalBytesWritten, total)
+
+            // Log every 1% milestone to the tracker
+            if total > 0 {
+                let pct = Int(Double(totalBytesWritten) / Double(total) * 100)
+                if pct != self.lastLoggedPct {
+                    self.lastLoggedPct = pct
+                    let mbWritten = totalBytesWritten / (1024 * 1024)
+                    let mbTotal = total / (1024 * 1024)
+                    IPSWDownloadTracker.shared.log("Downloading: \(pct)% (\(mbWritten)/\(mbTotal) MB)")
                 }
-                guard let tmp = tmpURL else {
-                    cont.resume(throwing: NSError(domain: "downloadFile", code: 0,
-                        userInfo: [NSLocalizedDescriptionKey: "no temp URL from URLSession"]))
-                    return
-                }
-                do {
-                    try? FileManager.default.removeItem(at: destination)
-                    try FileManager.default.moveItem(at: tmp, to: destination)
-                    cont.resume()
-                } catch {
-                    cont.resume(throwing: error)
+            } else {
+                // No Content-Length — log every 50 MB
+                let mb = totalBytesWritten / (1024 * 1024)
+                let lastMB = (totalBytesWritten - bytesWritten) / (1024 * 1024)
+                let bucket = (mb / 50) * 50
+                let lastBucket = (lastMB / 50) * 50
+                if bucket != lastBucket {
+                    IPSWDownloadTracker.shared.log("Downloaded: \(mb) MB (size unknown)")
                 }
             }
-            // KVO on the task's progress fires off-main; hop back to update UI.
-            let observation = task.progress.observe(\.fractionCompleted, options: [.new]) { p, _ in
-                let f = p.fractionCompleted
-                DispatchQueue.main.async { progress(f) }
-            }
-            // Keep observation alive until the task finishes.
-            task.resume()
-            // We can't easily dispose `observation` without keeping a ref;
-            // letting it drop with the task is fine — it stops firing once
-            // the underlying NSProgress is released alongside the task.
-            _ = observation
         }
     }
 
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        do {
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: location, to: destination)
+            continuation?.resume()
+        } catch {
+            continuation?.resume(throwing: error)
+        }
+        continuation = nil
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error = error {
+            continuation?.resume(throwing: error)
+            continuation = nil
+        }
+    }
+}
+
+// MARK: - AppDelegate helpers (continued)
+
+extension AppDelegate {
     /// Looks for a cached macOS IPSW under `~/.avf/MacOS/` — if found,
     /// `AISandboxMacVMInstaller.downloadAndInstall` will use it and skip
     /// the Apple CDN download.

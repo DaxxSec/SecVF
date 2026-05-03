@@ -7,10 +7,13 @@ class VMManagerBridge {
     private let macOSPath: String
     private let keysPath: String
 
+    private let aiSandboxPath: String
+
     init() {
         avfRoot = NSHomeDirectory() + "/.avf"
         linuxPath = avfRoot + "/Linux"
         macOSPath = avfRoot + "/MacOS"
+        aiSandboxPath = avfRoot + "/AISandbox"
         keysPath = avfRoot + "/keys"
     }
 
@@ -37,30 +40,68 @@ class VMManagerBridge {
             }
         }
 
+        // List AI Sandbox VMs (base + sessions)
+        if let sandboxVMs = try? FileManager.default.contentsOfDirectory(atPath: aiSandboxPath) {
+            for vmDir in sandboxVMs where vmDir.hasSuffix(".bundle") {
+                if let vm = loadVMMetadata(path: aiSandboxPath + "/" + vmDir, osType: "AISandbox") {
+                    vms.append(vm)
+                }
+            }
+        }
+        // Also check sessions subdirectory
+        let sessionsPath = aiSandboxPath + "/sessions"
+        if let sessionVMs = try? FileManager.default.contentsOfDirectory(atPath: sessionsPath) {
+            for vmDir in sessionVMs where vmDir.hasSuffix(".bundle") {
+                if let vm = loadVMMetadata(path: sessionsPath + "/" + vmDir, osType: "AISandbox") {
+                    vms.append(vm)
+                }
+            }
+        }
+
         return vms
     }
 
     private func loadVMMetadata(path: String, osType: String) -> [String: Any]? {
         let metadataPath = path + "/metadata.json"
+        let manifestPath = path + "/manifest.json"
+        let bundleName = URL(fileURLWithPath: path).lastPathComponent.replacingOccurrences(of: ".bundle", with: "")
 
-        guard let data = FileManager.default.contents(atPath: metadataPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        // Try metadata.json first (standard VMs), then manifest.json (AI Sandbox)
+        var vm: [String: Any]
+        if let data = FileManager.default.contents(atPath: metadataPath),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            vm = json
+        } else if let data = FileManager.default.contents(atPath: manifestPath),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            // Normalize manifest.json fields to match metadata.json shape
+            vm = [
+                "name": json["name"] as? String ?? bundleName,
+                "id": json["id"] as? String ?? "",
+                "vm_type": json["vm_type"] ?? "ai-sandbox",
+                "macos_version": json["macos_version"] ?? "",
+                "cpu_count": json["cpu_count"] ?? 0,
+                "memory_gib": json["memory_gib"] ?? 0,
+                "disk_size_gib": json["disk_size_gib"] ?? 0,
+                "sealed_at": json["sealed_at"] ?? "",
+                "version": json["version"] ?? ""
+            ]
+        } else {
             // Return basic info even without metadata
-            let name = URL(fileURLWithPath: path).lastPathComponent.replacingOccurrences(of: ".bundle", with: "")
-            return [
-                "name": name,
-                "osType": osType,
-                "status": getVMRunningStatus(name: name),
-                "path": path
+            vm = [
+                "name": bundleName
             ]
         }
 
-        var vm = json
         vm["osType"] = osType
         vm["path"] = path
 
+        // Ensure name is set
+        if vm["name"] as? String == nil || (vm["name"] as? String)?.isEmpty == true {
+            vm["name"] = bundleName
+        }
+
         // Check running status
-        let name = vm["name"] as? String ?? ""
+        let name = vm["name"] as? String ?? bundleName
         vm["status"] = getVMRunningStatus(name: name)
 
         // Get IP if running
@@ -233,6 +274,17 @@ class VMManagerBridge {
         // This is a simplified approach - in practice we'd need the MAC from VM config
 
         return nil
+    }
+
+    // MARK: - Exec Bridge Available Check (AI Sandbox)
+
+    func isExecBridgeAvailable(name: String) -> Bool {
+        guard let vm = findVM(name: name),
+              let idString = vm["id"] as? String, !idString.isEmpty else {
+            return false
+        }
+        let socketPath = "/tmp/secvf-exec-\(idString).sock"
+        return FileManager.default.fileExists(atPath: socketPath)
     }
 
     // MARK: - SSH Available Check

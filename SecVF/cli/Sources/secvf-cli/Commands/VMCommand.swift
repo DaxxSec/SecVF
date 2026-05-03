@@ -34,7 +34,7 @@ struct VMList: ParsableCommand {
     @Option(name: .long, help: "Filter by status (running, stopped, paused)")
     var status: String?
 
-    @Option(name: .long, help: "Filter by OS type (linux, macos)")
+    @Option(name: .long, help: "Filter by OS type (linux, macos, aisandbox)")
     var osType: String?
 
     mutating func run() throws {
@@ -68,9 +68,19 @@ struct VMList: ParsableCommand {
                 let name = (vm["name"] as? String ?? "Unknown").padding(toLength: 23, withPad: " ", startingAt: 0)
                 let os = (vm["osType"] as? String ?? "Unknown").padding(toLength: 9, withPad: " ", startingAt: 0)
                 let status = (vm["status"] as? String ?? "Unknown").padding(toLength: 9, withPad: " ", startingAt: 0)
-                let cpu = String(vm["cpuCount"] as? Int ?? 0).padding(toLength: 4, withPad: " ", startingAt: 0)
-                let ram = formatMemory(vm["memorySize"] as? UInt64 ?? 0).padding(toLength: 6, withPad: " ", startingAt: 0)
-                let network = vm["networkMode"] as? String ?? "NAT"
+                // AI Sandbox manifests use cpu_count/memory_gib; standard VMs use cpuCount/memorySize
+                let cpuVal = vm["cpuCount"] as? Int ?? vm["cpu_count"] as? Int ?? 0
+                let cpu = String(cpuVal).padding(toLength: 4, withPad: " ", startingAt: 0)
+                let ram: String
+                if let memBytes = vm["memorySize"] as? UInt64 {
+                    ram = formatMemory(memBytes)
+                } else if let memGiB = vm["memory_gib"] as? Int {
+                    ram = "\(memGiB)GB"
+                } else {
+                    ram = "0MB"
+                }
+                let ramPad = ram.padding(toLength: 6, withPad: " ", startingAt: 0)
+                let network = vm["networkMode"] as? String ?? (vm["osType"] as? String == "AISandbox" ? "vsock" : "NAT")
 
                 let statusIcon = switch status.trimmingCharacters(in: .whitespaces) {
                     case "running": "●"
@@ -78,7 +88,7 @@ struct VMList: ParsableCommand {
                     default: "○"
                 }
 
-                print("\(statusIcon) \(name) \(os) \(status) \(cpu) \(ram) \(network)")
+                print("\(statusIcon) \(name) \(os) \(status) \(cpu) \(ramPad) \(network)")
             }
         }
     }
@@ -293,19 +303,39 @@ struct VMStart: AsyncParsableCommand {
                 }
             }
 
-            if wait && !options.json {
-                print("Waiting for boot (timeout: \(timeout)s)...")
+            if wait {
+                let isAISandbox = (vm["osType"] as? String) == "AISandbox"
+                let waitLabel = isAISandbox ? "exec bridge" : "SSH"
+
+                if !options.json {
+                    print("Waiting for \(waitLabel) (timeout: \(timeout)s)...")
+                }
+
                 let startTime = Date()
                 while Date().timeIntervalSince(startTime) < Double(timeout) {
-                    if vmManager.isSSHAvailable(name: name) {
-                        print("✓ VM is ready (SSH available)")
+                    let ready = isAISandbox
+                        ? vmManager.isExecBridgeAvailable(name: name)
+                        : vmManager.isSSHAvailable(name: name)
+                    if ready {
+                        if options.json {
+                            JSONOutput(success: true, message: "VM ready", data: ["name": name, "transport": waitLabel]).print()
+                        } else {
+                            print("\n✓ VM is ready (\(waitLabel) available)")
+                        }
                         return
                     }
                     Thread.sleep(forTimeInterval: 2)
-                    print(".", terminator: "")
-                    fflush(stdout)
+                    if !options.json {
+                        print(".", terminator: "")
+                        fflush(stdout)
+                    }
                 }
-                print("\nWarning: Timeout waiting for SSH")
+
+                if options.json {
+                    JSONOutput(success: false, message: "Timeout waiting for \(waitLabel)").print()
+                } else {
+                    print("\nWarning: Timeout waiting for \(waitLabel)")
+                }
             }
         }
     }

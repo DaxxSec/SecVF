@@ -409,6 +409,140 @@ class DistroConfigurationManager {
         return approvedDomains.contains(host)
     }
 
+    /// Check all distros with version discovery enabled against their mirrors.
+    /// Updates the user config (`~/.avf/distros.json`) with any newer versions found.
+    /// Calls `progress` on the main thread for each distro checked.
+    /// Calls `completion` on the main thread when all checks are done.
+    @MainActor
+    func refreshDistroVersions(
+        progress: @escaping (_ distroName: String, _ status: String) -> Void,
+        completion: @escaping (_ updated: [String], _ errors: [String]) -> Void
+    ) {
+        guard let config = configFile else {
+            completion([], ["No distro configuration loaded"])
+            return
+        }
+
+        let discoverable = config.distributions.filter {
+            $0.versionDiscovery?.enabled == true
+        }
+
+        guard !discoverable.isEmpty else {
+            completion([], [])
+            return
+        }
+
+        let group = DispatchGroup()
+        var updatedDistros: [String] = []
+        var errorMessages: [String] = []
+        var updatedConfigs: [String: DiscoveredVersion] = [:]
+
+        for distro in discoverable {
+            guard let discovery = distro.versionDiscovery else { continue }
+            group.enter()
+
+            progress(distro.displayName, "Checking...")
+
+            DistroVersionFetcher.shared.clearCacheForDistro(distro.id)
+            DistroVersionFetcher.shared.fetchVersions(
+                for: distro.id,
+                baseURL: discovery.baseURL,
+                strategy: discovery.strategy,
+                filenamePattern: discovery.filenamePattern,
+                architecture: discovery.architecture
+            ) { result in
+                switch result {
+                case .success(let versions):
+                    guard let latest = versions.first else {
+                        progress(distro.displayName, "No versions found")
+                        group.leave()
+                        return
+                    }
+                    let currentVersion = distro.version
+                    let isNewer = latest.version.compare(currentVersion, options: .numeric) == .orderedDescending
+                    if isNewer {
+                        NSLog("[DistroRefresh] %@: %@ -> %@ (update available)", distro.displayName, currentVersion, latest.version)
+                        progress(distro.displayName, "\(currentVersion) -> \(latest.version)")
+                        updatedConfigs[distro.id] = latest
+                        updatedDistros.append("\(distro.displayName): \(currentVersion) -> \(latest.version)")
+                    } else {
+                        NSLog("[DistroRefresh] %@: %@ is current", distro.displayName, currentVersion)
+                        progress(distro.displayName, "\(currentVersion) (current)")
+                    }
+
+                case .noVersionsFound(let reason):
+                    NSLog("[DistroRefresh] %@: no versions — %@", distro.displayName, reason)
+                    progress(distro.displayName, "Skipped")
+
+                case .networkError(let err):
+                    NSLog("[DistroRefresh] %@: network error — %@", distro.displayName, err.localizedDescription)
+                    errorMessages.append("\(distro.displayName): \(err.localizedDescription)")
+                    progress(distro.displayName, "Offline")
+
+                case .parseError(let msg):
+                    NSLog("[DistroRefresh] %@: parse error — %@", distro.displayName, msg)
+                    errorMessages.append("\(distro.displayName): \(msg)")
+                    progress(distro.displayName, "Error")
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self, !updatedConfigs.isEmpty else {
+                completion(updatedDistros, errorMessages)
+                return
+            }
+
+            // Rebuild config with updated versions
+            let newDistros = config.distributions.map { distro -> DistroConfiguration in
+                guard let latest = updatedConfigs[distro.id] else { return distro }
+                let today = {
+                    let f = DateFormatter()
+                    f.dateFormat = "yyyy-MM-dd"
+                    f.locale = Locale(identifier: "en_US_POSIX")
+                    return f.string(from: Date())
+                }()
+                return DistroConfiguration(
+                    id: distro.id,
+                    displayName: distro.displayName,
+                    version: latest.version,
+                    releaseDate: today,
+                    downloadURL: latest.downloadURL,
+                    sha256Checksum: "FETCH_FROM_CHECKSUM_URL",
+                    expectedMaxSizeGB: distro.expectedMaxSizeGB,
+                    checksumURL: latest.checksumURL ?? distro.checksumURL,
+                    checksumFormat: distro.checksumFormat,
+                    versionDiscovery: distro.versionDiscovery
+                )
+            }
+
+            let today = {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy-MM-dd"
+                f.locale = Locale(identifier: "en_US_POSIX")
+                return f.string(from: Date())
+            }()
+
+            self.configFile = DistroConfigurationFile(
+                schemaVersion: config.schemaVersion,
+                lastUpdated: today,
+                approvedDomains: config.approvedDomains,
+                distributions: newDistros
+            )
+            self.distrosByID = Dictionary(uniqueKeysWithValues: newDistros.map { ($0.id, $0) })
+
+            do {
+                try self.saveUserConfiguration()
+                NSLog("[DistroRefresh] Saved updated config with %d updates", updatedConfigs.count)
+            } catch {
+                errorMessages.append("Failed to save: \(error.localizedDescription)")
+            }
+
+            completion(updatedDistros, errorMessages)
+        }
+    }
+
     /// Save current configuration to user override file
     /// Useful for programmatic updates
     func saveUserConfiguration() throws {

@@ -40,8 +40,17 @@ final class AISandboxInstallTracker {
     private(set) var phase: Phase = .idle
     private(set) var fraction: Double = 0.0
     private(set) var lastErrorMessage: String?
+    private(set) var logMessages: [String] = []
 
     private init() {}
+
+    /// Append a timestamped line to the task log (capped at 500 lines).
+    func log(_ message: String) {
+        let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        logMessages.append("[\(ts)] \(message)")
+        if logMessages.count > 500 { logMessages.removeFirst(logMessages.count - 500) }
+        notify()
+    }
 
     /// True when an install is currently running (any non-terminal phase).
     var isActive: Bool {
@@ -55,6 +64,7 @@ final class AISandboxInstallTracker {
         phase = .installing
         fraction = 0
         lastErrorMessage = nil
+        logMessages = []
         notify()
     }
 

@@ -26,6 +26,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var networkVisualizationView: NetworkTrafficView?
     private var statsUpdateTimer: Timer?
 
+    // Right panel tabs (VMs / Tasks)
+    private var rightPanelTabControl: NSSegmentedControl?
+    private var vmsTabContent: NSView?
+    private var tasksTabContent: NSView?
+    private var tasksLogTextView: NSTextView?
+    private var tasksStatusLabel: NSTextField?
+    private var tasksProgressBar: NSProgressIndicator?
+    private var vmsPlaceholderLabel: NSTextField?
+
     // Packet Log Panel
     private var packetLogPanel: NSView?
     private var packetLogTabControl: NSSegmentedControl?
@@ -93,6 +102,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             self,
             selector: #selector(handleAISandboxInstallTrackerChanged(_:)),
             name: .aiSandboxInstallTrackerChanged,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleIPSWDownloadTrackerChanged(_:)),
+            name: .ipswDownloadTrackerChanged,
             object: nil
         )
 
@@ -532,15 +548,30 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         runningVMsPanel.addSubview(titleLabel)
         statusLabel = titleLabel
 
-        // Separator
-        let separator = NSBox(frame: NSRect(x: 10, y: activePanelHeight - 38, width: activePanelWidth - 20, height: 1))
-        separator.boxType = .separator
-        separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)
-        separator.autoresizingMask = [.minYMargin]
-        runningVMsPanel.addSubview(separator)
+        // VMs / Tasks tab control
+        let tabCtrl = NSSegmentedControl(
+            labels: ["VMs", "Tasks"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(rightPanelTabChanged(_:))
+        )
+        tabCtrl.frame = NSRect(x: 8, y: activePanelHeight - 56, width: activePanelWidth - 16, height: 22)
+        tabCtrl.selectedSegment = 0
+        tabCtrl.segmentStyle = .texturedSquare
+        tabCtrl.autoresizingMask = [.minYMargin]
+        runningVMsPanel.addSubview(tabCtrl)
+        rightPanelTabControl = tabCtrl
 
-        // Scrollable container for running VM items
-        let scrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: activePanelHeight - 55))
+        // Content area height (below tab control)
+        let contentH = activePanelHeight - 64
+
+        // ── VMs tab content ───────────────────────────────────────────────────
+        let vmsContent = NSView(frame: NSRect(x: 0, y: 0, width: activePanelWidth, height: contentH))
+        vmsContent.autoresizingMask = [.height]
+        runningVMsPanel.addSubview(vmsContent)
+        vmsTabContent = vmsContent
+
+        let scrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: contentH - 10))
         scrollView.autoresizingMask = [.height]
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = true
@@ -548,7 +579,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
-        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: activePanelHeight - 55))
+        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: contentH - 10))
         stackView.orientation = .vertical
         stackView.spacing = 10
         stackView.alignment = .centerX
@@ -556,12 +587,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         stackView.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
 
         scrollView.documentView = stackView
-        runningVMsPanel.addSubview(scrollView)
+        vmsContent.addSubview(scrollView)
         runningVMsContainer = stackView
 
-        // Placeholder when no VMs running
         let placeholder = NSTextField(labelWithString: "No active VMs.\n\nSelect a VM and\nclick Start.")
-        placeholder.frame = NSRect(x: 12, y: activePanelHeight / 2 - 30, width: activePanelWidth - 24, height: 60)
+        placeholder.frame = NSRect(x: 12, y: contentH / 2 - 30, width: activePanelWidth - 24, height: 60)
         placeholder.font = NSFont.systemFont(ofSize: 10)
         placeholder.textColor = NSColor(white: 0.45, alpha: 1.0)
         placeholder.alignment = .center
@@ -569,9 +599,52 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         placeholder.isBordered = false
         placeholder.drawsBackground = false
         placeholder.maximumNumberOfLines = 0
-        placeholder.tag = 999
         placeholder.autoresizingMask = [.minYMargin, .maxYMargin]
-        runningVMsPanel.addSubview(placeholder)
+        vmsContent.addSubview(placeholder)
+        vmsPlaceholderLabel = placeholder
+
+        // ── Tasks tab content (hidden initially) ──────────────────────────────
+        let tasksContent = NSView(frame: NSRect(x: 0, y: 0, width: activePanelWidth, height: contentH))
+        tasksContent.autoresizingMask = [.height]
+        tasksContent.isHidden = true
+        runningVMsPanel.addSubview(tasksContent)
+        tasksTabContent = tasksContent
+
+        let taskStatusLbl = NSTextField(labelWithString: "No tasks running.")
+        taskStatusLbl.frame = NSRect(x: 8, y: contentH - 20, width: activePanelWidth - 16, height: 16)
+        taskStatusLbl.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        taskStatusLbl.textColor = NSColor(white: 0.5, alpha: 1.0)
+        taskStatusLbl.lineBreakMode = .byTruncatingTail
+        taskStatusLbl.autoresizingMask = [.minYMargin]
+        tasksContent.addSubview(taskStatusLbl)
+        tasksStatusLabel = taskStatusLbl
+
+        let taskProgress = NSProgressIndicator(frame: NSRect(x: 8, y: contentH - 36, width: activePanelWidth - 16, height: 8))
+        taskProgress.style = .bar
+        taskProgress.controlSize = .small
+        taskProgress.minValue = 0
+        taskProgress.maxValue = 1
+        taskProgress.isHidden = true
+        taskProgress.autoresizingMask = [.minYMargin]
+        tasksContent.addSubview(taskProgress)
+        tasksProgressBar = taskProgress
+
+        let logScrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: contentH - 48))
+        logScrollView.hasVerticalScroller = true
+        logScrollView.autohidesScrollers = true
+        logScrollView.drawsBackground = false
+        logScrollView.borderType = .noBorder
+        logScrollView.autoresizingMask = [.height]
+
+        let logText = NSTextView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: contentH - 48))
+        logText.isEditable = false
+        logText.drawsBackground = false
+        logText.textColor = NSColor(white: 0.7, alpha: 1.0)
+        logText.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
+        logText.autoresizingMask = [.width, .height]
+        logScrollView.documentView = logText
+        tasksContent.addSubview(logScrollView)
+        tasksLogTextView = logText
 
         contentView.addSubview(runningVMsPanel)
         statusBar = runningVMsPanel
@@ -947,13 +1020,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         statsUpdateTimer = nil
 
         // Show/hide placeholder based on running VMs
-        if let panel = statusBar {
-            for subview in panel.subviews {
-                if subview.tag == 999 {
-                    subview.isHidden = !runningVMs.isEmpty
-                }
-            }
-        }
+        let hasContent = !runningVMs.isEmpty || AISandboxInstallTracker.shared.isActive || IPSWDownloadTracker.shared.isActive
+        vmsPlaceholderLabel?.isHidden = hasContent
 
         // Check if we have a router VM running with other VMs
         let routerVM = runningVMs.first { $0.vm.networkConfig.isRouter }
@@ -1416,10 +1484,102 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @objc private func handleAISandboxInstallTrackerChanged(_ notification: Notification) {
-        // Tracker drives a synthetic entry at the top of the running-VMs
-        // sidebar; rebuild the sidebar to pick up the new state.
         DispatchQueue.main.async { [weak self] in
-            self?.refreshStatusBar()
+            guard let self else { return }
+            self.refreshStatusBar()
+            // Keep Tasks tab live when it's visible
+            if self.rightPanelTabControl?.selectedSegment == 1 {
+                self.refreshTasksTab()
+            }
+        }
+    }
+
+    @objc private func rightPanelTabChanged(_ sender: NSSegmentedControl) {
+        let showVMs = sender.selectedSegment == 0
+        vmsTabContent?.isHidden = !showVMs
+        tasksTabContent?.isHidden = showVMs
+        if !showVMs { refreshTasksTab() }
+    }
+
+    @objc private func handleIPSWDownloadTrackerChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.refreshStatusBar()
+            if self.rightPanelTabControl?.selectedSegment == 1 {
+                self.refreshTasksTab()
+            }
+        }
+    }
+
+    private func refreshTasksTab() {
+        let sandbox = AISandboxInstallTracker.shared
+        let ipsw = IPSWDownloadTracker.shared
+
+        let sandboxActive = sandbox.isActive || sandbox.phase == .finished || sandbox.phase == .failed
+        let ipswActive = ipsw.isActive || ipsw.phase == .finished || ipsw.phase == .failed
+
+        // Status label — show whichever task is active (prefer sandbox if both)
+        if sandboxActive {
+            let pctStr = sandbox.phase == .installing ? " · \(Int(sandbox.fraction * 100))%" : ""
+            tasksStatusLabel?.stringValue = "AI Sandbox: \(sandbox.phase.humanLabel)\(pctStr)"
+            tasksStatusLabel?.textColor = sandbox.phase == .failed
+                ? NSColor(red: 1.0, green: 0.3, blue: 0.3, alpha: 1.0)
+                : NSColor(red: 0.86, green: 0.50, blue: 1.00, alpha: 1.0)
+
+            tasksProgressBar?.isHidden = false
+            if sandbox.phase == .installing {
+                tasksProgressBar?.isIndeterminate = false
+                tasksProgressBar?.doubleValue = sandbox.fraction
+            } else {
+                tasksProgressBar?.isIndeterminate = true
+                tasksProgressBar?.startAnimation(nil)
+            }
+        } else if ipswActive {
+            let pctStr: String
+            if ipsw.phase == .downloading {
+                if ipsw.totalBytes > 0 {
+                    let mbDone = ipsw.receivedBytes / (1024 * 1024)
+                    let mbTotal = ipsw.totalBytes / (1024 * 1024)
+                    pctStr = " · \(Int(ipsw.fraction * 100))% (\(mbDone)/\(mbTotal) MB)"
+                } else {
+                    let mbDone = ipsw.receivedBytes / (1024 * 1024)
+                    pctStr = " · \(mbDone) MB"
+                }
+            } else { pctStr = "" }
+
+            tasksStatusLabel?.stringValue = "IPSW Download: \(ipsw.phase.humanLabel)\(pctStr)"
+            tasksStatusLabel?.textColor = ipsw.phase == .failed
+                ? NSColor(red: 1.0, green: 0.3, blue: 0.3, alpha: 1.0)
+                : NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0)
+
+            tasksProgressBar?.isHidden = false
+            if ipsw.totalBytes > 0 {
+                tasksProgressBar?.isIndeterminate = false
+                tasksProgressBar?.doubleValue = ipsw.fraction
+            } else {
+                tasksProgressBar?.isIndeterminate = true
+                tasksProgressBar?.startAnimation(nil)
+            }
+        } else {
+            tasksStatusLabel?.stringValue = "No tasks running."
+            tasksStatusLabel?.textColor = NSColor(white: 0.45, alpha: 1.0)
+            tasksProgressBar?.isHidden = true
+            tasksProgressBar?.stopAnimation(nil)
+        }
+
+        // Merge logs from both trackers — show whichever has content
+        var allLogs: [String] = []
+        if sandboxActive || !sandbox.logMessages.isEmpty {
+            allLogs.append(contentsOf: sandbox.logMessages)
+        }
+        if ipswActive || !ipsw.logMessages.isEmpty {
+            if !allLogs.isEmpty && !ipsw.logMessages.isEmpty { allLogs.append("---") }
+            allLogs.append(contentsOf: ipsw.logMessages)
+        }
+        let newLog = allLogs.joined(separator: "\n")
+        if let tv = tasksLogTextView, tv.string != newLog {
+            tv.string = newLog
+            tv.scrollToEndOfDocument(nil)
         }
     }
 
