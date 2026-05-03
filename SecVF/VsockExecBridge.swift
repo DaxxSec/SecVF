@@ -176,9 +176,12 @@ final class VsockExecBridge {
     // MARK: - Accept
 
     private func acceptOne() {
-        var clientAddr = sockaddr()
-        var clientLen = socklen_t(MemoryLayout<sockaddr>.size)
-        let clientFd = accept(listenerFd, &clientAddr, &clientLen)
+        // We don't inspect the peer address here — getpeereid() is what
+        // we use for auth — so let accept() skip filling it in. Previously
+        // we passed a `sockaddr` (16 bytes) for an AF_UNIX accept, which
+        // would have truncated a real `sockaddr_un` (~110 bytes). The
+        // address was never read, but the type was still wrong.
+        let clientFd = accept(listenerFd, nil, nil)
         guard clientFd >= 0 else { return }
         _ = fcntl(clientFd, F_SETFD, FD_CLOEXEC)
 
@@ -263,8 +266,31 @@ final class VsockExecBridge {
 
     /// Internal entry point that takes an explicit allowlist path so tests
     /// can drive the parser without writing into the real ~/.avf tree.
+    ///
+    /// SECURITY: the file is only honored if it's owned by the current user
+    /// AND not group/world-writable. Without this check, on a multi-user host
+    /// anyone with write access to the parent directory could add their own
+    /// UID and bypass the peer-cred gate.
     static func loadAllowlist(at configPath: String) -> Set<uid_t> {
         var allowed: Set<uid_t> = [getuid()]
+
+        var st = Darwin.stat()
+        let statRC = configPath.withCString { stat($0, &st) }
+        guard statRC == 0 else {
+            // File doesn't exist (or unreadable); fall back to defaults.
+            return allowed
+        }
+        if st.st_uid != getuid() {
+            NSLog("[VsockExecBridge] allowlist rejected: not owned by current user (st_uid=%u, getuid=%u)",
+                  st.st_uid, getuid())
+            return allowed
+        }
+        if (st.st_mode & 0o022) != 0 {
+            NSLog("[VsockExecBridge] allowlist rejected: group/world-writable (mode=0%o)",
+                  st.st_mode)
+            return allowed
+        }
+
         guard let raw = try? String(contentsOfFile: configPath, encoding: .utf8) else {
             return allowed
         }
@@ -481,7 +507,9 @@ final class VsockExecBridgeManager {
     /// could previously each construct + start a bridge before either inserted
     /// into the map, leaking the loser. We now serialize the whole
     /// build-and-install path under the lock and stop any prior bridge for
-    /// the same vmId before installing the new one.
+    /// the same vmId before installing the new one. (Supersedes an earlier
+    /// "lock around start" fix from the security review — this one handles
+    /// the cross-thread race in addition to the same-vmId re-entry case.)
     func startBridge(vmId: UUID, vmName: String, vm: VZVirtualMachine) {
         guard vm.socketDevices.first is VZVirtioSocketDevice else { return }
 
