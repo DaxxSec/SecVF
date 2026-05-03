@@ -40,6 +40,7 @@
 
 import Virtualization
 import Foundation
+import Darwin   // flock(2), open(2), close(2)
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -366,6 +367,20 @@ class AISandboxMacVMInstaller {
         }
         try bundle.create()
 
+        // ── Preflight: aux storage flock ──────────────────────────────────────
+        // VZ's `installConfig.validate()` will surface a generic "Invalid
+        // virtual machine configuration / Failed to lock auxiliary storage"
+        // (VZErrorDomain 2 / NSPOSIXErrorDomain 35 EAGAIN) if anything else
+        // has an exclusive lock on aux.img. Detect that here so the user
+        // gets actionable guidance ("kill these processes") instead of VZ's
+        // opaque wrapper. We probe via a non-blocking flock on a freshly-
+        // opened FD; success → close immediately so creatingStorageAt: can
+        // take the real lock. Tiny TOCTOU window we accept (an attacker who
+        // could exploit it already had the lock).
+        try Self.assertAuxStorageNotExternallyLocked(at: bundle.auxStorageURL)
+
+        try Task.checkCancellation()  // honor task cancellation
+
         // ── Resolve restore image ─────────────────────────────────────────────
         // Prefer a caller-provided local IPSW (skips the multi-GB download).
         // Otherwise query Apple's CDN for the latest supported macOS image.
@@ -375,6 +390,8 @@ class AISandboxMacVMInstaller {
         } else {
             restoreImage = try await VZMacOSRestoreImage.latestSupported
         }
+
+        try Task.checkCancellation()
 
         // Get the hardware requirements for this restore image
         guard let requirements = restoreImage.mostFeaturefulSupportedConfiguration else {
@@ -429,7 +446,17 @@ class AISandboxMacVMInstaller {
         installConfig.pointingDevices = [VZUSBScreenCoordinatePointingDeviceConfiguration()]
         installConfig.entropyDevices  = [VZVirtioEntropyDeviceConfiguration()]
 
-        try installConfig.validate()
+        // Translate VZ's generic wrap of EAGAIN into our specific error so
+        // the recovery suggestion fires. Any other validation failure
+        // bubbles up unchanged.
+        do {
+            try installConfig.validate()
+        } catch {
+            if Self.isAuxStorageLockError(error) {
+                throw SecVFError.auxiliaryStorageLocked(path: bundle.auxStorageURL.path)
+            }
+            throw error
+        }
 
         // ── Install macOS from IPSW ───────────────────────────────────────────
         // We're already on @MainActor (function annotation), so the framework
@@ -457,6 +484,52 @@ class AISandboxMacVMInstaller {
         }
 
         return bundle
+    }
+
+    // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /// Non-blocking flock check on aux.img. If the file doesn't exist yet
+    /// (clean-slate install), we no-op and let `creatingStorageAt:` create it.
+    /// If it exists and an exclusive flock is unavailable, we throw with the
+    /// path so SecVFError can render the user-facing diagnostic.
+    private static func assertAuxStorageNotExternallyLocked(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let fd = open(url.path, O_RDWR)
+        guard fd >= 0 else {
+            // Can't open at all — distinct error class; let creatingStorageAt:
+            // surface the underlying reason with its own error.
+            return
+        }
+        defer { close(fd) }
+        // LOCK_EX | LOCK_NB: exclusive, non-blocking. Returns -1/EAGAIN if held.
+        let r = flock(fd, LOCK_EX | LOCK_NB)
+        if r != 0 {
+            let e = errno
+            if e == EAGAIN || e == EWOULDBLOCK {
+                throw SecVFError.auxiliaryStorageLocked(path: url.path)
+            }
+            // Other flock failures (EBADF, ENOLCK, …) are not the lock-held
+            // case; let downstream surface them with their own specifics.
+            return
+        }
+        // Release the lock so the real `creatingStorageAt:` can take it.
+        // The fd close in `defer` already does this; flock(LOCK_UN) is
+        // belt-and-suspenders for clarity.
+        _ = flock(fd, LOCK_UN)
+    }
+
+    /// Returns true if the given Error is VZ's wrap of POSIX EAGAIN on aux
+    /// storage. We check by walking the underlying-error chain rather than
+    /// matching error message strings (which Apple may localize/reword).
+    private static func isAuxStorageLockError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        guard ns.domain == VZErrorDomain else { return false }
+        var current: NSError? = ns.userInfo[NSUnderlyingErrorKey] as? NSError
+        while let e = current {
+            if e.domain == NSPOSIXErrorDomain, e.code == Int(EAGAIN) { return true }
+            current = e.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return false
     }
 
     // ── Step 2: Provision the installed VM ────────────────────────────────────

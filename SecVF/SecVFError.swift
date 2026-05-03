@@ -21,6 +21,9 @@ enum SecVFError: LocalizedError {
     case installerAttachmentFailed(path: String)
     case invalidDiskConfiguration
 
+    // MARK: - Auxiliary Storage Errors
+    case auxiliaryStorageLocked(path: String)
+
     // MARK: - Machine Identifier Errors
     case machineIdentifierNotFound(path: String)
     case machineIdentifierDataInvalid
@@ -112,6 +115,8 @@ enum SecVFError: LocalizedError {
             return "Failed to create hardware model from data"
         case .auxiliaryStorageFailed(let path):
             return "Failed to create auxiliary storage at: \(path)"
+        case .auxiliaryStorageLocked(let path):
+            return "Auxiliary storage at \(path) is locked by another process — refusing to corrupt a running VM's state"
         case .restoreImageNotProvided:
             return "No restore image (IPSW) path provided for macOS installation"
         case .restoreImageHardwareModelFailed:
@@ -179,6 +184,13 @@ enum SecVFError: LocalizedError {
             return "Only use scripts from trusted locations within your home directory or app bundle."
         case .scriptsDiskCreationFailed, .scriptsISOCreationFailed:
             return "Check that you have write permissions to ~/.avf and sufficient disk space."
+        case .auxiliaryStorageLocked(let path):
+            return """
+                Another VZ instance is holding an exclusive flock on this file. Quit SecVF.app, then in Terminal:
+                    lsof "\(path)"          # find the PID holding the lock
+                    sudo kill -9 <PID>      # or: sudo pkill -9 -f SecVF
+                Then relaunch SecVF and try again. If the file is from a partial install, you can also `rm` it.
+                """
         case .checksumUnavailable:
             return "Wait for the official mirror's checksum file to come back online, or pick a distro version whose checksum can be fetched. Do not boot an unverified ISO."
         default:

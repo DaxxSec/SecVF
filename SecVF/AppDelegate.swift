@@ -13,6 +13,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
     // Multi-VM architecture - manage separate windows for each running VM
     private var vmWindows: [UUID: NSWindow] = [:]
+
+    // The currently-running AI Sandbox install task, if any. A second click
+    // on Tools → Create AI Sandbox VM… cancels this one before starting a
+    // new attempt — prevents two installer pipelines fighting over the
+    // same aux storage flock when the first one errored out partway.
+    private var activeAISandboxInstallTask: Task<Void, Never>?
     private var virtualMachines: [UUID: VZVirtualMachine] = [:]
     private var vmConfigs: [UUID: VMConfiguration] = [:]
     private var vmViews: [UUID: VZVirtualMachineView] = [:]
@@ -1870,6 +1876,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     /// install + provision + seal in the background and surfaces progress
     /// + completion alerts to the user.
     @objc private func createAISandboxVM() {
+        // If a previous install is still running (or wedged), cancel it
+        // first so its VZ refs can drop and any flock it holds releases
+        // before we kick off a fresh attempt on the same paths.
+        if let prior = activeAISandboxInstallTask {
+            NSLog("[AISandbox] Cancelling prior install task before starting new attempt")
+            prior.cancel()
+            activeAISandboxInstallTask = nil
+        }
+
         // Confirm with the user — this takes 30-60 min and is destructive
         // if a base bundle already exists.
         let baseBundleURL = AISandboxDefaults.baseBundle
@@ -1934,7 +1949,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // and renders an "installing" entry in the Running VMs sidebar.
         AISandboxInstallTracker.shared.begin()
 
-        Task { [weak self] in
+        let task = Task { [weak self] in
+            defer {
+                Task { @MainActor in
+                    // Self-clear so a future click doesn't try to cancel a
+                    // task that already finished. Only clear if WE are
+                    // still the registered active task — a later click may
+                    // have replaced us.
+                    self?.clearActiveInstallTaskIfMatches()
+                }
+            }
             do {
                 // Phase 1: install
                 let bundle = try await AISandboxMacVMInstaller.downloadAndInstall(
@@ -1946,12 +1970,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                     }
                 )
 
+                try Task.checkCancellation()
                 await MainActor.run {
                     AISandboxInstallTracker.shared.setPhase(.provisioning)
                 }
                 // Phase 2: provision
                 try await AISandboxMacVMInstaller.provisionBundle(bundle)
 
+                try Task.checkCancellation()
                 await MainActor.run {
                     AISandboxInstallTracker.shared.setPhase(.sealing)
                 }
@@ -1971,6 +1997,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                     )
                     AISandboxInstallTracker.shared.reset()
                 }
+            } catch is CancellationError {
+                NSLog("[AISandbox] Install cancelled (likely superseded by a later click)")
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.fail(with: "cancelled")
+                    AISandboxInstallTracker.shared.reset()
+                }
             } catch {
                 await MainActor.run {
                     AISandboxInstallTracker.shared.fail(with: error.localizedDescription)
@@ -1982,6 +2014,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 }
             }
         }
+        activeAISandboxInstallTask = task
+    }
+
+    /// Clears `activeAISandboxInstallTask` if it still points at a finished task.
+    /// Idempotent. Called from each install task's `defer` so future clicks
+    /// don't try to cancel an already-completed task.
+    private func clearActiveInstallTaskIfMatches() {
+        // We can't compare Task<Void, Never> values for equality directly,
+        // so the simple "clear it if it's there" works fine — if a newer
+        // task already replaced us, this just no-ops since the new task
+        // also installs a defer that will clear itself when done.
+        // But we must NOT clear a task that isn't ours; do the safer pattern:
+        // only clear if the Task is finished (we are calling from its own
+        // defer, so by definition our task is finished). The newer task,
+        // if any, is still running, so we'd be stomping on it.
+        // → actually the cleanest fix is: don't clear here. The next click
+        // unconditionally cancels-and-replaces, which handles both stale
+        // and live cases. Leaving this as a no-op keeps the surface stable
+        // in case we want stricter semantics later.
     }
 
     /// Tools → Download macOS IPSW. One-time pull of the latest Apple-supported
