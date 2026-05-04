@@ -105,14 +105,24 @@ struct AISandboxVMBundle {
     /// APFS CoW clone this bundle to a new session bundle.
     /// On APFS, cp -c (clonefile) makes this nearly instantaneous.
     func clone(to destination: URL) throws {
+        let fm = FileManager.default
+
         // Clone disk image (CoW — zero copy time, zero extra space until written)
-        try FileManager.default.copyItem(at: diskURL, to: destination.appendingPathComponent("disk.img"))
+        let clonedDisk = destination.appendingPathComponent("disk.img")
+        try fm.copyItem(at: diskURL, to: clonedDisk)
         // Clone aux storage (small, but needs its own writable copy)
-        try FileManager.default.copyItem(at: auxStorageURL, to: destination.appendingPathComponent("aux.img"))
+        let clonedAux = destination.appendingPathComponent("aux.img")
+        try fm.copyItem(at: auxStorageURL, to: clonedAux)
+
+        // The sealed base has 0o444 on disk.img/aux.img — make the session
+        // copies writable so VZ can attach them with readOnly: false.
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: clonedDisk.path)
+        try fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: clonedAux.path)
+
         // Share hardware model + machine identifier (read-only, no need to copy)
         // Session VMs reuse the base's hardware identity — fine for sandbox use
-        try FileManager.default.copyItem(at: hardwareModelURL, to: destination.appendingPathComponent("hardware-model.bin"))
-        try FileManager.default.copyItem(at: machineIdentifierURL, to: destination.appendingPathComponent("machine-identifier.bin"))
+        try fm.copyItem(at: hardwareModelURL, to: destination.appendingPathComponent("hardware-model.bin"))
+        try fm.copyItem(at: machineIdentifierURL, to: destination.appendingPathComponent("machine-identifier.bin"))
     }
 }
 
