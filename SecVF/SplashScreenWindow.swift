@@ -17,6 +17,7 @@ class SplashScreenWindow: NSWindow {
     private var statusLabel: NSTextField?
     private var fadeOutTimer: Timer?
     private var versionPulseTimer: Timer?
+    private var isDismissing = false
 
     init() {
         // Create frameless window in center of screen
@@ -252,12 +253,9 @@ class SplashScreenWindow: NSWindow {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             logoImageView.animator().alphaValue = 1.0
         }, completionHandler: { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isDismissing else { return }
             MainActor.assumeIsolated {
-                // Pulse logo
                 self.pulseAnimation()
-
-                // Fade in text
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 0.6
                     self.titleLabel.animator().alphaValue = 1.0
@@ -265,19 +263,17 @@ class SplashScreenWindow: NSWindow {
                 })
             }
         })
-
-        // No auto-close — caller controls dismissal via fadeOut().
     }
 
     private func pulseAnimation() {
+        guard !isDismissing else { return }
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 1.5
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
-
             logoImageView.layer?.transform = CATransform3DMakeScale(1.1, 1.1, 1.0)
         }, completionHandler: { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isDismissing else { return }
             MainActor.assumeIsolated {
                 NSAnimationContext.runAnimationGroup({ context in
                     context.duration = 1.5
@@ -292,6 +288,9 @@ class SplashScreenWindow: NSWindow {
     }
 
     func fadeOut() {
+        guard !isDismissing else { return }
+        isDismissing = true
+
         fadeOutTimer?.invalidate()
         fadeOutTimer = nil
         versionPulseTimer?.invalidate()
@@ -302,16 +301,10 @@ class SplashScreenWindow: NSWindow {
         logoImageView?.layer?.removeAllAnimations()
         contentView?.subviews.forEach { $0.layer?.removeAllAnimations() }
 
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.5
-            self.animator().alphaValue = 0
-        }, completionHandler: { [weak self] in
-            // Defer close() to next run loop iteration so the _NSWindowTransformAnimation
-            // created by animator().alphaValue fully deallocates before the window closes
-            DispatchQueue.main.async { [weak self] in
-                self?.close()
-            }
-        })
+        // Set alpha directly (no animator proxy) to avoid dangling
+        // _NSWindowTransformAnimation references after close.
+        self.alphaValue = 0
+        self.close()
     }
 
     deinit {

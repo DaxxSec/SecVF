@@ -1333,12 +1333,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             guard !dismissed else { return }
             dismissed = true
             self?.splashScreen?.fadeOut()
-            // Don't nil splashScreen here — fadeOut() runs a 0.5s animation.
-            // Releasing the window mid-animation causes EXC_BAD_ACCESS.
-            // The window closes itself at the end of fadeOut; nil the ref after.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                self?.splashScreen = nil
-            }
+            self?.splashScreen = nil
             self?.showLibraryWindow()
         }
 
