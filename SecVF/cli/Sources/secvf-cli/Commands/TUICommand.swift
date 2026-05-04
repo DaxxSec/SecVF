@@ -35,8 +35,10 @@ struct TUICommand: ParsableCommand {
             return
         }
 
-        // Get the CLI path to pass to the TUI
-        let cliPath = CommandLine.arguments[0]
+        // Get the CLI path to pass to the TUI. Using argv[0] directly is
+        // unreliable when the CLI is invoked via a PATH symlink (Issue A
+        // of PR #4 followup). Resolve via _NSGetExecutablePath instead.
+        let cliPath = resolveSelfExecutablePath()
 
         // Launch the TUI
         let process = Process()
@@ -139,8 +141,9 @@ struct TUICommand: ParsableCommand {
     private func findTUIModule() -> String? {
         let fm = FileManager.default
 
-        // Get CLI executable location
-        let executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        // Get CLI executable location. argv[0] alone breaks when the CLI is
+        // on PATH via a symlink — basename doesn't resolve to a directory.
+        let executableURL = URL(fileURLWithPath: resolveSelfExecutablePath()).resolvingSymlinksInPath()
         let executableDir = executableURL.deletingLastPathComponent()
 
         // Search paths relative to CLI binary
