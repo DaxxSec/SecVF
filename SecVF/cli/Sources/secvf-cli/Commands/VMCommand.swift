@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import Darwin
+import AppKit  // NSWorkspace — used to detect a running SecVF.app instance
 
 /// Resolve the running CLI's own absolute executable path.
 ///
@@ -22,6 +23,47 @@ func resolveSelfExecutablePath() -> String {
     }
     // Last-ditch fallback: hope argv[0] is absolute.
     return CommandLine.arguments[0]
+}
+
+/// Bundle IDs the desktop app may be running under. Both legacy (`com.ItzDaxxy.SecVF`)
+/// and the intended new ID (`com.DaxxSec.SecVF`) are accepted — same compatibility
+/// strategy ISOCacheManager uses for the `validBundleIDs` allowlist.
+private let secvfAppBundleIDs: Set<String> = [
+    "com.ItzDaxxy.SecVF",
+    "com.DaxxSec.SecVF",
+]
+
+/// True if a SecVF.app instance is running on this user session. Used by the
+/// AISandbox start path (Issue D) to decide whether to route the start
+/// request via DistributedNotificationCenter to the GUI app, vs. fail clearly
+/// because the bridge owner isn't running.
+func isSecVFAppRunning() -> Bool {
+    return NSWorkspace.shared.runningApplications.contains { app in
+        guard let id = app.bundleIdentifier else { return false }
+        return secvfAppBundleIDs.contains(id)
+    }
+}
+
+/// Per-VM log file under `~/.avf/logs/`. Used by the foreground subprocess
+/// spawn (Issue C) so the spawned process's stderr/stdout aren't sent to
+/// `/dev/null` — when the spawn fails immediately (entitlements, missing
+/// IPSW, VZ error), the user has somewhere to look.
+func vmStartLogPath(for vmName: String) -> String {
+    let logsDir = NSHomeDirectory() + "/.avf/logs"
+    try? FileManager.default.createDirectory(
+        atPath: logsDir, withIntermediateDirectories: true
+    )
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyyMMdd-HHmmss"
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    let stamp = formatter.string(from: Date())
+    // Sanitize vmName for filesystem use: keep alphanumerics, dash, underscore.
+    let safeName = vmName.unicodeScalars.map { scalar -> String in
+        let allowed = CharacterSet.alphanumerics
+            .union(CharacterSet(charactersIn: "_-"))
+        return allowed.contains(scalar) ? String(scalar) : "_"
+    }.joined()
+    return "\(logsDir)/\(safeName)-start-\(stamp).log"
 }
 
 struct VMCommand: ParsableCommand {
@@ -288,42 +330,114 @@ struct VMStart: AsyncParsableCommand {
 
             VMProcessManager.shared.removePidFile(for: name)
         } else {
-            // Spawn background process. argv[0] is unreliable when the CLI
-            // is invoked via a PATH symlink — resolve our own absolute path.
-            let executablePath = resolveSelfExecutablePath()
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = ["vm", "start", name, "--foreground"]
+            let isAISandbox = (vm["osType"] as? String) == "AISandbox"
 
-            // Detach from terminal
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            process.standardInput = FileHandle.nullDevice
-
-            do {
-                try process.run()
-
-                // Wait a moment to check if it started
-                Thread.sleep(forTimeInterval: 1)
-
-                if VMProcessManager.shared.isVMRunning(name: name) {
+            if isAISandbox {
+                // Issue D: AI Sandbox VMs run inside SecVF.app. The vsock exec
+                // bridge (VsockExecBridgeManager) is owned by AppDelegate and
+                // can only be started from the GUI app's process. Spawning a
+                // CLI-local VMRunner builds a working VZ machine but no
+                // /tmp/secvf-exec-<id>.sock ever appears, so --wait always
+                // times out. Route the start request to the GUI app via
+                // DistributedNotificationCenter instead — handleCLIStartVM
+                // already calls bootAISandboxSession() for AISandbox VMs.
+                guard isSecVFAppRunning() else {
+                    let msg = "SecVF.app is not running. Open the app first, then re-run `secvf-cli vm start \(name)`."
                     if options.json {
-                        JSONOutput(success: true, message: "VM started", data: ["name": name, "pid": process.processIdentifier]).print()
+                        JSONOutput(success: false, message: msg).print()
                     } else {
-                        print("✓ Started VM: \(name) (PID: \(process.processIdentifier))")
+                        print("Error: \(msg)")
                     }
-                } else {
-                    if options.json {
-                        JSONOutput(success: false, message: "VM failed to start").print()
-                    } else {
-                        print("Error: VM failed to start")
-                    }
+                    return
                 }
-            } catch {
+
+                DistributedNotificationCenter.default().postNotificationName(
+                    NSNotification.Name("com.secvf.cli.start"),
+                    object: nil,
+                    userInfo: ["vmName": name],
+                    deliverImmediately: true
+                )
+
                 if options.json {
-                    JSONOutput(success: false, message: "Failed to spawn VM process: \(error.localizedDescription)").print()
+                    JSONOutput(success: true, message: "VM start requested via SecVF.app",
+                               data: ["name": name, "transport": "DistributedNotificationCenter"]).print()
                 } else {
-                    print("Error: \(error.localizedDescription)")
+                    print("✓ Requested AI Sandbox VM start via SecVF.app: \(name)")
+                }
+                // Skip the local spawn; fall through to the --wait loop which
+                // polls the exec-bridge socket for readiness.
+            } else {
+                // Standard VM path: spawn a background process running the
+                // CLI in --foreground mode under our own pid namespace.
+                //
+                // Issue C: redirect stdio to a per-VM log file (was /dev/null).
+                // When VZVirtualMachine.start() fails — entitlements gap,
+                // missing IPSW, malformed bundle — the user previously saw
+                // only "VM failed to start" with no diagnostic. The log path
+                // is printed on failure. We also extend the post-spawn check
+                // from a single 1s wait to a 5s/0.5s polling loop so slow
+                // VZ bringup doesn't get reported as a startup failure.
+                let executablePath = resolveSelfExecutablePath()
+                let logPath = vmStartLogPath(for: name)
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: executablePath)
+                process.arguments = ["vm", "start", name, "--foreground"]
+
+                let logFD = open(logPath, O_WRONLY | O_CREAT | O_APPEND, 0o600)
+                let logHandle: FileHandle
+                if logFD >= 0 {
+                    logHandle = FileHandle(fileDescriptor: logFD, closeOnDealloc: true)
+                    process.standardOutput = logHandle
+                    process.standardError = logHandle
+                } else {
+                    // If we can't open the log, fall back to the old behaviour
+                    // rather than refuse to start.
+                    process.standardOutput = FileHandle.nullDevice
+                    process.standardError = FileHandle.nullDevice
+                }
+                process.standardInput = FileHandle.nullDevice
+
+                do {
+                    try process.run()
+
+                    // Poll for up to 5s in 500ms increments.
+                    let deadline = Date().addingTimeInterval(5)
+                    var seenRunning = false
+                    while Date() < deadline {
+                        if VMProcessManager.shared.isVMRunning(name: name) {
+                            seenRunning = true
+                            break
+                        }
+                        Thread.sleep(forTimeInterval: 0.5)
+                    }
+
+                    if seenRunning {
+                        if options.json {
+                            JSONOutput(success: true, message: "VM started",
+                                       data: ["name": name,
+                                              "pid": process.processIdentifier,
+                                              "log": logPath]).print()
+                        } else {
+                            print("✓ Started VM: \(name) (PID: \(process.processIdentifier))")
+                            print("  Log: \(logPath)")
+                        }
+                    } else {
+                        if options.json {
+                            JSONOutput(success: false, message: "VM failed to start",
+                                       data: ["log": logPath]).print()
+                        } else {
+                            print("Error: VM failed to start. See log for details:")
+                            print("  \(logPath)")
+                        }
+                    }
+                } catch {
+                    if options.json {
+                        JSONOutput(success: false, message: "Failed to spawn VM process: \(error.localizedDescription)",
+                                   data: ["log": logPath]).print()
+                    } else {
+                        print("Error: \(error.localizedDescription)")
+                        print("  Log: \(logPath)")
+                    }
                 }
             }
 
