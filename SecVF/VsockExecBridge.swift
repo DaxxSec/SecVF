@@ -323,31 +323,46 @@ final class VsockExecBridge {
         var slotHandedOff = false
         defer { if !slotHandedOff { releaseConnectionSlot() } }
 
-        guard let vm = vm else {
-            errorOut(clientHandle, "VM no longer running")
-            return
-        }
-        guard let socketDev = vm.socketDevices.first as? VZVirtioSocketDevice else {
-            errorOut(clientHandle, "no vsock device on VM")
-            return
+        // VZVirtualMachine properties and connect(toPort:) must be called on
+        // the main thread — VZ enforces this with a runtime trap (EXC_BREAKPOINT).
+        // Resolve the socket device and initiate the vsock connect on main,
+        // then continue the byte-piping setup on this background thread.
+        let sem = DispatchSemaphore(value: 0)
+        var connOpt: VZVirtioSocketConnection?
+        var connErr: Error?
+        var earlyError: String?
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let vm = self.vm else {
+                earlyError = "VM no longer running"
+                sem.signal()
+                return
+            }
+            guard let socketDev = vm.socketDevices.first as? VZVirtioSocketDevice else {
+                earlyError = "no vsock device on VM"
+                sem.signal()
+                return
+            }
+            socketDev.connect(toPort: self.vsockPort) { result in
+                switch result {
+                case .success(let c): connOpt = c
+                case .failure(let e): connErr = e
+                }
+                sem.signal()
+            }
         }
 
         // Bounded wait — if the guest's vsock stack never accepts (e.g. the
         // exec agent isn't listening), we surface a clean error instead of
         // wedging the thread forever.
-        let sem = DispatchSemaphore(value: 0)
-        var connOpt: VZVirtioSocketConnection?
-        var connErr: Error?
-        socketDev.connect(toPort: vsockPort) { result in
-            switch result {
-            case .success(let c): connOpt = c
-            case .failure(let e): connErr = e
-            }
-            sem.signal()
-        }
         let connectTimeout: DispatchTime = .now() + .seconds(5)
         if sem.wait(timeout: connectTimeout) == .timedOut {
             errorOut(clientHandle, "vsock connect to :\(vsockPort) timed out after 5s")
+            return
+        }
+
+        if let msg = earlyError {
+            errorOut(clientHandle, msg)
             return
         }
 
