@@ -15,9 +15,9 @@ class SplashScreenWindow: NSWindow {
     private var titleLabel: NSTextField!
     private var subtitleLabel: NSTextField!
     private var statusLabel: NSTextField?
-    private var fadeOutTimer: Timer?
     private var versionPulseTimer: Timer?
     private var isDismissing = false
+    private var pulseHigh = false
 
     init() {
         // Create frameless window in center of screen
@@ -82,6 +82,7 @@ class SplashScreenWindow: NSWindow {
         logoImageView.imageScaling = .scaleProportionallyUpOrDown
         logoImageView.image = createSecVFLogo()
         logoImageView.alphaValue = 0  // Start invisible for fade-in animation
+        logoImageView.wantsLayer = true
         logoContainer.addSubview(logoImageView)
 
         // Title - Two-tone: "Sec" in light gray, "VF" in medium gray
@@ -139,15 +140,11 @@ class SplashScreenWindow: NSWindow {
         versionLabel.alphaValue = 0
         contentView.addSubview(versionLabel)
 
-        // Animate version label pulsing — capture self weakly so
-        // the timer doesn't prevent deallocation.
-        versionPulseTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let label = self?.statusLabel else { return }
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.5
-                label.animator().alphaValue = label.alphaValue == 0.3 ? 0.6 : 0.3
-            }
-        }
+        // Pulse the version label — use target/selector to stay on MainActor
+        versionPulseTimer = Timer.scheduledTimer(
+            timeInterval: 0.5, target: self,
+            selector: #selector(pulseTick), userInfo: nil, repeats: true
+        )
     }
 
     private func createSecVFLogo() -> NSImage {
@@ -247,69 +244,50 @@ class SplashScreenWindow: NSWindow {
     }
 
     private func animateEntrance() {
-        // Fade in sequence
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.8
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            logoImageView.animator().alphaValue = 1.0
-        }, completionHandler: { [weak self] in
-            guard let self, !self.isDismissing else { return }
-            MainActor.assumeIsolated {
-                self.pulseAnimation()
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 0.6
-                    self.titleLabel.animator().alphaValue = 1.0
-                    self.subtitleLabel.animator().alphaValue = 1.0
-                })
-            }
-        })
+        guard !isDismissing else { return }
+
+        // Skip all NSAnimationContext animator proxies — they create dangling
+        // references that crash when the window deallocates mid-animation.
+        // Just snap to final state immediately.
+        logoImageView.alphaValue = 1.0
+        titleLabel.alphaValue = 1.0
+        subtitleLabel.alphaValue = 1.0
     }
 
-    private func pulseAnimation() {
+    @objc private func pulseTick() {
         guard !isDismissing else { return }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 1.5
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            context.allowsImplicitAnimation = true
-            logoImageView.layer?.transform = CATransform3DMakeScale(1.1, 1.1, 1.0)
-        }, completionHandler: { [weak self] in
-            guard let self, !self.isDismissing else { return }
-            MainActor.assumeIsolated {
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = 1.5
-                    self.logoImageView.layer?.transform = CATransform3DIdentity
-                })
-            }
-        })
+        pulseHigh.toggle()
+        statusLabel?.alphaValue = pulseHigh ? 0.6 : 0.3
     }
 
     func setStatusMessage(_ message: String) {
+        guard !isDismissing else { return }
         statusLabel?.stringValue = message
     }
 
     func fadeOut() {
         guard !isDismissing else { return }
+
         isDismissing = true
 
-        fadeOutTimer?.invalidate()
-        fadeOutTimer = nil
         versionPulseTimer?.invalidate()
         versionPulseTimer = nil
 
-        // Cancel any running layer animations (pulse, version label) to prevent
-        // use-after-free when the window is deallocated
+        // Cancel any running layer animations
         logoImageView?.layer?.removeAllAnimations()
         contentView?.subviews.forEach { $0.layer?.removeAllAnimations() }
 
-        // Set alpha directly (no animator proxy) to avoid dangling
-        // _NSWindowTransformAnimation references after close.
+        // Hide the window — use orderOut instead of close to avoid
+        // deferred AppKit teardown callbacks that crash after dealloc.
         self.alphaValue = 0
-        self.close()
+
+        self.orderOut(nil)
+
     }
 
     deinit {
-        fadeOutTimer?.invalidate()
         versionPulseTimer?.invalidate()
+
     }
 }
 

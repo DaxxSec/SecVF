@@ -1333,7 +1333,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             guard !dismissed else { return }
             dismissed = true
             self?.splashScreen?.fadeOut()
-            self?.splashScreen = nil
+            // Keep splashScreen reference alive — orderOut hides it but
+            // deallocating triggers deferred AppKit teardown that crashes.
             self?.showLibraryWindow()
         }
 
@@ -1346,20 +1347,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
         DistroConfigurationManager.shared.refreshDistroVersions(
             progress: { [weak self] distroName, status in
-                self?.splashScreen?.setStatusMessage("[ \(distroName): \(status) ]")
+                // progress callbacks arrive on background threads — bounce to main
+                DispatchQueue.main.async {
+                    self?.splashScreen?.setStatusMessage("[ \(distroName): \(status) ]")
+                }
             },
             completion: { [weak self] updated, errors in
-                if updated.isEmpty {
-                    self?.splashScreen?.setStatusMessage("[ ALL DISTROS CURRENT ]")
-                } else {
-                    self?.splashScreen?.setStatusMessage("[ UPDATED \(updated.count) DISTRO\(updated.count == 1 ? "" : "S") ]")
-                    for u in updated { NSLog("[DistroRefresh] Updated: %@", u) }
-                }
-                for e in errors { NSLog("[DistroRefresh] Error: %@", e) }
+                // completion is already on main (group.notify .main) but be safe
+                DispatchQueue.main.async {
+                    if updated.isEmpty {
+                        self?.splashScreen?.setStatusMessage("[ ALL DISTROS CURRENT ]")
+                    } else {
+                        self?.splashScreen?.setStatusMessage("[ UPDATED \(updated.count) DISTRO\(updated.count == 1 ? "" : "S") ]")
+                        for u in updated { NSLog("[DistroRefresh] Updated: %@", u) }
+                    }
+                    for e in errors { NSLog("[DistroRefresh] Error: %@", e) }
 
-                // Brief pause so user can read the final status, then dismiss
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    dismissSplash()
+                    // Brief pause so user can read the final status, then dismiss
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        dismissSplash()
+                    }
                 }
             }
         )
