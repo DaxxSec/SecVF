@@ -126,16 +126,21 @@ struct AISandboxMacVMConfiguration {
     /// Build a configuration from an existing provisioned VM bundle.
     /// Use this for session VMs (cloned from base).
     init(bundle: AISandboxVMBundle,
-         workspaceURL: URL = FileManager.default.homeDirectoryForCurrentUser
-             .appendingPathComponent("ai-sandbox-workspace"),
-         sessionsURL: URL = FileManager.default.homeDirectoryForCurrentUser
-             .appendingPathComponent(".avf/AISandbox/sessions"),
-         anchorURL: URL = FileManager.default.homeDirectoryForCurrentUser
-             .appendingPathComponent("ai-sandbox-workspace/anchor")
+         workspaceURL: URL = AISandboxDefaults.baseDir
+             .appendingPathComponent("workspace"),
+         sessionsURL: URL = AISandboxDefaults.sessionsDir,
+         anchorURL: URL = AISandboxDefaults.baseDir
+             .appendingPathComponent("workspace/anchor")
     ) throws {
 
         guard let hardwareModel     = bundle.hardwareModel     else { throw AISandboxVMError.missingHardwareModel }
         guard let machineIdentifier = bundle.machineIdentifier else { throw AISandboxVMError.missingMachineIdentifier }
+
+        // Ensure shared directories exist before VZSharedDirectory touches them
+        let fm = FileManager.default
+        for dir in [workspaceURL, sessionsURL, anchorURL] {
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
 
         let config = VZVirtualMachineConfiguration()
 
