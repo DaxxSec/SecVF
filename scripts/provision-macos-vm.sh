@@ -375,12 +375,17 @@ PLIST
 log "Configuring VirtioFS workspace mounts"
 sudo mkdir -p "$WORKSPACE_MOUNT" "$SESSIONS_MOUNT"
 
-# Create security telemetry directories (Change 4: known paths for sentinel)
+# Create security telemetry directories (Change 4: known paths for sentinel).
+# Note: chown/chmod inside a VirtioFS-mounted share fails with EPERM — the
+# host owns the underlying inodes and the guest can't override them. Soft-
+# fail the perm changes; the LaunchDaemon (which writes telemetry) runs as
+# root anyway, so it doesn't need the chown to succeed. Host-side ownership
+# of ~/.avf/AISandbox/workspace/ is what actually controls access.
 sudo mkdir -p "${WORKSPACE_MOUNT}/.secvf-telemetry/kali-netcap"
-sudo chown -R "${AI_SANDBOX_USER}:staff" "${WORKSPACE_MOUNT}/.secvf-telemetry"
-sudo chmod -R 750 "${WORKSPACE_MOUNT}/.secvf-telemetry"
-sudo chown "${AI_SANDBOX_USER}:staff" "$WORKSPACE_MOUNT"
-sudo chmod 750 "$WORKSPACE_MOUNT"
+sudo chown -R "${AI_SANDBOX_USER}:staff" "${WORKSPACE_MOUNT}/.secvf-telemetry" 2>/dev/null || true
+sudo chmod -R 750 "${WORKSPACE_MOUNT}/.secvf-telemetry" 2>/dev/null || true
+sudo chown "${AI_SANDBOX_USER}:staff" "$WORKSPACE_MOUNT" 2>/dev/null || true
+sudo chmod 750 "$WORKSPACE_MOUNT" 2>/dev/null || true
 
 # fstab entries for VirtioFS (tagged mounts from Swift config). Mount points
 # live under /Users/Shared because macOS's sealed system volume makes `/`
