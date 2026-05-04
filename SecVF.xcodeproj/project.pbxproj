@@ -54,6 +54,7 @@
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
 		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
 		SECPT002SECPT002SECPT002 /* SecurityPrimitivesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */; };
+		AISBT004AISBT004AISBT004 /* AISandboxInstallTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AISBT003AISBT003AISBT003 /* AISandboxInstallTrackerTests.swift */; };
 		UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */; };
 		VMMP002VMMP002VMMP002002 /* VMManagerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */; };
 /* End PBXBuildFile section */
@@ -122,6 +123,7 @@
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
 		SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityPrimitivesTests.swift; sourceTree = "<group>"; };
+		AISBT003AISBT003AISBT003 /* AISandboxInstallTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxInstallTrackerTests.swift; sourceTree = "<group>"; };
 		UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UTTypeExtensions.swift; sourceTree = "<group>"; };
 		VMMP001VMMP001VMMP001001 /* VMManagerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerProtocol.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -241,6 +243,7 @@
 				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
 				DD6666DD66666666DD666DD6 /* IntegrationTests.swift */,
 				SECPT001SECPT001SECPT001 /* SecurityPrimitivesTests.swift */,
+				AISBT003AISBT003AISBT003 /* AISandboxInstallTrackerTests.swift */,
 			);
 			name = SecVFTests;
 			path = SecVF/Tests;
@@ -418,6 +421,7 @@
 				CC5555CC55555555CC555CC5 /* ISOCacheManagerTests.swift in Sources */,
 				CC6666CC66666666CC666CC6 /* IntegrationTests.swift in Sources */,
 				SECPT002SECPT002SECPT002 /* SecurityPrimitivesTests.swift in Sources */,
+				AISBT004AISBT004AISBT004 /* AISandboxInstallTrackerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -367,14 +367,47 @@ class AISandboxMacVMInstaller {
         }
         try bundle.create()
 
-        // Clean up the bundle directory on any failure so the next attempt
-        // starts fresh without prompting "Replace existing bundle?".
+        // Clean up the bundle directory on any FATAL failure so the next
+        // attempt starts fresh without prompting "Replace existing bundle?".
+        //
+        // Critical: skip the cleanup on `CancellationError`. A superseded
+        // run reaches its catch arm AFTER the replacement run has already
+        // started its own `bundle.create()` against the same path; if we
+        // delete on cancellation, we silently corrupt the in-flight run.
+        // See PR #4 review C1 (docs/PR4_REVIEW_FIXES_2026-05-03.md).
         var installSucceeded = false
+        var wasCancelled = false
         defer {
-            if !installSucceeded {
+            if !installSucceeded && !wasCancelled {
                 try? FileManager.default.removeItem(at: bundle.url)
             }
         }
+
+        do {
+            return try await Self.installAfterBundleCreated(
+                bundle: bundle,
+                localIPSW: localIPSW,
+                progress: progress,
+                installSucceeded: &installSucceeded
+            )
+        } catch is CancellationError {
+            wasCancelled = true
+            throw CancellationError()
+        }
+    }
+
+    /// Inner install body. Split out from `downloadAndInstall` so the
+    /// outer function can wrap it in a single do/catch that distinguishes
+    /// CancellationError from other failures (controls whether the
+    /// cleanup defer runs). `installSucceeded` is an inout flag so the
+    /// outer defer sees the final value.
+    @MainActor
+    private static func installAfterBundleCreated(
+        bundle: AISandboxVMBundle,
+        localIPSW: URL?,
+        progress: @escaping (Double) -> Void,
+        installSucceeded: inout Bool
+    ) async throws -> AISandboxVMBundle {
 
         // ── Preflight: aux storage flock ──────────────────────────────────────
         // VZ's `installConfig.validate()` will surface a generic "Invalid

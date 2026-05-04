@@ -19,6 +19,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     // new attempt — prevents two installer pipelines fighting over the
     // same aux storage flock when the first one errored out partway.
     private var activeAISandboxInstallTask: Task<Void, Never>?
+    /// Identity tag for `activeAISandboxInstallTask`. `Task` is a value
+    /// type so `===` doesn't apply; a per-task UUID lets the self-clear
+    /// avoid stomping a newer click's task. (S7 of PR #4 review.)
+    private var activeAISandboxInstallTaskId: UUID?
     private var virtualMachines: [UUID: VZVirtualMachine] = [:]
     private var vmConfigs: [UUID: VMConfiguration] = [:]
     private var vmViews: [UUID: VZVirtualMachineView] = [:]
@@ -1289,6 +1293,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // for accumulated network/security/error files in ~/.avf/logs/.
         LogRotation.runAtLaunch()
 
+        // Backfill missing id/name into pre-existing AI Sandbox bundle
+        // manifests. Bundles sealed before the sealBundle() id/name fix
+        // (PR #4) have no `id` field, which leaves `secvf-cli vm exec`
+        // unable to compute the UDS path and forces `--wait` to fall
+        // through to SSH polling. Idempotent — only mutates manifests
+        // that are missing the field. (Issue B of PR #4 followup.)
+        backfillAISandboxManifestIds()
+
         // Setup Monitoring menu
         setupMonitoringMenu()
 
@@ -1338,7 +1350,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             self?.showLibraryWindow()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+        // Splash safety timeout. Lowered from 10s to 4s (S9 of PR #4 review)
+        // because refreshDistroVersions is now TTL-rate-limited — if the call
+        // would actually hit the network, it's an attempt-once-per-6h thing
+        // and we'd rather show the library quickly with stale distro data
+        // than block launch waiting for a slow mirror.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) {
             if !dismissed {
                 NSLog("[DistroRefresh] Timed out — dismissing splash")
                 dismissSplash()
@@ -1951,6 +1968,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             NSLog("[AISandbox] Cancelling prior install task before starting new attempt")
             prior.cancel()
             activeAISandboxInstallTask = nil
+            activeAISandboxInstallTaskId = nil
         }
 
         // Confirm with the user — this takes 30-60 min and is destructive
@@ -2021,59 +2039,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         NSLog("[AISandbox] Reusing cached IPSW: %@", cachedIPSW.path)
 
         // Drive the tracker singleton — VMLibraryWindowController watches it
-        // and renders an "installing" entry in the Running VMs sidebar.
-        AISandboxInstallTracker.shared.begin()
-        AISandboxInstallTracker.shared.log("Starting AI Sandbox build")
-        AISandboxInstallTracker.shared.log("IPSW: \(cachedIPSW.lastPathComponent)")
-        AISandboxInstallTracker.shared.log("Bundle: \(AISandboxDefaults.baseBundle.path)")
+        // and renders an "installing" entry in the Tasks tab.
+        // begin() returns a fresh runId; pass it to every run-scoped
+        // mutation so a superseded run's late callbacks can't clobber the
+        // run that replaced it. See PR #4 review C2.
+        let runId = AISandboxInstallTracker.shared.begin()
+        AISandboxInstallTracker.shared.log("Starting AI Sandbox build", runId: runId)
+        AISandboxInstallTracker.shared.log("IPSW: \(cachedIPSW.lastPathComponent)", runId: runId)
+        AISandboxInstallTracker.shared.log("Bundle: \(AISandboxDefaults.baseBundle.path)", runId: runId)
 
         let task = Task { [weak self] in
-            defer {
-                Task { @MainActor in
-                    // Self-clear so a future click doesn't try to cancel a
-                    // task that already finished. Only clear if WE are
-                    // still the registered active task — a later click may
-                    // have replaced us.
-                    self?.clearActiveInstallTaskIfMatches()
-                }
-            }
+            // self-clear hook so a future click doesn't try to cancel a
+            // task that already finished. The strong-id comparison lives in
+            // clearActiveInstallTaskIfMatches; we capture the task ref
+            // *after* the Task literal so we can pass it.
             do {
                 // Phase 1: install
                 var lastLoggedPct = -1
                 let bundle = try await AISandboxMacVMInstaller.downloadAndInstall(
                     localIPSW: cachedIPSW,
                     progress: { fraction in
-                        DispatchQueue.main.async {
-                            AISandboxInstallTracker.shared.updateInstallFraction(fraction)
+                        Task { @MainActor in
+                            AISandboxInstallTracker.shared.updateInstallFraction(fraction, runId: runId)
                             // Log every 5% milestone to Tasks tab
                             let pct = Int(fraction * 100)
                             let bucket = (pct / 5) * 5
                             if bucket != lastLoggedPct {
                                 lastLoggedPct = bucket
-                                AISandboxInstallTracker.shared.log("VZMacOSInstaller: \(pct)%")
+                                AISandboxInstallTracker.shared.log("VZMacOSInstaller: \(pct)%", runId: runId)
                             }
                         }
                     }
                 )
                 await MainActor.run {
-                    AISandboxInstallTracker.shared.log("macOS install complete")
+                    AISandboxInstallTracker.shared.log("macOS install complete", runId: runId)
                 }
 
                 try Task.checkCancellation()
                 await MainActor.run {
-                    AISandboxInstallTracker.shared.setPhase(.sealing)
-                    AISandboxInstallTracker.shared.log("Sealing base bundle…")
+                    AISandboxInstallTracker.shared.setPhase(.sealing, runId: runId)
+                    AISandboxInstallTracker.shared.log("Sealing base bundle…", runId: runId)
                 }
                 // Phase 2: seal
-                // Note: vsock-based provisioning (provisionBundle) is skipped here
-                // because the fresh macOS install has no vsock agent running.
-                // Boot the VM manually and call AISandboxMacVMInstaller.provisionBundle
-                // once the guest is configured with a vsock listener on port 2222.
+                // Note: vsock-based provisioning is intentionally not run here
+                // because a fresh macOS install has no vsock agent. Boot the
+                // VM manually once a guest-side agent on port 2222 ships.
                 try AISandboxMacVMInstaller.sealBundle(bundle)
 
                 await MainActor.run {
-                    AISandboxInstallTracker.shared.log("Bundle sealed at \(bundle.url.path)")
-                    AISandboxInstallTracker.shared.setPhase(.finished)
+                    AISandboxInstallTracker.shared.log("Bundle sealed at \(bundle.url.path)", runId: runId)
+                    AISandboxInstallTracker.shared.setPhase(.finished, runId: runId)
                     self?.showAlert(
                         title: "AI Sandbox VM Ready",
                         message: """
@@ -2084,46 +2099,104 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                         Each session is an APFS clone of the base — fast and disposable.
                         """
                     )
-                    AISandboxInstallTracker.shared.reset()
+                    AISandboxInstallTracker.shared.reset(runId: runId)
                 }
             } catch is CancellationError {
                 NSLog("[AISandbox] Install cancelled (likely superseded by a later click)")
+                // Run-scoped — silently no-ops if a newer run owns the
+                // tracker. This is the C2 fix: prior PRs unconditionally
+                // called fail()/reset() and clobbered the replacement run.
                 await MainActor.run {
-                    AISandboxInstallTracker.shared.log("Cancelled.")
-                    AISandboxInstallTracker.shared.fail(with: "cancelled")
-                    AISandboxInstallTracker.shared.reset()
+                    AISandboxInstallTracker.shared.log("Cancelled.", runId: runId)
+                    AISandboxInstallTracker.shared.fail(with: "cancelled", runId: runId)
+                    AISandboxInstallTracker.shared.reset(runId: runId)
                 }
             } catch {
                 await MainActor.run {
-                    AISandboxInstallTracker.shared.log("Error: \(error.localizedDescription)")
-                    AISandboxInstallTracker.shared.fail(with: error.localizedDescription)
+                    AISandboxInstallTracker.shared.log("Error: \(error.localizedDescription)", runId: runId)
+                    AISandboxInstallTracker.shared.fail(with: error.localizedDescription, runId: runId)
                     self?.showAlert(
                         title: "AI Sandbox VM creation failed",
                         message: "\(error.localizedDescription)\n\nFull: \(String(describing: error))"
                     )
-                    AISandboxInstallTracker.shared.reset()
+                    AISandboxInstallTracker.shared.reset(runId: runId)
                 }
             }
         }
+        let taskId = UUID()
         activeAISandboxInstallTask = task
+        activeAISandboxInstallTaskId = taskId
+
+        // Self-clear on completion. Compare via a per-task UUID — `Task` is
+        // a value type so identity comparison via `===` doesn't apply.
+        // If a newer click already replaced us by the time this runs,
+        // our taskId won't match and we leave the newer state alone.
+        Task { @MainActor [weak self] in
+            await task.value   // Task<Void, Never> — never throws
+            self?.clearActiveInstallTaskIfMatches(taskId)
+        }
     }
 
-    /// Clears `activeAISandboxInstallTask` if it still points at a finished task.
-    /// Idempotent. Called from each install task's `defer` so future clicks
-    /// don't try to cancel an already-completed task.
-    private func clearActiveInstallTaskIfMatches() {
-        // We can't compare Task<Void, Never> values for equality directly,
-        // so the simple "clear it if it's there" works fine — if a newer
-        // task already replaced us, this just no-ops since the new task
-        // also installs a defer that will clear itself when done.
-        // But we must NOT clear a task that isn't ours; do the safer pattern:
-        // only clear if the Task is finished (we are calling from its own
-        // defer, so by definition our task is finished). The newer task,
-        // if any, is still running, so we'd be stomping on it.
-        // → actually the cleanest fix is: don't clear here. The next click
-        // unconditionally cancels-and-replaces, which handles both stale
-        // and live cases. Leaving this as a no-op keeps the surface stable
-        // in case we want stricter semantics later.
+    /// Clears `activeAISandboxInstallTask` only if it still belongs to the
+    /// run identified by `taskId`. A newer click that replaced us must not
+    /// have its reference stomped. (S7 of PR #4 review.)
+    private func clearActiveInstallTaskIfMatches(_ taskId: UUID) {
+        if activeAISandboxInstallTaskId == taskId {
+            activeAISandboxInstallTask = nil
+            activeAISandboxInstallTaskId = nil
+        }
+    }
+
+    /// Walks `~/.avf/AISandbox/` (base bundle + sessions) and backfills the
+    /// `id`/`name` fields into any manifest.json that's missing them.
+    /// Idempotent — leaves manifests with existing ids alone. Runs once at
+    /// app launch so the CLI's exec-bridge path can compute the UDS path
+    /// for bundles that were sealed before the id/name fields were added
+    /// in PR #4. (Issue B of PR #4 followup.)
+    private func backfillAISandboxManifestIds() {
+        let aiSandboxRoot = NSHomeDirectory() + "/.avf/AISandbox"
+        let fm = FileManager.default
+
+        var bundlesToCheck: [URL] = []
+        // Base bundles directly under ~/.avf/AISandbox/
+        if let entries = try? fm.contentsOfDirectory(atPath: aiSandboxRoot) {
+            for entry in entries where entry.hasSuffix(".bundle") {
+                bundlesToCheck.append(URL(fileURLWithPath: aiSandboxRoot + "/" + entry))
+            }
+        }
+        // Session bundles under ~/.avf/AISandbox/sessions/
+        let sessionsRoot = aiSandboxRoot + "/sessions"
+        if let entries = try? fm.contentsOfDirectory(atPath: sessionsRoot) {
+            for entry in entries where entry.hasSuffix(".bundle") {
+                bundlesToCheck.append(URL(fileURLWithPath: sessionsRoot + "/" + entry))
+            }
+        }
+
+        for bundleURL in bundlesToCheck {
+            let manifestURL = bundleURL.appendingPathComponent("manifest.json")
+            guard fm.fileExists(atPath: manifestURL.path),
+                  let data = try? Data(contentsOf: manifestURL),
+                  var manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { continue }
+
+            var changed = false
+            let idStr = manifest["id"] as? String
+            if idStr == nil || idStr?.isEmpty == true || UUID(uuidString: idStr ?? "") == nil {
+                manifest["id"] = UUID().uuidString
+                changed = true
+            }
+            if (manifest["name"] as? String)?.isEmpty ?? true {
+                let bundleName = bundleURL.deletingPathExtension().lastPathComponent
+                manifest["name"] = bundleName
+                changed = true
+            }
+
+            if changed,
+               let updated = try? JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted) {
+                try? updated.write(to: manifestURL)
+                NSLog("[AISandbox] Backfilled manifest id/name for %@", bundleURL.lastPathComponent)
+            }
+        }
     }
 
     // MARK: - Boot AI Sandbox Session
@@ -2132,6 +2205,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     private var activeSandboxSession: AISandboxVMSession?
     /// Stable UUID assigned to the active sandbox session for exec bridge addressing.
     private var activeSandboxVMId: UUID?
+    /// Synchronous gate: set to true *before* the boot Task starts so a
+    /// second click within the clone+start window can't race a duplicate
+    /// session into existence (S3 of PR #4 review).
+    private var activeSandboxBootInFlight = false
 
     /// Tools → Boot AI Sandbox. Clones the base bundle (APFS CoW), boots
     /// the session VM, and shows it in a new window.
@@ -2154,7 +2231,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             }
         }
 
+        // Synchronous race gate. The boot Task takes seconds (clone + VZ
+        // config + machine.start) before assigning `activeSandboxSession`.
+        // Without this, a second click during that window would clone a
+        // second bundle, start a second VZ machine, and silently leak the
+        // loser when the second writer overwrites `activeSandboxSession`.
+        if activeSandboxBootInFlight {
+            NSLog("[AISandbox] Boot already in flight; ignoring duplicate click")
+            return
+        }
+        activeSandboxBootInFlight = true
+
         Task { @MainActor in
+            defer { self.activeSandboxBootInFlight = false }
+
             let session = AISandboxVMSession()
             NSLog("[AISandbox] Cloning base → session %@", session.sessionID)
 
@@ -2191,18 +2281,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 NSApp.activate(ignoringOtherApps: true)
 
                 self.activeSandboxSession = session
-                let sandboxVMId = UUID()
+
+                // S4: persist the sandbox UUID on first boot only. Re-booting
+                // the same session bundle MUST keep the same id so existing
+                // `secvf-cli vm exec` clients addressing /tmp/secvf-exec-<id>.sock
+                // don't get stranded by a fresh UUID rewrite.
+                let manifestURL = session.bundleURL.appendingPathComponent("manifest.json")
+                var manifest = (try? JSONSerialization.jsonObject(
+                    with: Data(contentsOf: manifestURL)) as? [String: Any]) ?? [:]
+
+                let sandboxVMId: UUID
+                if let existing = manifest["id"] as? String,
+                   let parsed = UUID(uuidString: existing), !existing.isEmpty {
+                    sandboxVMId = parsed
+                } else {
+                    sandboxVMId = UUID()
+                    manifest["id"] = sandboxVMId.uuidString
+                }
+                if (manifest["name"] as? String)?.isEmpty ?? true {
+                    manifest["name"] = "ai-sandbox-exec-\(session.sessionID)"
+                }
                 self.activeSandboxVMId = sandboxVMId
 
-                // Write the UUID into the session manifest so the CLI can find it
-                let manifestURL = session.bundleURL.appendingPathComponent("manifest.json")
-                if var manifest = try? JSONSerialization.jsonObject(
-                    with: Data(contentsOf: manifestURL)) as? [String: Any] {
-                    manifest["id"] = sandboxVMId.uuidString
-                    manifest["name"] = "ai-sandbox-exec-\(session.sessionID)"
-                    if let updated = try? JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted) {
-                        try? updated.write(to: manifestURL)
-                    }
+                if let updated = try? JSONSerialization.data(withJSONObject: manifest, options: .prettyPrinted) {
+                    try? updated.write(to: manifestURL)
                 }
 
                 NSLog("[AISandbox] Starting session VM (id=%@)…", sandboxVMId.uuidString)
@@ -2353,6 +2455,12 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
     let destination: URL
     let progress: (_ received: Int64, _ total: Int64) -> Void
     var continuation: CheckedContinuation<Void, Error>?
+    /// Milestone bookkeeping. INVARIANT: read/write only on main. The
+    /// URLSession delegate methods fire on a serial OperationQueue, but
+    /// every site that touches `lastLoggedPct` must hop to main first
+    /// (see urlSession(_:didWriteData:...) for the pattern). Splitting
+    /// the read or write outside the main hop would race the tracker
+    /// log call and miss/duplicate milestones (S10 of PR #4 review).
     private var lastLoggedPct = -1
 
     init(destination: URL, progress: @escaping (_ received: Int64, _ total: Int64) -> Void) {

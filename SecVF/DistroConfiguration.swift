@@ -409,15 +409,39 @@ class DistroConfigurationManager {
         return approvedDomains.contains(host)
     }
 
+    /// TTL between distro version refreshes. Stored in UserDefaults so we
+    /// don't spam mirrors on every launch (S9 of PR #4 review).
+    private static let refreshTTLSeconds: TimeInterval = 6 * 60 * 60   // 6h
+    private static let lastRefreshDefaultsKey = "com.secvf.distro.lastRefreshAttempt"
+
     /// Check all distros with version discovery enabled against their mirrors.
     /// Updates the user config (`~/.avf/distros.json`) with any newer versions found.
     /// Calls `progress` on the main thread for each distro checked.
     /// Calls `completion` on the main thread when all checks are done.
+    ///
+    /// Rate-limited: skips if a refresh attempt landed within `refreshTTLSeconds`.
+    /// Pass `force: true` to bypass the TTL (e.g. for a manual "Check Now" menu item).
     @MainActor
     func refreshDistroVersions(
+        force: Bool = false,
         progress: @escaping (_ distroName: String, _ status: String) -> Void,
         completion: @escaping (_ updated: [String], _ errors: [String]) -> Void
     ) {
+        // S9: skip if we refreshed recently. Prevents launch from blocking on
+        // every cold start while a slow mirror times out, and stops us from
+        // pestering distro CDNs on every relaunch in the same session.
+        if !force,
+           let last = UserDefaults.standard.object(forKey: Self.lastRefreshDefaultsKey) as? Date,
+           Date().timeIntervalSince(last) < Self.refreshTTLSeconds {
+            NSLog("[DistroRefresh] Skipped — last attempt %.0fs ago, TTL %.0fs",
+                  Date().timeIntervalSince(last), Self.refreshTTLSeconds)
+            completion([], [])
+            return
+        }
+        // Stamp the attempt up front so a hung or slow refresh still counts
+        // toward the rate limit (failures shouldn't trigger immediate retry).
+        UserDefaults.standard.set(Date(), forKey: Self.lastRefreshDefaultsKey)
+
         guard let config = configFile else {
             completion([], ["No distro configuration loaded"])
             return

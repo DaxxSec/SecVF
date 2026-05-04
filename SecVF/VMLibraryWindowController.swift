@@ -31,6 +31,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var vmsTabContent: NSView?
     private var tasksTabContent: NSView?
     private var tasksLogTextView: NSTextView?
+    /// Count of log lines already rendered into `tasksLogTextView`. Used by
+    /// `refreshTasksTab()` to append only new lines instead of rebuilding
+    /// the entire text-view storage on every notification (S14 of PR #4 review).
+    private var lastDisplayedLogCount = 0
     private var tasksStatusLabel: NSTextField?
     private var tasksProgressBar: NSProgressIndicator?
     private var vmsPlaceholderLabel: NSTextField?
@@ -1168,14 +1172,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         containerView.addSubview(progressBar)
 
         // Percent / phase number text
+        // Two-phase install (S8 of PR #4 review removed the dead .provisioning
+        // case — vsock provisioning is deferred until a guest-side agent ships).
         let footerText: String
         switch tracker.phase {
         case .installing:
-            footerText = "Phase 1/3 · \(Int(tracker.fraction * 100))%"
-        case .provisioning:
-            footerText = "Phase 2/3"
+            footerText = "Phase 1/2 · \(Int(tracker.fraction * 100))%"
         case .sealing:
-            footerText = "Phase 3/3"
+            footerText = "Phase 2/2"
         default:
             footerText = ""
         }
@@ -1576,9 +1580,29 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             if !allLogs.isEmpty && !ipsw.logMessages.isEmpty { allLogs.append("---") }
             allLogs.append(contentsOf: ipsw.logMessages)
         }
-        let newLog = allLogs.joined(separator: "\n")
-        if let tv = tasksLogTextView, tv.string != newLog {
-            tv.string = newLog
+
+        // S14: append-only updates instead of `tv.string = newLog` rebuild.
+        // The previous approach rebuilt the entire NSTextStorage on every
+        // tracker notification (~100 rebuilds per IPSW download), causing
+        // visible flicker and pointless work. Now we only render the new
+        // tail. Reset on shrink (when a tracker's begin() clears its log).
+        guard let tv = tasksLogTextView else { return }
+        if allLogs.count < lastDisplayedLogCount {
+            tv.string = ""
+            lastDisplayedLogCount = 0
+        }
+        if allLogs.count > lastDisplayedLogCount {
+            let newLines = allLogs[lastDisplayedLogCount..<allLogs.count]
+            let prefix = lastDisplayedLogCount == 0 ? "" : "\n"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .regular),
+                .foregroundColor: NSColor(white: 0.7, alpha: 1.0)
+            ]
+            tv.textStorage?.append(NSAttributedString(
+                string: prefix + newLines.joined(separator: "\n"),
+                attributes: attrs
+            ))
+            lastDisplayedLogCount = allLogs.count
             tv.scrollToEndOfDocument(nil)
         }
     }

@@ -377,26 +377,38 @@ final class VsockExecBridge {
         )
         slotHandedOff = true
 
-        clientHandle.readabilityHandler = { [weak state] fh in
+        // STRONG capture of `state` — intentional retain cycle that
+        // breaks when finish() clears both readabilityHandlers. Without
+        // this, `state` has no strong owner outside this function and
+        // ARC frees it as soon as we return; the FileHandles then
+        // close-on-dealloc and the bridge dies before the first byte
+        // flows. (S13 of PR #4 review — pre-existing F2 from PR_REVIEW_2026-05-03.)
+        //
+        // Cycle: state ──► clientHandle ──► (readabilityHandler closure) ──► state
+        // Broken when: client EOF → fh.readabilityHandler = nil → closure
+        // dropped → state's lone strong ref disappears → state freed →
+        // its strong refs to client/vsock dropped → handles deallocate →
+        // closeOnDealloc closes the underlying fds.
+        clientHandle.readabilityHandler = { [state] fh in
             let d = fh.availableData
             if d.isEmpty {
                 fh.readabilityHandler = nil
-                state?.finish()
+                state.finish()
                 return
             }
-            if state?.writeToVsock(d) != true {
+            if !state.writeToVsock(d) {
                 fh.readabilityHandler = nil
             }
         }
 
-        vsockHandle.readabilityHandler = { [weak state] fh in
+        vsockHandle.readabilityHandler = { [state] fh in
             let d = fh.availableData
             if d.isEmpty {
                 fh.readabilityHandler = nil
-                state?.finish()
+                state.finish()
                 return
             }
-            if state?.writeToClient(d) != true {
+            if !state.writeToClient(d) {
                 fh.readabilityHandler = nil
             }
         }

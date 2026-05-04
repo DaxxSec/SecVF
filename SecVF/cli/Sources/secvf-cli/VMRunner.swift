@@ -224,17 +224,22 @@ class VMRunner: NSObject, VZVirtualMachineDelegate {
 
         config.platform = platform
 
-        // Storage — disk.img (lowercase)
+        // Storage — disk.img (lowercase).
+        //
+        // S5 of PR #4 review: pin VirtioBlock unconditionally. The bundle's
+        // disk image was created against `VZVirtioBlockDeviceConfiguration`
+        // by AISandboxMacVMConfiguration.installAfterBundleCreated. Selecting
+        // NVMe here on macOS 15+ would attach the SAME disk image through a
+        // different controller bus than the install ran against, which can
+        // surface as "no boot device" inside the guest if the boot image is
+        // controller-aware. Two-host scenario (install on macOS 14, boot on
+        // macOS 15+) makes this trivially reproducible. Pin one controller.
         let diskPath = bundlePath + "/disk.img"
         if FileManager.default.fileExists(atPath: diskPath) {
             let diskAttachment = try VZDiskImageStorageDeviceAttachment(
                 url: URL(fileURLWithPath: diskPath), readOnly: false
             )
-            if #available(macOS 15.0, *) {
-                config.storageDevices = [VZNVMExpressControllerDeviceConfiguration(attachment: diskAttachment)]
-            } else {
-                config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)]
-            }
+            config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: diskAttachment)]
         }
 
         // Network — NAT
