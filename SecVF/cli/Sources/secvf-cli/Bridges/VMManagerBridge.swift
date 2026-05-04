@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Bridge to VM metadata stored in ~/.avf/
 class VMManagerBridge {
@@ -284,7 +285,37 @@ class VMManagerBridge {
             return false
         }
         let socketPath = "/tmp/secvf-exec-\(idString).sock"
-        return FileManager.default.fileExists(atPath: socketPath)
+        guard FileManager.default.fileExists(atPath: socketPath) else { return false }
+
+        // S12 of PR #4 review: a leftover socket file from a crashed prior
+        // session would falsely return true if we stopped at fileExists().
+        // Try a real non-blocking connect to confirm someone's accepting.
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(socketPath.utf8CString)
+        let pathCapacity = MemoryLayout.size(ofValue: addr.sun_path)
+        guard pathBytes.count <= pathCapacity else { return false }
+
+        withUnsafeMutablePointer(to: &addr.sun_path) { sunPath in
+            sunPath.withMemoryRebound(to: CChar.self, capacity: pathCapacity) { dst in
+                pathBytes.withUnsafeBufferPointer { src in
+                    if let base = src.baseAddress {
+                        memcpy(dst, base, pathBytes.count)
+                    }
+                }
+            }
+        }
+
+        let connectResult = withUnsafePointer(to: &addr) { aptr in
+            aptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saptr in
+                connect(fd, saptr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        return connectResult == 0
     }
 
     // MARK: - SSH Available Check

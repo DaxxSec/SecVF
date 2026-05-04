@@ -1,5 +1,28 @@
 import ArgumentParser
 import Foundation
+import Darwin
+
+/// Resolve the running CLI's own absolute executable path.
+///
+/// `CommandLine.arguments[0]` is whatever was used to invoke the binary —
+/// when the user has the CLI on PATH via a symlink (e.g. `~/.local/bin/secvf-cli`),
+/// argv[0] is just `secvf-cli`. Passing that to `Process.executableURL`
+/// produces `file://secvf-cli` which NSTask resolves to "file doesn't exist."
+/// Use `_NSGetExecutablePath()` to get the absolute path of the running
+/// binary regardless of how it was invoked. (Issue A of PR #4 followup.)
+func resolveSelfExecutablePath() -> String {
+    var size: UInt32 = 0
+    _ = _NSGetExecutablePath(nil, &size)   // first call learns required size
+    var buf = [CChar](repeating: 0, count: Int(size))
+    if _NSGetExecutablePath(&buf, &size) == 0 {
+        let raw = String(cString: buf)
+        // Resolve symlinks to the real installed location.
+        let resolved = (raw as NSString).resolvingSymlinksInPath
+        return resolved
+    }
+    // Last-ditch fallback: hope argv[0] is absolute.
+    return CommandLine.arguments[0]
+}
 
 struct VMCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -265,8 +288,9 @@ struct VMStart: AsyncParsableCommand {
 
             VMProcessManager.shared.removePidFile(for: name)
         } else {
-            // Spawn background process
-            let executablePath = CommandLine.arguments[0]
+            // Spawn background process. argv[0] is unreliable when the CLI
+            // is invoked via a PATH symlink — resolve our own absolute path.
+            let executablePath = resolveSelfExecutablePath()
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executablePath)
             process.arguments = ["vm", "start", name, "--foreground"]

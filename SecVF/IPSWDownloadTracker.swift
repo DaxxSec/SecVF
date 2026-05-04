@@ -7,9 +7,13 @@
 //  VMLibraryWindowController observes notifications to render in the
 //  Tasks tab.
 //
+//  `@MainActor` so writers can't race with readers (the tracker is
+//  observed from the library window controller's main-thread updates).
+//
 
 import Foundation
 
+@MainActor
 final class IPSWDownloadTracker {
     static let shared = IPSWDownloadTracker()
 
@@ -36,6 +40,11 @@ final class IPSWDownloadTracker {
     private(set) var lastErrorMessage: String?
     private(set) var logMessages: [String] = []
     private(set) var filename: String = ""
+
+    /// Auto-reset timing for non-active terminal phases. The Tasks tab
+    /// goes back to "No tasks running." after this delay.
+    static let autoResetSuccessSeconds: TimeInterval = 5
+    static let autoResetFailureSeconds: TimeInterval = 30
 
     private init() {}
 
@@ -71,12 +80,18 @@ final class IPSWDownloadTracker {
         phase = .finished
         fraction = 1
         notify()
+        // Auto-clear the sticky "Done" status after the user has had a
+        // chance to see it. Only resets if we're still in .finished — a
+        // new begin() in the meantime takes priority.
+        scheduleAutoReset(after: Self.autoResetSuccessSeconds, expectingPhase: .finished)
     }
 
     func fail(with message: String) {
         phase = .failed
         lastErrorMessage = message
         notify()
+        // Failures stay visible longer — user needs time to read the alert.
+        scheduleAutoReset(after: Self.autoResetFailureSeconds, expectingPhase: .failed)
     }
 
     func reset() {
@@ -87,6 +102,14 @@ final class IPSWDownloadTracker {
         lastErrorMessage = nil
         filename = ""
         notify()
+    }
+
+    private func scheduleAutoReset(after delay: TimeInterval, expectingPhase: Phase) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard self.phase == expectingPhase else { return }
+            self.reset()
+        }
     }
 
     private func notify() {

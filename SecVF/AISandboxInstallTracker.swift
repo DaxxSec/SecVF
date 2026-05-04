@@ -5,34 +5,47 @@
 //  Lightweight observable singleton for the in-progress AI Sandbox VM
 //  install. AppDelegate's `createAISandboxVM` action drives state into
 //  this tracker; VMLibraryWindowController observes notifications to
-//  render an "installing" entry in the Running VMs sidebar.
+//  render an "installing" entry in the Tasks tab.
 //
 //  This is *not* a VM in the VMManager sense — it's an in-flight
-//  build operation. It exists for as long as `downloadAndInstall +
-//  provisionBundle + sealBundle` are running.
+//  build operation. It exists for as long as the install task runs.
+//
+//  Concurrency model:
+//  - The class is `@MainActor` so writers can't race. Build will fail at
+//    any non-main caller and force a `Task { @MainActor in }` hop. Worth
+//    doing now rather than waiting for Swift 6's strict concurrency to
+//    light it up as a build-breaker.
+//
+//  Run-id discipline:
+//  - Every `begin()` mints a fresh `UUID`. Run-scoped mutators
+//    (`fail`, `reset`, `setPhase`, `updateInstallFraction`, `log`) accept
+//    an optional `runId:` argument and no-op when it doesn't match
+//    `currentRunId`. Prevents a superseded run's late callbacks
+//    (typically from a `CancellationError` catch arm) from clobbering
+//    the run that replaced it. See PR review F1 / C2 in
+//    `docs/PR4_REVIEW_FIXES_2026-05-03.md`.
 //
 
 import Foundation
 
+@MainActor
 final class AISandboxInstallTracker {
     static let shared = AISandboxInstallTracker()
 
     enum Phase: String {
         case idle
-        case installing      // Phase 1: VZMacOSInstaller
-        case provisioning    // Phase 2: boot + provision-macos-vm.sh
-        case sealing         // Phase 3: VZMacAuxiliaryStorage seal
+        case installing      // VZMacOSInstaller running
+        case sealing         // Bundle being sealed
         case finished
         case failed
 
         var humanLabel: String {
             switch self {
-            case .idle:         return ""
-            case .installing:   return "Installing macOS"
-            case .provisioning: return "Provisioning guest"
-            case .sealing:      return "Sealing bundle"
-            case .finished:     return "Done"
-            case .failed:       return "Failed"
+            case .idle:       return ""
+            case .installing: return "Installing macOS"
+            case .sealing:    return "Sealing bundle"
+            case .finished:   return "Done"
+            case .failed:     return "Failed"
             }
         }
     }
@@ -42,10 +55,73 @@ final class AISandboxInstallTracker {
     private(set) var lastErrorMessage: String?
     private(set) var logMessages: [String] = []
 
+    /// Identifier of the install run that currently owns the tracker.
+    /// See run-id discipline note in the file header.
+    private(set) var currentRunId: UUID?
+
     private init() {}
 
+    // MARK: - Run-scoped mutators
+    //
+    // Each `begin()` mints a fresh UUID; pass it back to the run-scoped
+    // mutators so a superseded run can't stomp on the current one.
+    // Callers that have no run id in scope (e.g. UI dismissing a
+    // finished/failed result) can omit the arg; in that case the
+    // mutator runs unconditionally.
+
+    /// Start a new run. Returns the run id.
+    @discardableResult
+    func begin() -> UUID {
+        let id = UUID()
+        phase = .installing
+        fraction = 0
+        lastErrorMessage = nil
+        logMessages = []
+        currentRunId = id
+        notify()
+        return id
+    }
+
+    func updateInstallFraction(_ f: Double, runId: UUID? = nil) {
+        if let runId = runId, runId != currentRunId { return }
+        guard phase == .installing else { return }
+        fraction = max(0, min(1, f))
+        notify()
+    }
+
+    func setPhase(_ next: Phase, runId: UUID? = nil) {
+        if let runId = runId, runId != currentRunId { return }
+        phase = next
+        // Sealing doesn't have meaningful fractional progress; collapse the bar.
+        if next == .sealing {
+            fraction = 0
+        } else if next == .finished {
+            fraction = 1
+        }
+        notify()
+    }
+
+    func fail(with message: String, runId: UUID? = nil) {
+        if let runId = runId, runId != currentRunId { return }
+        phase = .failed
+        lastErrorMessage = message
+        notify()
+    }
+
+    /// Drop the tracker back to idle. The run-scoped form skips when the
+    /// caller's run is no longer current.
+    func reset(runId: UUID? = nil) {
+        if let runId = runId, runId != currentRunId { return }
+        phase = .idle
+        fraction = 0
+        lastErrorMessage = nil
+        currentRunId = nil
+        notify()
+    }
+
     /// Append a timestamped line to the task log (capped at 500 lines).
-    func log(_ message: String) {
+    func log(_ message: String, runId: UUID? = nil) {
+        if let runId = runId, runId != currentRunId { return }
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         logMessages.append("[\(ts)] \(message)")
         if logMessages.count > 500 { logMessages.removeFirst(logMessages.count - 500) }
@@ -55,51 +131,9 @@ final class AISandboxInstallTracker {
     /// True when an install is currently running (any non-terminal phase).
     var isActive: Bool {
         switch phase {
-        case .installing, .provisioning, .sealing: return true
-        case .idle, .finished, .failed:            return false
+        case .installing, .sealing: return true
+        case .idle, .finished, .failed: return false
         }
-    }
-
-    func begin() {
-        phase = .installing
-        fraction = 0
-        lastErrorMessage = nil
-        logMessages = []
-        notify()
-    }
-
-    /// Install phase progress (0..1). Other phases ignore the fraction.
-    func updateInstallFraction(_ f: Double) {
-        guard phase == .installing else { return }
-        fraction = max(0, min(1, f))
-        notify()
-    }
-
-    func setPhase(_ next: Phase) {
-        phase = next
-        // Provisioning/sealing don't have meaningful fractional progress
-        // we can observe, so collapse the bar.
-        if next == .provisioning || next == .sealing {
-            fraction = 0
-        } else if next == .finished {
-            fraction = 1
-        }
-        notify()
-    }
-
-    func fail(with message: String) {
-        phase = .failed
-        lastErrorMessage = message
-        notify()
-    }
-
-    /// Drop the tracker back to idle. Called once the UI has acknowledged
-    /// a finished/failed run (e.g. user dismissed the result alert).
-    func reset() {
-        phase = .idle
-        fraction = 0
-        lastErrorMessage = nil
-        notify()
     }
 
     private func notify() {
