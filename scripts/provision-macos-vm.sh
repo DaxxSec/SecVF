@@ -383,12 +383,11 @@ sudo launchctl load /Library/LaunchDaemons/com.secvf.ai-sandbox.security-execmon
 # ─────────────────────────────────────────────────────────────────────────────
 # 8. WRITE PROVISION MANIFEST
 # ─────────────────────────────────────────────────────────────────────────────
-MANIFEST_PATH="/etc/ai-sandbox-vm-manifest.json"
 MACOS_VERSION=$(sw_vers -productVersion)
 NODE_VERSION=$(node --version)
 AI_AGENT_VERSION=$(openclaw --version 2>/dev/null || echo "unknown")
 
-sudo tee "$MANIFEST_PATH" << MANIFEST
+MANIFEST_CONTENT=$(cat << MANIFEST
 {
   "vm_type":          "ai-sandbox-macos-base",
   "version":          "1.0",
@@ -403,10 +402,25 @@ sudo tee "$MANIFEST_PATH" << MANIFEST
   "workspace_mount":  "${WORKSPACE_MOUNT}"
 }
 MANIFEST
+)
+
+# Write to the guest's /etc for local reference
+echo "$MANIFEST_CONTENT" | sudo tee /etc/ai-sandbox-vm-manifest.json > /dev/null
+
+# Write to /workspace (VirtioFS mount) so the HOST can detect completion.
+# SecVF.app polls ~/.avf/AISandbox/workspace/provision-complete.json to
+# know when provisioning is done and it's safe to shut down + seal.
+if mount | grep -q '/workspace.*virtiofs'; then
+    echo "$MANIFEST_CONTENT" > "${WORKSPACE_MOUNT}/provision-complete.json"
+    log "Provision marker written to ${WORKSPACE_MOUNT}/provision-complete.json (host-visible)"
+else
+    warn "/workspace not mounted via VirtioFS — host cannot auto-detect completion"
+    warn "SecVF.app will prompt you to confirm provisioning manually"
+fi
 
 log ""
 log "═══════════════════════════════════════════════════"
-log "  macOS VM provisioning complete 🦞"
+log "  macOS VM provisioning complete"
 log "  macOS:    ${MACOS_VERSION}"
 log "  Node:     ${NODE_VERSION}"
 log "  AI Agent: ${AI_AGENT_VERSION}"

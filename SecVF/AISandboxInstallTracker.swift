@@ -35,17 +35,19 @@ final class AISandboxInstallTracker {
     enum Phase: String {
         case idle
         case installing      // VZMacOSInstaller running
+        case provisioning    // First boot — user completes OOBE + runs provision script
         case sealing         // Bundle being sealed
         case finished
         case failed
 
         var humanLabel: String {
             switch self {
-            case .idle:       return ""
-            case .installing: return "Installing macOS"
-            case .sealing:    return "Sealing bundle"
-            case .finished:   return "Done"
-            case .failed:     return "Failed"
+            case .idle:          return ""
+            case .installing:    return "Installing macOS"
+            case .provisioning:  return "Provisioning VM"
+            case .sealing:       return "Sealing bundle"
+            case .finished:      return "Done"
+            case .failed:        return "Failed"
             }
         }
     }
@@ -92,8 +94,8 @@ final class AISandboxInstallTracker {
     func setPhase(_ next: Phase, runId: UUID? = nil) {
         if let runId = runId, runId != currentRunId { return }
         phase = next
-        // Sealing doesn't have meaningful fractional progress; collapse the bar.
-        if next == .sealing {
+        // Provisioning and sealing don't have meaningful fractional progress.
+        if next == .provisioning || next == .sealing {
             fraction = 0
         } else if next == .finished {
             fraction = 1
@@ -131,7 +133,7 @@ final class AISandboxInstallTracker {
     /// True when an install is currently running (any non-terminal phase).
     var isActive: Bool {
         switch phase {
-        case .installing, .sealing: return true
+        case .installing, .provisioning, .sealing: return true
         case .idle, .finished, .failed: return false
         }
     }

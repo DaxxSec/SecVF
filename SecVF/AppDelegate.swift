@@ -1300,6 +1300,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // through to SSH polling. Idempotent — only mutates manifests
         // that are missing the field. (Issue B of PR #4 followup.)
         backfillAISandboxManifestIds()
+        checkForUnfinishedAISandboxBake()
 
         // Setup Monitoring menu
         setupMonitoringMenu()
@@ -2076,14 +2077,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 }
 
                 try Task.checkCancellation()
+
+                // Phase 2: provision — boot the VM so the user can complete
+                // Setup Assistant, then run the provision script. A fresh
+                // macOS install has no vsock agent, so we expose the script
+                // via VirtioFS and guide the user through Terminal.
+                await MainActor.run {
+                    AISandboxInstallTracker.shared.setPhase(.provisioning, runId: runId)
+                    AISandboxInstallTracker.shared.log("Booting VM for first-boot provisioning…", runId: runId)
+                }
+
+                try await self?.runProvisioningPhase(bundle: bundle, runId: runId)
+
+                try Task.checkCancellation()
+
+                // Phase 3: seal
                 await MainActor.run {
                     AISandboxInstallTracker.shared.setPhase(.sealing, runId: runId)
                     AISandboxInstallTracker.shared.log("Sealing base bundle…", runId: runId)
                 }
-                // Phase 2: seal
-                // Note: vsock-based provisioning is intentionally not run here
-                // because a fresh macOS install has no vsock agent. Boot the
-                // VM manually once a guest-side agent on port 2222 ships.
                 try AISandboxMacVMInstaller.sealBundle(bundle)
 
                 await MainActor.run {
@@ -2145,6 +2157,247 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             activeAISandboxInstallTask = nil
             activeAISandboxInstallTaskId = nil
         }
+    }
+
+    // MARK: - AI Sandbox Provisioning Phase
+
+    /// Host-side path where the provision script writes its completion marker
+    /// via the VirtioFS workspace share.
+    private var provisionMarkerURL: URL {
+        AISandboxDefaults.baseDir
+            .appendingPathComponent("workspace/provision-complete.json")
+    }
+
+    /// Provisioning window shown during first-boot bake. Retained here so
+    /// we can close it programmatically when provisioning completes.
+    private var provisioningWindow: NSWindow?
+
+    /// Boot the freshly-installed VM, show a window for the user to complete
+    /// Setup Assistant + run the provision script, and wait for the completion
+    /// marker before returning. Called between install and seal.
+    @MainActor
+    private func runProvisioningPhase(
+        bundle: AISandboxVMBundle,
+        runId: UUID
+    ) async throws {
+        let tracker = AISandboxInstallTracker.shared
+        let fm = FileManager.default
+        let workspaceDir = AISandboxDefaults.baseDir.appendingPathComponent("workspace")
+
+        // ── 1. Ensure workspace dir exists and copy provision script there ──
+        try fm.createDirectory(at: workspaceDir, withIntermediateDirectories: true)
+
+        let scriptDst = workspaceDir.appendingPathComponent("provision-macos-vm.sh")
+        // Prefer the bundled resource; fall back to the repo copy
+        let scriptSrc = Bundle.main.url(forResource: "provision-macos-vm", withExtension: "sh")
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Code/SecVF/scripts/provision-macos-vm.sh")
+        if fm.fileExists(atPath: scriptSrc.path) {
+            try? fm.removeItem(at: scriptDst) // overwrite stale copy
+            try fm.copyItem(at: scriptSrc, to: scriptDst)
+            // Ensure it's executable
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptDst.path)
+        }
+        tracker.log("Provision script staged at \(scriptDst.path)", runId: runId)
+
+        // Remove stale marker from a prior failed bake
+        try? fm.removeItem(at: provisionMarkerURL)
+
+        // ── 2. Boot the VM with a visible window ────────────────────────────
+        let vmConfig = try AISandboxMacVMConfiguration(bundle: bundle)
+        let machine = VZVirtualMachine(configuration: vmConfig.configuration)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "SecVF - AI Sandbox Provisioning"
+
+        let vmView = VZVirtualMachineView()
+        vmView.frame = window.contentView!.bounds
+        vmView.autoresizingMask = [.width, .height]
+        vmView.virtualMachine = machine
+        if #available(macOS 14.0, *) {
+            vmView.automaticallyReconfiguresDisplay = true
+        }
+        window.contentView?.addSubview(vmView)
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        self.provisioningWindow = window
+
+        tracker.log("Starting VM for first boot…", runId: runId)
+        try await machine.start()
+        tracker.log("VM running — complete Setup Assistant in the VM window", runId: runId)
+
+        // ── 3. Show instruction panel ───────────────────────────────────────
+        showProvisioningInstructions()
+
+        // ── 4. Poll for the marker file ─────────────────────────────────────
+        // The provision script writes provision-complete.json to /workspace/
+        // (VirtioFS). We poll on the host side. No hard timeout — the user
+        // controls pace. Task cancellation breaks the loop.
+        tracker.log("Waiting for provision-complete.json in workspace…", runId: runId)
+        while !fm.fileExists(atPath: provisionMarkerURL.path) {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 3_000_000_000) // 3s
+        }
+        tracker.log("Provision marker detected — provisioning complete", runId: runId)
+
+        // ── 5. Shut down the VM ─────────────────────────────────────────────
+        tracker.log("Shutting down provisioned VM…", runId: runId)
+        if machine.canRequestStop {
+            try machine.requestStop()
+            // Wait for graceful shutdown (up to 60s)
+            for _ in 0..<20 {
+                if machine.state == .stopped { break }
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+        if machine.state != .stopped {
+            try await machine.stop()
+        }
+        tracker.log("VM shut down", runId: runId)
+
+        // Clean up the provisioning window
+        self.provisioningWindow?.close()
+        self.provisioningWindow = nil
+    }
+
+    /// On launch, detect an unfinished bake: base bundle exists, disk.img is
+    /// writable (not sealed), and no provision marker. Offer to resume.
+    private func checkForUnfinishedAISandboxBake() {
+        let fm = FileManager.default
+        let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
+        guard baseBundle.exists else { return }
+
+        // Sealed bundles have disk.img at 0o444. If it's writable, the bake
+        // was interrupted before seal.
+        let diskPath = baseBundle.diskURL.path
+        guard fm.isWritableFile(atPath: diskPath) else { return }
+
+        // If the marker already exists, provisioning finished but sealing
+        // didn't. We can go straight to seal.
+        if fm.fileExists(atPath: provisionMarkerURL.path) {
+            let alert = NSAlert()
+            alert.messageText = "Finish Sealing AI Sandbox?"
+            alert.informativeText = """
+            The AI Sandbox base bundle at:
+                \(baseBundle.url.path)
+
+            was provisioned but never sealed. Seal it now?
+            """
+            alert.addButton(withTitle: "Seal Now")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn {
+                do {
+                    try AISandboxMacVMInstaller.sealBundle(baseBundle)
+                    showAlert(title: "AI Sandbox Sealed", message: "Base bundle sealed. Use Tools → Boot AI Sandbox to launch a session.")
+                } catch {
+                    showAlert(title: "Seal Failed", message: error.localizedDescription)
+                }
+            }
+            return
+        }
+
+        // No marker, unsealed bundle → bake was interrupted before or during provisioning.
+        let alert = NSAlert()
+        alert.messageText = "Resume AI Sandbox Provisioning?"
+        alert.informativeText = """
+        An unfinished AI Sandbox base bundle was found at:
+            \(baseBundle.url.path)
+
+        macOS is installed but provisioning didn't complete.
+        "Resume" will boot the VM so you can finish Setup Assistant \
+        and run the provision script.
+
+        "Discard" will delete the bundle so you can start fresh.
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Resume")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Later")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            // Resume provisioning
+            let runId = AISandboxInstallTracker.shared.begin()
+            AISandboxInstallTracker.shared.setPhase(.provisioning, runId: runId)
+            AISandboxInstallTracker.shared.log("Resuming interrupted provisioning", runId: runId)
+
+            let task = Task { [weak self] in
+                do {
+                    try await self?.runProvisioningPhase(bundle: baseBundle, runId: runId)
+                    try Task.checkCancellation()
+
+                    await MainActor.run {
+                        AISandboxInstallTracker.shared.setPhase(.sealing, runId: runId)
+                        AISandboxInstallTracker.shared.log("Sealing base bundle…", runId: runId)
+                    }
+                    try AISandboxMacVMInstaller.sealBundle(baseBundle)
+                    await MainActor.run {
+                        AISandboxInstallTracker.shared.log("Bundle sealed", runId: runId)
+                        AISandboxInstallTracker.shared.setPhase(.finished, runId: runId)
+                        self?.showAlert(
+                            title: "AI Sandbox VM Ready",
+                            message: "Base bundle sealed. Use Tools → Boot AI Sandbox to launch a session VM."
+                        )
+                        AISandboxInstallTracker.shared.reset(runId: runId)
+                    }
+                } catch is CancellationError {
+                    await MainActor.run {
+                        AISandboxInstallTracker.shared.fail(with: "cancelled", runId: runId)
+                        AISandboxInstallTracker.shared.reset(runId: runId)
+                    }
+                } catch {
+                    await MainActor.run {
+                        AISandboxInstallTracker.shared.fail(with: error.localizedDescription, runId: runId)
+                        self?.showAlert(title: "Provisioning Failed", message: error.localizedDescription)
+                        AISandboxInstallTracker.shared.reset(runId: runId)
+                    }
+                }
+            }
+            activeAISandboxInstallTask = task
+            let taskId = UUID()
+            activeAISandboxInstallTaskId = taskId
+            Task { @MainActor [weak self] in
+                await task.value
+                self?.clearActiveInstallTaskIfMatches(taskId)
+            }
+        } else if response == .alertSecondButtonReturn {
+            // Discard
+            try? fm.removeItem(at: baseBundle.url)
+            NSLog("[AISandbox] Discarded unfinished bundle at %@", baseBundle.url.path)
+        }
+        // "Later" → do nothing
+    }
+
+    /// Shows a floating instruction panel guiding the user through first-boot
+    /// provisioning. The panel is non-modal so the VM window stays interactive.
+    private func showProvisioningInstructions() {
+        let alert = NSAlert()
+        alert.messageText = "AI Sandbox First-Boot Provisioning"
+        alert.informativeText = """
+        The VM is booting for the first time. Complete these steps \
+        in the VM window:
+
+        1. Walk through macOS Setup Assistant (create any admin user)
+        2. Once at the desktop, open Terminal.app and run:
+
+           sudo mkdir -p /workspace
+           sudo mount -t virtiofs workspace /workspace
+           /workspace/provision-macos-vm.sh
+
+        3. Wait for the script to finish (~10-30 min).
+           It will install Homebrew, Node.js, the AI agent,
+           security monitoring, and the vsock exec dispatcher.
+
+        SecVF will automatically detect completion and seal the bundle.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     /// Walks `~/.avf/AISandbox/` (base bundle + sessions) and backfills the
