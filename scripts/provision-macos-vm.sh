@@ -33,8 +33,12 @@ die()  { echo "[provision][$(date +%T)] ✗ $*" >&2; exit 1; }
 [[ "$(uname -m)" == "arm64" ]] || warn "Expected arm64, got $(uname -m)"
 
 AI_SANDBOX_USER="ai-sandbox-agent"
-WORKSPACE_MOUNT="/workspace"
-SESSIONS_MOUNT="/sessions-ro"
+# macOS Big Sur+ has a sealed system volume; `/` is read-only, so `/workspace`
+# at root cannot exist without /etc/synthetic.conf + reboot. Mount under
+# /Users/Shared instead — writable, persistent across reboots, no SSV trick
+# needed. The HOST share path (~/.avf/AISandbox/workspace) is unchanged.
+WORKSPACE_MOUNT="/Users/Shared/workspace"
+SESSIONS_MOUNT="/Users/Shared/sessions-ro"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. SYSTEM HARDENING
@@ -77,9 +81,13 @@ if ! id "$AI_SANDBOX_USER" &>/dev/null; then
     sudo dscl . -create "/Users/${AI_SANDBOX_USER}" PrimaryGroupID 20
     sudo dscl . -create "/Users/${AI_SANDBOX_USER}" NFSHomeDirectory "/Users/${AI_SANDBOX_USER}"
     sudo createhomedir -c -u "$AI_SANDBOX_USER" 2>/dev/null || true
-    # Lock password — this user is only accessed via vsock, not login
-    sudo dscl . -passwd "/Users/${AI_SANDBOX_USER}" '*'
 fi
+# Disable interactive login. Idempotent — applying the same auth authority
+# is a no-op. `dscl -passwd … '*'` was rejected by macOS pwpolicy
+# (eDSAuthPasswordQualityCheckFailed); ;DisabledUser; is the directory-
+# services-native way to make an account non-loginable without setting any
+# password at all.
+sudo dscl . -create "/Users/${AI_SANDBOX_USER}" AuthenticationAuthority ";DisabledUser;"
 log "User created: ${AI_SANDBOX_USER} (UID 601, no login)"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +222,7 @@ sudo tee /Library/LaunchDaemons/com.secvf.ai-sandbox.security-execmon.plist << '
         <string>-s</string>
         <string>/usr/local/share/secvf-ai-sandbox/execmon.d</string>
         <string>-o</string>
-        <string>/workspace/.secvf-telemetry/dtrace-exec.jsonl</string>
+        <string>/Users/Shared/workspace/.secvf-telemetry/dtrace-exec.jsonl</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -240,7 +248,7 @@ sudo tee /usr/local/bin/ai-sandbox-vsock-agent.sh << 'AGENT'
 # differently — the host Swift code connects via VZVirtioSocketDevice.
 # On the guest side, we listen using the VSOCK character device.
 set -euo pipefail
-WORKSPACE="/workspace"
+WORKSPACE="/Users/Shared/workspace"
 
 exec socat VSOCK-LISTEN:2222,reuseaddr,fork \
     EXEC:"/usr/local/bin/ai-sandbox-exec-handler.sh",pty,stderr
@@ -263,7 +271,7 @@ IFS= read -r cmd
 cmd="${cmd%$'\r'}"
 [[ -z "$cmd" ]] && exit 0
 
-cd /workspace 2>/dev/null || exit 1
+cd /Users/Shared/workspace 2>/dev/null || exit 1
 
 case "$cmd" in
     "STREAM "*)
@@ -357,21 +365,20 @@ sudo chmod -R 750 "${WORKSPACE_MOUNT}/.secvf-telemetry"
 sudo chown "${AI_SANDBOX_USER}:staff" "$WORKSPACE_MOUNT"
 sudo chmod 750 "$WORKSPACE_MOUNT"
 
-# Add to /etc/synthetic.conf so paths exist before fstab mounts
-grep -q workspace /etc/synthetic.conf 2>/dev/null || \
-    sudo bash -c "echo 'workspace' >> /etc/synthetic.conf"
+# fstab entries for VirtioFS (tagged mounts from Swift config). Mount points
+# live under /Users/Shared because macOS's sealed system volume makes `/`
+# read-only — synthetic.conf could create empty dirs at root but adds a
+# reboot dependency we don't need. /Users/Shared is writable, persistent,
+# and accessible by all users.
+sudo mkdir -p /Users/Shared/anchor-ro
+sudo chmod 555 /Users/Shared/anchor-ro
 
-# fstab entries for VirtioFS (tagged mounts from Swift config)
-grep -q 'workspace' /etc/fstab 2>/dev/null || \
-    sudo bash -c "echo 'workspace /workspace virtiofs rw 0 0' >> /etc/fstab"
-grep -q 'sessions-ro' /etc/fstab 2>/dev/null || \
-    sudo bash -c "echo 'sessions-ro /sessions-ro virtiofs ro 0 0' >> /etc/fstab"
-
-# /anchor-ro — identity anchor (read-only, hypervisor-enforced)
-grep -q 'anchor-ro' /etc/fstab 2>/dev/null || \
-    sudo bash -c "echo 'anchor-ro /anchor-ro virtiofs ro 0 0' >> /etc/fstab"
-sudo mkdir -p /anchor-ro
-sudo chmod 555 /anchor-ro
+grep -q '/Users/Shared/workspace' /etc/fstab 2>/dev/null || \
+    sudo bash -c "echo 'workspace /Users/Shared/workspace virtiofs rw 0 0' >> /etc/fstab"
+grep -q '/Users/Shared/sessions-ro' /etc/fstab 2>/dev/null || \
+    sudo bash -c "echo 'sessions-ro /Users/Shared/sessions-ro virtiofs ro 0 0' >> /etc/fstab"
+grep -q '/Users/Shared/anchor-ro' /etc/fstab 2>/dev/null || \
+    sudo bash -c "echo 'anchor-ro /Users/Shared/anchor-ro virtiofs ro 0 0' >> /etc/fstab"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. LOAD LAUNCH DAEMONS
@@ -410,7 +417,7 @@ echo "$MANIFEST_CONTENT" | sudo tee /etc/ai-sandbox-vm-manifest.json > /dev/null
 # Write to /workspace (VirtioFS mount) so the HOST can detect completion.
 # SecVF.app polls ~/.avf/AISandbox/workspace/provision-complete.json to
 # know when provisioning is done and it's safe to shut down + seal.
-if mount | grep -q '/workspace.*virtiofs'; then
+if mount | grep -q "${WORKSPACE_MOUNT}.*virtiofs"; then
     echo "$MANIFEST_CONTENT" > "${WORKSPACE_MOUNT}/provision-complete.json"
     log "Provision marker written to ${WORKSPACE_MOUNT}/provision-complete.json (host-visible)"
 else
