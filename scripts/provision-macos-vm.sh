@@ -107,10 +107,23 @@ echo 'export PATH="/opt/homebrew/opt/node@22/bin:$PATH"' >> ~/.zprofile
 export PATH="/opt/homebrew/opt/node@22/bin:$PATH"
 node --version | grep -q "^v22" || die "Node 22 install failed"
 
-log "Installing AI agent (openclaw)"
-AI_AGENT_VERSION="${AI_AGENT_VERSION:-2026.2.21}"
-npm install -g "openclaw@${AI_AGENT_VERSION}"
-openclaw --version | grep -q "." || die "AI agent install failed"
+log "Installing AI agent (Claude Code)"
+# Prefer a pre-staged tarball on the workspace share — host fetches it once
+# via `npm pack @anthropic-ai/claude-code` and drops it under
+# ~/.avf/AISandbox/workspace/, so the guest can install offline-style and
+# avoid network blocks on registry.npmjs.org. Fall back to the live registry
+# if no tarball is staged.
+if ! command -v claude &>/dev/null; then
+    AGENT_TARBALL=$(ls "${WORKSPACE_MOUNT}"/anthropic-ai-claude-code-*.tgz 2>/dev/null | head -1)
+    if [[ -n "$AGENT_TARBALL" ]]; then
+        log "Installing from staged tarball: $AGENT_TARBALL"
+        npm install -g "$AGENT_TARBALL"
+    else
+        log "No staged tarball, fetching from registry"
+        npm install -g @anthropic-ai/claude-code
+    fi
+fi
+claude --version | grep -q "." || die "AI agent install failed"
 
 log "Installing supporting tools"
 brew install \
@@ -392,7 +405,7 @@ sudo launchctl load /Library/LaunchDaemons/com.secvf.ai-sandbox.security-execmon
 # ─────────────────────────────────────────────────────────────────────────────
 MACOS_VERSION=$(sw_vers -productVersion)
 NODE_VERSION=$(node --version)
-AI_AGENT_VERSION=$(openclaw --version 2>/dev/null || echo "unknown")
+AI_AGENT_VERSION=$(claude --version 2>/dev/null || echo "unknown")
 
 MANIFEST_CONTENT=$(cat << MANIFEST
 {
