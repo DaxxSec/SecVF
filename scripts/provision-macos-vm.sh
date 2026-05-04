@@ -253,6 +253,10 @@ PLIST
 # ─────────────────────────────────────────────────────────────────────────────
 log "Installing vsock exec agent"
 
+# /usr/local/bin doesn't exist by default on Apple Silicon macOS (Homebrew
+# installs to /opt/homebrew). Create it before the tee writes below.
+sudo mkdir -p /usr/local/bin
+
 sudo tee /usr/local/bin/ai-sandbox-vsock-agent.sh << 'AGENT'
 #!/bin/bash
 # AI Sandbox vsock exec agent — macOS guest
