@@ -205,12 +205,16 @@ extension SecVFError {
     /// Log error to security audit log
     func logToAudit() {
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logEntry = "[\(timestamp)] ERROR: \(self.localizedDescription)\n"
+        // Tokenize the home prefix so logs shared with vendors / IR partners
+        // don't leak the operator's identity via `/Users/<name>/...` paths.
+        let safeDesc = self.localizedDescription
+            .replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        let logEntry = "[\(timestamp)] ERROR: \(safeDesc)\n"
 
         let logsDir = NSHomeDirectory() + "/.avf/logs/"
         let logPath = logsDir + "error-audit.log"
 
-        // Ensure directory exists
+        // Ensure directory exists with restrictive perms
         try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
 
@@ -223,10 +227,17 @@ extension SecVFError {
                 }
             } else {
                 try? data.write(to: URL(fileURLWithPath: logPath))
+                // Explicit 0o600 on first create — without it, default umask
+                // on a multi-user Mac leaves the audit log world-readable,
+                // exposing error history to other local accounts.
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600],
+                    ofItemAtPath: logPath
+                )
             }
         }
 
         // Also log to system console
-        NSLog("[SecVF ERROR] %@", self.localizedDescription)
+        NSLog("[SecVF ERROR] %@", safeDesc)
     }
 }

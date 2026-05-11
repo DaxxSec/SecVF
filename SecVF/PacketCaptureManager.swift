@@ -53,7 +53,7 @@ extension Notification.Name {
 class PacketCaptureManager {
     static let shared = PacketCaptureManager()
 
-    private let logger = OSLog(subsystem: "com.secvf", category: "PacketCapture")
+    private let logger = OSLog(subsystem: "com.DaxxSec.SecVF", category: "PacketCapture")
     private let captureQueue = DispatchQueue(label: "com.secvf.packetcapture", qos: .userInitiated)
     private let parseQueue = DispatchQueue(label: "com.secvf.packetparse", qos: .utility)
 
