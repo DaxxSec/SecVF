@@ -21,6 +21,15 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Logging helpers — define BEFORE any code that calls them. The original
+# layout defined `error()` further down (after the router-conf load),
+# so a missing /etc/secvf-router.conf aborted with `error: command not
+# found` instead of the intended "Run kali-router-setup.sh first" message.
+log()   { echo -e "${GREEN}[+]${NC} $1"; }
+info()  { echo -e "${BLUE}[*]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
 # Load interface config from router setup (REQUIRED)
 if [ -f /etc/secvf-router.conf ]; then
     source /etc/secvf-router.conf
@@ -62,11 +71,6 @@ banner() {
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
-
-log() { echo -e "${GREEN}[+]${NC} $1"; }
-info() { echo -e "${BLUE}[*]${NC} $1"; }
-warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then

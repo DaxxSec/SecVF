@@ -1587,27 +1587,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     }
 
     @objc private func showISOCacheManager() {
-        // TODO: Add ISOCacheManagerWindow.swift to Xcode project first
-        NSLog("ISO Cache Manager feature coming soon - file needs to be added to Xcode project")
-        // Commented out implementation:
-        // if isoCacheManagerWindow == nil || isoCacheManagerWindow?.window == nil {
-        //     isoCacheManagerWindow = ISOCacheManagerWindow()
-        // }
-        // isoCacheManagerWindow?.showWindow(nil)
-        // isoCacheManagerWindow?.window?.makeKeyAndOrderFront(nil)
+        // ISOCacheManagerWindow.swift exists in the repo but is not yet
+        // added to the Xcode project target. The menu item was previously
+        // a silent NSLog — surface an honest alert instead so the user
+        // isn't left wondering why nothing happened.
+        // TODO(pre-launch): wire ISOCacheManagerWindow into the Xcode
+        // project target and replace this alert with the real call site.
+        let alert = NSAlert()
+        alert.messageText = "ISO Cache Manager — coming soon"
+        alert.informativeText = "This feature is in development and not yet enabled in this build. For now, manage cached ISOs directly under ~/.avf/ISOCache/."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func showSwitchStatistics() {
-        // Print switch statistics to console for debugging
-        VirtualNetworkSwitch.shared.printStatistics()
+        // SwitchStatisticsWindowController.swift exists in the repo but
+        // is not yet added to the Xcode project target. Previously this
+        // dumped to stdout (invisible). Surface an honest alert + offer
+        // to print to Console as a fallback.
+        // TODO(pre-launch): wire SwitchStatisticsWindowController and
+        // replace this alert with the real call site.
+        let alert = NSAlert()
+        alert.messageText = "Switch Statistics window — coming soon"
+        alert.informativeText = "The in-app statistics window is in development. For now, current stats have been printed to the system log (Console.app, subsystem com.DaxxSec.SecVF)."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
 
-        // TODO: Uncomment when SwitchStatisticsWindowController.swift is added to Xcode project
-        // Create new viewer if nil or window was closed
-        // if switchStatisticsWindow == nil || switchStatisticsWindow?.window == nil {
-        //     switchStatisticsWindow = SwitchStatisticsWindowController()
-        // }
-        // switchStatisticsWindow?.showWindow(nil)
-        // switchStatisticsWindow?.window?.makeKeyAndOrderFront(nil)
+        // Still emit to OSLog for users who know to look for it.
+        VirtualNetworkSwitch.shared.printStatistics()
     }
 
     // MARK: - Tools Menu Handlers
