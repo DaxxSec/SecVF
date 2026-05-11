@@ -1,6 +1,0 @@
-Contact: https://github.com/DaxxSec/SecVF/security/advisories/new
-Contact: mailto:security@daxxsec.tech
-Preferred-Languages: en
-Canonical: https://secvf.daxxsec.tech/.well-known/security.txt
-Policy: https://github.com/DaxxSec/SecVF/blob/main/SECURITY.md
-Expires: 2027-01-01T00:00:00Z
