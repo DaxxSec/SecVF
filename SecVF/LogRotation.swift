@@ -30,13 +30,14 @@ enum LogRotation {
             .appendingPathComponent(".avf/logs", isDirectory: true)
     }
 
-    /// Run both pruning passes. Safe to call from any thread; does its work
+    /// Run all pruning passes. Safe to call from any thread; does its work
     /// on a utility queue so the main thread isn't blocked at launch.
     static func runAtLaunch() {
         DispatchQueue.global(qos: .utility).async {
             do {
                 try pruneOldDatedLogs()
                 try rotateAuditLog()
+                try rotateOversizeDatedLogs()
             } catch {
                 NSLog("[LogRotation] failed: %@", error.localizedDescription)
             }
@@ -98,6 +99,47 @@ enum LogRotation {
         NSLog("[LogRotation] rotated error-audit.log (%d bytes → .1)", size)
     }
 
+    // MARK: - Size cap for dated logs (network-*, security-*)
+    //
+    // Date-based pruning above only fires for files older than maxAgeDays —
+    // a single chatty day (e.g. a packet-flood incident on the virtual
+    // switch) could fill disk before the date cutoff helps. Treat dated
+    // logs the same way as the audit log when they exceed maxDatedBytes:
+    // rename to `.1`, leaving the original empty for new writes.
+
+    private static func rotateOversizeDatedLogs() throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: logsDir.path) else { return }
+
+        let maxBytes = maxDatedBytesFromEnv()
+
+        let entries = try fm.contentsOfDirectory(
+            at: logsDir,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+
+        for url in entries {
+            let name = url.lastPathComponent
+            // Only the active dated logs; skip already-rotated .1 and
+            // anything else that landed in this dir.
+            guard name.hasSuffix(".log"),
+                  name.hasPrefix("network-") || name.hasPrefix("security-") else {
+                continue
+            }
+            let attrs = try? fm.attributesOfItem(atPath: url.path)
+            let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+            guard size > maxBytes else { continue }
+
+            let backupURL = logsDir.appendingPathComponent("\(name).1")
+            if fm.fileExists(atPath: backupURL.path) {
+                try? fm.removeItem(at: backupURL)
+            }
+            try fm.moveItem(at: url, to: backupURL)
+            NSLog("[LogRotation] rotated %@ (%d bytes → .1)", name, size)
+        }
+    }
+
     // MARK: - Env-driven config
 
     private static func maxAgeDaysFromEnv() -> Int {
@@ -114,5 +156,15 @@ enum LogRotation {
             return v * 1024 * 1024
         }
         return 10 * 1024 * 1024
+    }
+
+    /// Size cap for dated logs (`network-*.log`, `security-*.log`). Larger
+    /// default than the audit log because these capture higher-volume data.
+    private static func maxDatedBytesFromEnv() -> Int {
+        if let raw = ProcessInfo.processInfo.environment["SECVF_LOG_MAX_DATED_MB"],
+           let v = Int(raw), v > 0 {
+            return v * 1024 * 1024
+        }
+        return 100 * 1024 * 1024
     }
 }

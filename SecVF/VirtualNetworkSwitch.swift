@@ -327,6 +327,16 @@ class VirtualNetworkSwitch {
 
         // Learn source MAC address
         if port.macAddress == nil || port.macAddress != srcMAC {
+            // Evict the previous MAC from the lookup table. Without this,
+            // a guest rotating source MACs (legitimately on driver reload,
+            // maliciously to bypass filtering, or accidentally by crafting
+            // random src MACs) grows macTable unboundedly — each rotation
+            // adds a new entry while the previous one orphans. The MAC
+            // table is bounded only by port count if we always sweep the
+            // old value.
+            if let oldMAC = port.macAddress {
+                macTable.removeValue(forKey: oldMAC)
+            }
             port.macAddress = srcMAC
             macTable[srcMAC] = fromVM
             log("Learned MAC address \(srcMAC) on port \(port.vmName)")
