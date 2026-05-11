@@ -1,0 +1,34 @@
+title: SecVF — EMERGENCY event recorded
+id: 7c1a8e60-4f72-489b-9a8e-2a3e8b9c8d9e
+status: stable
+description: |
+  Any EMERGENCY-severity event in SecVF's security log indicates a
+  potential boundary violation. These are SecVF's highest-severity
+  classification — see the Containment Breakout wiki for response.
+references:
+  - https://secvf.daxxsec.tech/wiki/Containment-Breakout
+  - https://secvf.daxxsec.tech/wiki/Security-Model
+author: DaxxSec
+date: 2026-05-10
+logsource:
+  product: secvf
+  service: security-events
+detection:
+  selection:
+    stream: security
+    severity: EMERGENCY
+  condition: selection
+level: critical
+falsepositives:
+  - None expected — EMERGENCY is reserved for actual boundary indicators
+fields:
+  - vm
+  - subsystem
+  - event
+  - data
+tags:
+  - secvf
+  - containment
+
+# LogQL:
+# {stream="security", severity="EMERGENCY"}

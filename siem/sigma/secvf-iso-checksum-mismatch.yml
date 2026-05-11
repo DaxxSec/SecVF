@@ -1,0 +1,38 @@
+title: SecVF — ISO checksum mismatch
+id: 8e2f4f01-1a93-4a3e-8be1-1d5f37c5d5a9
+status: stable
+description: |
+  SecVF rejected an ISO download because its SHA-256 did not match the
+  expected value from the upstream mirror. The file was deleted before
+  it was mounted. Possible causes: supply-chain anomaly at the mirror,
+  network-level tampering, transit corruption.
+references:
+  - https://secvf.daxxsec.tech/wiki/Security-Model#provenance
+  - https://secvf.daxxsec.tech/wiki/Logging#disk-security
+author: DaxxSec
+date: 2026-05-10
+logsource:
+  product: secvf
+  service: security-events
+detection:
+  selection:
+    stream: security
+    subsystem: iso-cache
+    event: checksum.mismatch
+  condition: selection
+level: critical
+falsepositives:
+  - Transient network corruption (will not repeat on next attempt)
+  - Upstream mirror briefly serving a stale checksum vs binary (rare, usually < 5 min window)
+fields:
+  - vm
+  - data.file
+  - data.expected
+  - data.got
+tags:
+  - secvf
+  - containment
+  - supply-chain
+
+# LogQL equivalent for Grafana / Loki:
+# {stream="security", subsystem="iso-cache", event="checksum.mismatch"}

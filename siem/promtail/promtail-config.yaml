@@ -1,0 +1,165 @@
+# Promtail — tails SecVF's log files and ships to Loki.
+#
+# Five streams:
+#   secvf_security    — ~/.avf/logs/security-YYYY-MM-DD.log     (JSONL)
+#   secvf_error_audit — ~/.avf/logs/error-audit.log             (JSONL)
+#   secvf_network     — ~/.avf/logs/network-YYYY-MM-DD.log      (text)
+#   secvf_ai_sandbox  — ~/.avf/AISandbox/sessions/*/audit.log   (JSONL)
+#   secvf_suricata    — /var/log/suricata/eve.json              (JSONL) — IDS alerts
+#   secvf_yara        — /var/log/yara/scan.jsonl                (JSONL) — file matches
+
+server:
+  http_listen_address: 0.0.0.0
+  http_listen_port: 9080
+  log_level: warn
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+scrape_configs:
+
+  # ─── SecVF security events (JSONL) ─────────────────────────────────────
+  - job_name: secvf_security
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: secvf
+          stream: security
+          host: secvf-host
+          __path__: /avf-logs/security-*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            severity: severity
+            subsystem: subsystem
+            event: event
+            vm: vm
+            ts: ts
+      - labels:
+          severity:
+          subsystem:
+          event:
+          vm:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+      - drop:
+          expression: '^\s*$'
+
+  # ─── SecVF typed error audit (JSONL) ────────────────────────────────────
+  - job_name: secvf_error_audit
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: secvf
+          stream: error_audit
+          host: secvf-host
+          __path__: /avf-logs/error-audit.log
+    pipeline_stages:
+      - json:
+          expressions:
+            category: category
+            code: code
+            ts: ts
+      - labels:
+          category:
+          code:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+
+  # ─── SecVF network logs (text format) ──────────────────────────────────
+  - job_name: secvf_network
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: secvf
+          stream: network
+          host: secvf-host
+          __path__: /avf-logs/network-*.log
+    pipeline_stages:
+      - regex:
+          expression: '(?P<ts>\S+) \[(?P<src>[^\]]+)\] port=(?P<port>\d+) vm=(?P<vm>\S+).*'
+      - labels:
+          src:
+          vm:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+
+  # ─── AI sandbox per-session audit (JSONL) ──────────────────────────────
+  - job_name: secvf_ai_sandbox
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: secvf
+          stream: ai_sandbox
+          host: secvf-host
+          __path__: /avf-aisandbox/sessions/*/audit.log
+    pipeline_stages:
+      - json:
+          expressions:
+            severity: severity
+            subsystem: subsystem
+            event: event
+            session: session
+            ts: ts
+      - labels:
+          severity:
+          subsystem:
+          event:
+          session:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+
+  # ─── Suricata IDS alerts (eve.json) ────────────────────────────────────
+  - job_name: secvf_suricata
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: detection
+          stream: suricata
+          host: secvf-host
+          __path__: /var/log/suricata/eve.json
+    pipeline_stages:
+      - json:
+          expressions:
+            event_type: event_type
+            severity: alert.severity
+            signature: alert.signature
+            category: alert.category
+            sid: alert.signature_id
+            src_ip: src_ip
+            dst_ip: dest_ip
+      - labels:
+          event_type:
+          severity:
+          category:
+
+  # ─── YARA scanner matches (JSONL) ──────────────────────────────────────
+  - job_name: secvf_yara
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: detection
+          stream: yara
+          host: secvf-host
+          __path__: /var/log/yara/scan.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            rule: rule
+            namespace: namespace
+            file: file
+            tags: tags
+      - labels:
+          rule:
+          namespace:

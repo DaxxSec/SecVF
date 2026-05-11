@@ -1,0 +1,141 @@
+{
+  "uid": "secvf-detection",
+  "title": "SecVF · Detection (IDS + YARA)",
+  "tags": ["secvf", "detection"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Suricata alerts (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"suricata\", event_type=\"alert\"}[24h]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "orange" },
+            { "value": 50, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "YARA matches (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"yara\"} | json | event=\"scan.match\"[24h]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Files scanned (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"yara\"} | json | event=\"scan.done\"[24h]))",
+        "refId": "A"
+      }],
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Distinct C2 indicators (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "count(count by (signature) (count_over_time({stream=\"suricata\", category=~\".*[Cc]2.*|.*[Tt]rojan.*\"}[24h])))",
+        "refId": "A"
+      }],
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Detections over time",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({stream=\"suricata\", event_type=\"alert\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "Suricata"
+        },
+        {
+          "expr": "sum(count_over_time({stream=\"yara\"} | json | event=\"scan.match\" [5m]))",
+          "refId": "B",
+          "legendFormat": "YARA"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "bars", "fillOpacity": 60 }
+        }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Top Suricata signatures (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "topk(15, sum by (signature) (count_over_time({stream=\"suricata\", event_type=\"alert\"} | json | __error__=\"\"[24h])))",
+        "queryType": "instant",
+        "refId": "A",
+        "instant": true
+      }],
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 12 }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Top YARA rules (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "topk(15, sum by (rule) (count_over_time({stream=\"yara\"} | json | event=\"scan.match\" [24h])))",
+        "queryType": "instant",
+        "refId": "A",
+        "instant": true
+      }],
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 12 }
+    },
+    {
+      "id": 30,
+      "type": "logs",
+      "title": "Recent detections (live)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "{job=\"detection\"}",
+        "refId": "A"
+      }],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 22 }
+    }
+  ]
+}

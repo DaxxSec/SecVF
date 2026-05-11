@@ -1,0 +1,101 @@
+# SecVF custom Suricata rules — analyst-lab-specific signatures.
+#
+# These complement the curated ET Open rules. They focus on indicators that
+# are characteristic of the SecVF analysis environment specifically, not
+# generic malware behaviour. Catch sandbox-aware samples, observe lateral
+# movement inside the lab, flag exfil attempts targeted at the host.
+#
+# Rule SID range:  1000000 - 1009999 (private use range)
+# License: MIT (same as SecVF)
+
+# ───────────────────────────────────────────────────────────────────────
+# Sandbox-aware behaviour
+# ───────────────────────────────────────────────────────────────────────
+
+alert dns $HOME_NET any -> any any (msg:"SECVF — DNS query for sandbox/vm detection domain"; \
+  content:"www.update.microsoft.com"; nocase; classtype:trojan-activity; \
+  metadata:secvf-class sandbox-detect; sid:1000001; rev:1;)
+
+alert dns $HOME_NET any -> any any (msg:"SECVF — DNS query for ipinfo-style geolocation API"; \
+  content:"|03|api"; content:"ipify|03|"; distance:0; nocase; \
+  classtype:network-scan; metadata:secvf-class geolocate; sid:1000002; rev:1;)
+
+alert http $HOME_NET any -> any any (msg:"SECVF — HTTP request to public IP lookup service"; \
+  flow:established,to_server; content:"GET"; http_method; \
+  pcre:"/Host: (api\.ipify\.org|ipinfo\.io|ifconfig\.me|checkip\.amazonaws\.com|icanhazip\.com)/i"; \
+  classtype:network-scan; metadata:secvf-class geolocate; sid:1000003; rev:1;)
+
+# ───────────────────────────────────────────────────────────────────────
+# Lateral movement inside the lab
+# ───────────────────────────────────────────────────────────────────────
+
+alert tcp $HOME_NET any -> $HOME_NET 22 (msg:"SECVF — Intra-lab SSH connection attempt"; \
+  flow:to_server,not_established; classtype:network-scan; \
+  metadata:secvf-class lateral-movement; sid:1000010; rev:1;)
+
+alert tcp $HOME_NET any -> $HOME_NET 445 (msg:"SECVF — Intra-lab SMB connection attempt"; \
+  flow:to_server,not_established; classtype:network-scan; \
+  metadata:secvf-class lateral-movement; sid:1000011; rev:1;)
+
+alert tcp $HOME_NET any -> $HOME_NET 3389 (msg:"SECVF — Intra-lab RDP connection attempt"; \
+  flow:to_server,not_established; classtype:network-scan; \
+  metadata:secvf-class lateral-movement; sid:1000012; rev:1;)
+
+alert tcp $HOME_NET any -> $HOME_NET 5900:5910 (msg:"SECVF — Intra-lab VNC connection attempt"; \
+  flow:to_server,not_established; classtype:network-scan; \
+  metadata:secvf-class lateral-movement; sid:1000013; rev:1;)
+
+# ───────────────────────────────────────────────────────────────────────
+# Host-targeting (anything trying to reach the router or host directly)
+# ───────────────────────────────────────────────────────────────────────
+
+alert tcp $HOME_NET any -> 10.0.100.1 any (msg:"SECVF — Lab guest attempting connection to router VM"; \
+  flow:to_server,not_established; classtype:attempted-recon; \
+  metadata:secvf-class host-target; sid:1000020; rev:1;)
+
+# ───────────────────────────────────────────────────────────────────────
+# C2 / staging indicators (generic patterns)
+# ───────────────────────────────────────────────────────────────────────
+
+alert http $HOME_NET any -> any any (msg:"SECVF — HTTP POST to .php with short payload (beacon shape)"; \
+  flow:established,to_server; content:"POST"; http_method; \
+  content:".php"; http_uri; \
+  byte_test:4,<,256,0,relative; \
+  classtype:trojan-activity; metadata:secvf-class beacon; sid:1000030; rev:1;)
+
+alert http $HOME_NET any -> any any (msg:"SECVF — HTTP GET with hex-string URI parameter (stager pattern)"; \
+  flow:established,to_server; content:"GET"; http_method; \
+  pcre:"/[?&][a-z]=[0-9a-f]{32,}/i"; http_uri; \
+  classtype:trojan-activity; metadata:secvf-class stager; sid:1000031; rev:1;)
+
+alert http $HOME_NET any -> any any (msg:"SECVF — HTTP request advertising Windows-implant User-Agent"; \
+  flow:established,to_server; \
+  content:"User-Agent|3A 20|"; \
+  pcre:"/User-Agent:[^\r\n]*?(Mozilla\/4\.0 \(compatible; MSIE [0-9]\.0\)|WinHTTP|winhttp|Microsoft BITS)/i"; \
+  classtype:trojan-activity; metadata:secvf-class c2; sid:1000032; rev:1;)
+
+# ───────────────────────────────────────────────────────────────────────
+# Exfiltration attempts
+# ───────────────────────────────────────────────────────────────────────
+
+alert dns $HOME_NET any -> any any (msg:"SECVF — DNS query with extremely long subdomain (possible tunneling)"; \
+  pcre:"/^[A-Za-z0-9-]{40,}\./"; \
+  classtype:trojan-activity; metadata:secvf-class dns-tunnel; sid:1000040; rev:1;)
+
+alert dns $HOME_NET any -> any any (msg:"SECVF — Unusually high DNS TXT record query rate"; \
+  dns.opcode:0; \
+  threshold: type both, track by_src, count 30, seconds 60; \
+  classtype:trojan-activity; metadata:secvf-class dns-tunnel; sid:1000041; rev:1;)
+
+# ───────────────────────────────────────────────────────────────────────
+# TLS / encryption anomalies
+# ───────────────────────────────────────────────────────────────────────
+
+alert tls $HOME_NET any -> any any (msg:"SECVF — TLS Client Hello with no SNI extension"; \
+  flow:established,to_server; tls.no_sni; \
+  classtype:protocol-command-decode; metadata:secvf-class tls-anomaly; sid:1000050; rev:1;)
+
+alert tls $HOME_NET any -> any any (msg:"SECVF — TLS Client Hello matching Cobalt Strike default JA3"; \
+  flow:established,to_server; \
+  ja3.hash; content:"a0e9f5d64349fb13191bc491f15b0b9d"; \
+  classtype:trojan-activity; metadata:secvf-class beacon; sid:1000060; rev:1;)

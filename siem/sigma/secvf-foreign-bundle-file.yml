@@ -1,0 +1,38 @@
+title: SecVF — Foreign file in VM bundle directory
+id: a3d8e2c4-1b9f-4e7a-86c2-9f0a8e7d6c5b
+status: stable
+description: |
+  SecVF's filesystem monitor (VMSecurityMonitor / FSEvents) observed a
+  file in ~/.avf/<family>/<vm>.bundle/ that SecVF did not write itself.
+  Likely causes:
+    1. Manual user edit (benign — re-running a command, restoring files)
+    2. External process (other tooling reading/writing the bundle)
+    3. A guest reaching out of its bundle (containment indicator)
+references:
+  - https://secvf.daxxsec.tech/wiki/Containment-Breakout#filesystem
+author: DaxxSec
+date: 2026-05-10
+logsource:
+  product: secvf
+  service: security-events
+detection:
+  selection:
+    stream: security
+    subsystem: fsevents
+    event: file.unexpected
+  condition: selection
+level: high
+falsepositives:
+  - User manually editing bundle files between VM runs
+  - Time Machine reading the bundle (Spotlight indexed files)
+fields:
+  - vm
+  - data.path
+  - data.event_flags
+tags:
+  - secvf
+  - containment
+  - filesystem
+
+# LogQL:
+# {stream="security", subsystem="fsevents", event="file.unexpected"}

@@ -1,0 +1,38 @@
+title: SecVF — VirtioFS symlink-escape attempt
+id: 1c5e3a7b-8d4f-4e9a-b2c1-6f8e7d4a3b2c
+status: stable
+description: |
+  A guest created a symlink inside a VirtioFS share that points outside
+  the share's directory tree. The framework refused to follow it (the
+  share root is the symlink boundary), but the attempt itself is a
+  containment indicator — the guest is trying to reach host filesystem
+  outside its scope.
+references:
+  - https://secvf.daxxsec.tech/wiki/File-Transfer#virtiofs
+  - https://secvf.daxxsec.tech/wiki/Containment-Breakout#virtiofs
+author: DaxxSec
+date: 2026-05-10
+logsource:
+  product: secvf
+  service: security-events
+detection:
+  selection:
+    stream: security
+    subsystem: virtiofs
+    event: symlink.escape-attempt
+  condition: selection
+level: high
+falsepositives:
+  - Benign software in the guest creating symlinks for its own purposes (rare; would point to dirs outside the share)
+fields:
+  - vm
+  - data.link_path
+  - data.target_path
+tags:
+  - secvf
+  - containment
+  - virtiofs
+  - ipc
+
+# LogQL:
+# {stream="security", subsystem="virtiofs", event="symlink.escape-attempt"}

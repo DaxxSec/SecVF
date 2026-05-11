@@ -1,0 +1,177 @@
+# SecVF — built-in detection / SIEM stack
+#
+# Five services: Loki (log store), Promtail (log shipper), Grafana (UI + alerts),
+# Suricata (network IDS over PCAPs), yara-scanner (file content matching).
+#
+# All services bind to 127.0.0.1 only. None of them are exposed to the network
+# without an explicit reverse-proxy in front. Reads SecVF's audit logs from
+# ~/.avf/ as read-only mounts.
+#
+# Compatible with: Docker Desktop, OrbStack, colima, podman-compose, Rancher.
+# Recommended on Apple Silicon: OrbStack — built on Apple Virtualization
+# framework, same substrate as SecVF itself, ~10× lighter than Docker Desktop,
+# free for personal use.
+#
+# Quick start:
+#   cd siem/
+#   docker compose up -d
+#   open http://localhost:3000   # admin / secvf (change immediately)
+
+services:
+
+  # ─── Loki — log aggregation & query ─────────────────────────────────────
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: secvf-loki
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64M
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 512m
+    pids_limit: 128
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "127.0.0.1:3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O- http://localhost:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ─── Promtail — tails SecVF logs, parses, ships to Loki ─────────────────
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: secvf-promtail
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=32M
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 128m
+    pids_limit: 64
+    volumes:
+      - ./promtail/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - ${HOME}/.avf/logs:/avf-logs:ro
+      - ${HOME}/.avf/AISandbox:/avf-aisandbox:ro
+      - promtail-positions:/var/lib/promtail
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki: { condition: service_healthy }
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ─── Grafana — dashboards, alerts, UI ───────────────────────────────────
+  grafana:
+    image: grafana/grafana-oss:11.3.1
+    container_name: secvf-grafana
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 384m
+    pids_limit: 128
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=secvf
+      # No telemetry, no analytics, no checking-for-updates phone-home.
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_COOKIE_SAMESITE=strict
+      - GF_SERVER_ENABLE_GZIP=true
+      - GF_LOG_LEVEL=warn
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      loki: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --tries=1 -O- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ─── Suricata — offline IDS over captured PCAPs ─────────────────────────
+  # Watches ~/.avf/Captures/ for new .pcap / .pcapng, runs ET Open + custom
+  # SecVF rules, writes eve.json which Promtail picks up. Runs in offline
+  # mode — does NOT touch any live network interface.
+  suricata:
+    image: jasonish/suricata:7.0.7
+    container_name: secvf-suricata
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    # Suricata needs CAP_NET_ADMIN/RAW for live capture; we run offline only
+    # against files, so we drop everything.
+    mem_limit: 1g
+    pids_limit: 256
+    volumes:
+      - ./suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - ./suricata/rules:/var/lib/suricata/rules:ro
+      - ./suricata/run.sh:/run.sh:ro
+      - ${HOME}/.avf/Captures:/pcaps:ro
+      - suricata-logs:/var/log/suricata
+    entrypoint: ["/bin/sh", "/run.sh"]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ─── YARA scanner — file content matching ───────────────────────────────
+  # Watches ~/.avf/Quarantine/ (you put suspect files here) and any path
+  # under ~/.avf/ where files appear. Runs the full ruleset and writes
+  # per-match JSONL that Promtail tails.
+  yara-scanner:
+    build: ./yara-scanner
+    image: secvf-yara-scanner:latest
+    container_name: secvf-yara
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=64M
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 512m
+    pids_limit: 64
+    volumes:
+      - ./yara-scanner/rules:/yara-rules:ro
+      - ${HOME}/.avf/Quarantine:/quarantine:ro
+      - yara-logs:/var/log/yara
+    environment:
+      - WATCH_DIR=/quarantine
+      - RULES_DIR=/yara-rules
+      - LOG_FILE=/var/log/yara/scan.jsonl
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ─── Bridge: surface suricata + yara logs back to Promtail ──────────────
+  # Promtail picks them up via the shared docker volumes (mounted RO above
+  # under /avf-* on the Promtail container — but for these we use named
+  # volumes shared between services). Promtail's config reads the named-
+  # volume mountpoints.
+
+volumes:
+  loki-data:
+  grafana-data:
+  promtail-positions:
+  suricata-logs:
+  yara-logs:
