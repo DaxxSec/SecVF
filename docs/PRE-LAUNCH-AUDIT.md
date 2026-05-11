@@ -45,21 +45,25 @@ While you slept, I:
 - `secvf switch macs` generates the same MAC every time (was randomized per process via `String.hashValue`).
 
 **What I deliberately did NOT touch (needs your judgment):**
-- B4 (single-writer audit log refactor) — architectural decision.
-- B5, B6 (AIMon vsock auth, message-size bound) — AIMon-scope per `project_aimon_relationship.md`.
-- B7 (DistributedNotificationCenter sender-verify) — design choice: signed messages vs mach-service vs ignore.
+- B5 (AIMon vsock exec UDS perms + caller auth) — AIMon-scope per `project_aimon_relationship.md`.
+- B6_AIMon (AIMon vsock message-size + read-timeout) — AIMon-scope.
 - B8 (AIMon APFS-CoW clonefile rewrite) — AIMon-scope.
-- B9 (two PacketAnalysisWindowController instances) — needs UI routing decision.
-- H6 (tshark `-r FIFO` likely broken stream protocol) — can't safely verify without a real packet flow; flag for you to test.
+- H6 (tshark `-r FIFO` stream protocol) — *investigated this morning*: the audit's claim was wrong. See **B6 update** below.
 - Test-coverage pass — out of scope for an autonomous run.
+
+**Batch 5 morning additions (after the user came back online):**
+
+- **B4 done**: routed all three log writers (`VMSecurityMonitor.writeToSecurityLog`, `SecVFError.logToAudit`, `VirtualNetworkSwitch.logToFile`) through `AVFAuditLog.append` / `appendAsync`. Single per-process serial queue + `O_APPEND` + `0o600` on first create. Concurrent producers can no longer interleave bytes mid-line. AVFAuditLog gained `appendAsync` so the VSwitch hot path stays non-blocking.
+- **B9 done**: added `.openPacketAnalysis` notification. AppDelegate owns the sole `PacketAnalysisWindowController`; the library-window button now posts the notification instead of instantiating its own.
+- **B6 investigated, no change**: the audit's claim that `tshark -r <fifo> -T json -l` "never produces live packets" is incorrect. The FIFO writer (`PacketCaptureManager.fifoWriteHandle`) stays open across packets, so tshark on `-r` never reads EOF. `-T json -l` flushes each packet object, and the brace-counting stream parser at `PacketCaptureManager.swift:520` (`extractNextPacket`) correctly extracts incremental `{ ... }` objects from tshark's JSON-array framing. The pattern works as designed.
+- **B7 investigated, code-comment only**: `DistributedNotificationCenter.default()` is per-user-session on macOS. Fast-user-switching peers cannot reach our handlers. Same-user same-host processes CAN post — but a same-user attacker already has GUI-script-level control of SecVF, so DNC doesn't widen the attack surface. Added a clarifying comment block in `AppDelegate.swift` above the CLI observer registration. No defense-in-depth code change for 1.0.
 
 **Recommended morning action:**
 
-1. `git log --oneline 9072f8e^..HEAD` to see all 5 new commits.
+1. `git log --oneline 9072f8e^..HEAD` to see all commits in this branch.
 2. Skim this doc top-to-bottom.
 3. Pull the branch, run smoke tests on a real Mac (`xcodebuild test` + a manual VM create/start), confirm nothing regressed.
-4. Make the architectural decisions on B4 / B7 — those need you.
-5. Verify H6 (tshark) on a real capture session before merging the branch to main.
+4. Sanity-check Batch 5 specifically: the audit logs should still appear (security/network/error) after a VM start/stop cycle, and the library-button "Open Full Analysis" should reuse the same window as Cmd-Shift-P.
 
 ---
 
@@ -103,7 +107,7 @@ The "Status" column reflects what happened during the autonomous fix loop on thi
 
 **`SecVFError.swift:218-223`, `VMSecurityMonitor.swift:380-389`, `VirtualNetworkSwitch.swift:511-521`** all open, seek-to-end, write, close. Concurrent producers (security monitor on `eventQueue`, switch on `logQueue`, error audit from any thread) can interleave bytes; a crash mid-write yields a truncated last line; the next event concatenates. **Worst kind of forensic corruption: silent.**
 
-**Status (this run):** Documented with a TODO comment in code; user review needed. A proper fix wants a single serial writer per file with `fsync` after each line; that's a refactor I don't want to do without you on the keyboard.
+**Fix (Batch 5 — this morning):** Routed all three writers through `AVFAuditLog.append` (sync) / `appendAsync` (non-blocking, used by the VSwitch packet-log hot path). Single per-process serial queue + `O_APPEND` + `0o600` on first create. Concurrent in-process writers can no longer interleave bytes mid-line. Cross-process writers (CLI + app) still serialize at the kernel for writes ≤ PIPE_BUF via `O_APPEND`. `fsync` per-line was deliberately not added — the existing crash-loss window is identical to before, and per-line fsync hurts the VSwitch hot path. If durability becomes a concern, add a `flush: Bool = false` parameter.
 
 ### B5. AI sandbox vsock exec bridge has root-shell escalation surface
 
@@ -121,7 +125,7 @@ The "Status" column reflects what happened during the autonomous fix loop on thi
 
 **`AppDelegate.swift:92-111, 419-509`** registers observers for `com.secvf.cli.start/stop/force-stop` keyed only on `vmName`. The Mac mini global memory notes this is a multi-user machine — meaning the *other* user on the same host can post these notifications to start/stop your VMs by name. No signing, no sender check, no audit.
 
-**Status (this run):** Documented. Real fix needs message signing or a mach-port-based bridge that only the same-app instance can drive. Not a one-liner; user review needed for design choice (signed messages? per-user app group? mach service with check-in?).
+**Update (Batch 5 — investigated this morning):** The "other user can post" framing was wrong. `DistributedNotificationCenter.default()` on macOS is a **per-user-session** center backed by the user's launchd bootstrap. Fast-user-switching peers cannot reach our observers; SSH-only sessions have no DNC at all. **Same-user same-host processes CAN** post matching notifications, but a same-user attacker already has GUI-script-level control of SecVF (`osascript`, accessibility, AppleScript dictionaries), so DNC does not widen the attack surface beyond what's already there. **Resolution:** added a clarifying comment block in `AppDelegate.swift` documenting the threat model; no code change beyond that for 1.0. If we later support multi-tenant single-user (e.g. a shared analyst account), gate on a shared-secret userInfo token.
 
 ### B8. AI sandbox session "clone" is a full 64 GiB byte copy, not APFS CoW
 
@@ -133,7 +137,7 @@ The "Status" column reflects what happened during the autonomous fix loop on thi
 
 **`AppDelegate.swift:50, 1573-1577` + `VMLibraryWindowController.swift:48, 901-906`** — both register for `.packetCaptured`. Opening "Packet Analysis" via Cmd-Shift-P and via the library button creates two independent subscribers; packets render twice, status counts diverge.
 
-**Fix (this run):** Route the library button through the AppDelegate-owned singleton. See commit.
+**Fix (Batch 5 — this morning):** Added `.openPacketAnalysis` notification. `VMLibraryWindowController.openPacketAnalysisWindow(_:)` now posts the notification instead of instantiating its own controller; AppDelegate's `handleOpenPacketAnalysis(_:)` surfaces the single owned window. Removed the unused `packetAnalysisWindowController` ivar in the library controller. Single controller now owns the packet stream; subscribers no longer duplicate.
 
 ### B10. `UTType(filenameExtension: "pcap")!` force-unwrap
 
@@ -316,15 +320,12 @@ A test-writing pass is its own project; not in scope for this autonomous run.
 | Batch 2 (crash prevention) | `f9b96fe` | B10, H4, H15 partial |
 | Batch 3 (Swift correctness) | `90f1941` | H1, H2, H3, H13, M9, M14 |
 | Batch 4 (shell scripts) | `109d534` | B1, H5, H11 |
-| **Deferred (needs your input)** | _none yet_ | B4, B5, B6, B7, B8, B9, H6, H12, H14 partial, M3, M6, all AIMon-scope, all coverage gaps |
+| Batch 5 (B4 single-writer + B9 controller dedup + B6/B7 investigation) | _this morning_ | B4 fixed, B9 fixed, B6 investigated (no change needed), B7 investigated (comment only) |
+| **Still deferred** | — | B5, B8 (AIMon-scope), H12, H14 partial, M3, M6, all other AIMon-scope, all coverage gaps |
 
-**What the deferred items need from you:**
+**What the still-deferred items need from you:**
 
-1. **B4 (single-writer audit log)** — Architectural choice. Options: one actor that owns all writes, or `fsync` + advisory lock per writer, or move to OSLog as canonical and treat files as exports. I'd lean toward an actor.
-2. **B6 (tshark stream protocol)** — Verification on a real Mac with a live capture. If the auditor's read is right, the fix is `tshark -i - -T ek -l` reading the FIFO via stdin instead of `tshark -r <fifo> -T json -l`. I won't change it without you watching packets flow.
-3. **B7 (DNC sender verification)** — Design choice for a multi-user Mac. Signed messages? Per-user app-group prefix? Mach service with check-in? Worth a 10-minute think.
-4. **B5, B6, B8 (AIMon-scope)** — Track in the [AIMon repo](https://github.com/DaxxSec/ai-mon). All three are real, just not SecVF 1.0 blockers since AIMon is the consumer.
-5. **B9 (two `PacketAnalysisWindowController` instances)** — Refactor the library-button path to route through the AppDelegate-owned singleton. Touch surface is small but the choice is yours (singleton vs proper window-controller registry).
-6. **Test-coverage pass** — Pick a target (e.g. `VMManager.createVM`, `verifySHA256`, `DistroVersionFetcher`) and write the GWT tests. ~1 day of work each.
+1. **B5, B8 (AIMon-scope)** — Track in the [AIMon repo](https://github.com/DaxxSec/ai-mon). Real issues, just not SecVF 1.0 blockers since AIMon is the consumer.
+2. **Test-coverage pass** — Pick a target (e.g. `VMManager.createVM`, `verifySHA256`, `DistroVersionFetcher`) and write the GWT tests. ~1 day of work each.
 
 Each batch commit is independent. Revert any single one with `git revert <hash>` without affecting the others.

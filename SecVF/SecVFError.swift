@@ -211,31 +211,11 @@ extension SecVFError {
             .replacingOccurrences(of: NSHomeDirectory(), with: "~")
         let logEntry = "[\(timestamp)] ERROR: \(safeDesc)\n"
 
-        let logsDir = NSHomeDirectory() + "/.avf/logs/"
-        let logPath = logsDir + "error-audit.log"
-
-        // Ensure directory exists with restrictive perms
-        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-
-        if let data = logEntry.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let handle = FileHandle(forWritingAtPath: logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-            } else {
-                try? data.write(to: URL(fileURLWithPath: logPath))
-                // Explicit 0o600 on first create — without it, default umask
-                // on a multi-user Mac leaves the audit log world-readable,
-                // exposing error history to other local accounts.
-                try? FileManager.default.setAttributes(
-                    [.posixPermissions: 0o600],
-                    ofItemAtPath: logPath
-                )
-            }
-        }
+        // Route through AVFAuditLog so concurrent producers stay line-coherent
+        // in error-audit.log. AVFAuditLog opens with O_APPEND + mode 0o600
+        // (the file gets the right perms on first create automatically).
+        AVFPaths.ensureDirectoriesExist()
+        AVFAuditLog.append(logEntry, to: AVFPaths.errorAuditLog)
 
         // Also log to system console
         NSLog("[SecVF ERROR] %@", safeDesc)

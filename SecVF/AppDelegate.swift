@@ -88,7 +88,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             object: nil
         )
 
-        // Register for CLI distributed notifications (cross-process)
+        // Open packet analysis — single owner is AppDelegate. Other UIs post
+        // .openPacketAnalysis rather than instantiate a second controller.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenPacketAnalysis(_:)),
+            name: .openPacketAnalysis,
+            object: nil
+        )
+
+        // Register for CLI distributed notifications (cross-process).
+        //
+        // Scope note (B7): DistributedNotificationCenter.default() is a
+        // PER-USER-SESSION center on macOS — it lives on the user's launchd
+        // bootstrap, so other users on the same Mac (fast user switching,
+        // separate accounts) cannot post into our handlers. Same-user
+        // processes CAN post these notifications, but a same-user attacker
+        // has already compromised SecVF's UI affordances; DNC adds no new
+        // attack surface beyond what GUI scripting would offer. For SecVF
+        // 1.0 we accept the same-user threat model and do not add a
+        // sender-PID validation step. If we later support a multi-tenant
+        // host model, gate these on a shared-secret userInfo token.
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(handleCLIStartVM(_:)),
@@ -1575,6 +1595,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         }
         packetAnalysisWindow?.showWindow(nil)
         packetAnalysisWindow?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func handleOpenPacketAnalysis(_ notification: Notification) {
+        // Funnels library-window and any future caller through the same
+        // singleton-owned analysis window.
+        showPacketAnalysis()
     }
 
     @objc private func showISOCacheLogs() {

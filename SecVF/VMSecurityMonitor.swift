@@ -389,40 +389,22 @@ class VMSecurityMonitor {
     }
 
     private func writeToSecurityLog(_ event: SecurityEvent) {
-        let logDir = NSHomeDirectory() + "/.avf/logs/"
-        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+        // Routed through AVFAuditLog so concurrent producers (this method
+        // can be invoked from any thread that calls logSecurityEvent) stay
+        // line-coherent in the security log. AVFAuditLog opens with O_APPEND
+        // + mode 0o600 — handles permission tightening on first create too.
+        AVFPaths.ensureDirectoriesExist()
 
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let logFileName = "security-\(dateFormatter.string(from: Date())).log"
-        let logPath = logDir + logFileName
-
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let timestamp = dateFormatter.string(from: event.timestamp)
         // Replace the user's home prefix with `~/` so logs shared with vendors /
         // incident-response partners don't leak the operator's identity via
         // paths like `/Users/jane.doe/.avf/...`.
         let line = "[\(timestamp)] \(event.logMessage)\n"
-        let logLine = line.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+            .replacingOccurrences(of: NSHomeDirectory(), with: "~")
 
-        if let logData = logLine.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                    fileHandle.seekToEndOfFile()
-                    fileHandle.write(logData)
-                    fileHandle.closeFile()
-                }
-            } else {
-                try? logData.write(to: URL(fileURLWithPath: logPath))
-                // First-write file gets 0o600 explicitly — on a multi-user Mac
-                // the default umask leaves these world-readable, leaking VM
-                // names and severity history to other local accounts.
-                try? FileManager.default.setAttributes(
-                    [.posixPermissions: 0o600],
-                    ofItemAtPath: logPath
-                )
-            }
-        }
+        AVFAuditLog.append(line, to: AVFPaths.securityLog(for: event.timestamp))
     }
 
     // MARK: - Security Recommendations

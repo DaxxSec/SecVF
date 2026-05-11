@@ -489,15 +489,12 @@ class VirtualNetworkSwitch {
         logToFile(message, type: type)
     }
 
-    // Dedicated queue for log file I/O to prevent blocking switchQueue
-    private static let logQueue = DispatchQueue(label: "com.secvf.virtualswitch.log", qos: .utility)
-
     private func logToFile(_ message: String, type: OSLogType) {
-        // Capture timestamp NOW, but do I/O on background queue
+        // Capture timestamp NOW, but route I/O through AVFAuditLog's serial
+        // queue so packet-forwarding lines from switchQueue interleave correctly
+        // with security/error writes from other subsystems. Uses appendAsync
+        // because this is on the per-packet hot path — we don't want to block.
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let logFileName = "network-\(dateFormatter.string(from: Date())).log"
-
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let timestamp = dateFormatter.string(from: Date())
 
@@ -512,24 +509,8 @@ class VirtualNetworkSwitch {
 
         let logLine = "[\(timestamp)] [\(severityStr)] \(message)\n"
 
-        // Move ALL file I/O to background queue to prevent blocking
-        Self.logQueue.async {
-            let logDir = NSHomeDirectory() + "/.avf/logs/"
-            try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
-            let logPath = logDir + logFileName
-
-            if let logData = logLine.data(using: .utf8) {
-                if FileManager.default.fileExists(atPath: logPath) {
-                    if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                        fileHandle.seekToEndOfFile()
-                        fileHandle.write(logData)
-                        fileHandle.closeFile()
-                    }
-                } else {
-                    try? logData.write(to: URL(fileURLWithPath: logPath))
-                }
-            }
-        }
+        AVFPaths.ensureDirectoriesExist()
+        AVFAuditLog.appendAsync(logLine, to: AVFPaths.networkLog())
     }
 
     // MARK: - Security Validation
