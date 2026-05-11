@@ -224,8 +224,15 @@ configure_fake_dns() {
     systemctl stop systemd-resolved 2>/dev/null || true
     systemctl disable systemd-resolved 2>/dev/null || true
 
-    # Backup original dnsmasq config
-    [[ -f /etc/dnsmasq.conf ]] && cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup
+    # Backup original dnsmasq config — but ONLY if no backup exists yet.
+    # Without this guard, a second `start` (without an intervening successful
+    # `stop` that restored the original) overwrites the legitimate backup
+    # with the previous-run's FakeNet config, losing the user's real
+    # /etc/dnsmasq.conf forever.
+    if [[ -f /etc/dnsmasq.conf && ! -f /etc/dnsmasq.conf.backup ]]; then
+        cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup
+        log "Backed up original /etc/dnsmasq.conf → /etc/dnsmasq.conf.backup"
+    fi
 
     cat > /etc/dnsmasq.conf << EOF
 # SecVF FakeNet DNS Configuration
@@ -458,6 +465,17 @@ stop_fakenet() {
 
     systemctl stop dnsmasq 2>/dev/null || true
     systemctl stop nginx 2>/dev/null || true
+
+    # Restore the user's original /etc/dnsmasq.conf so a subsequent
+    # `systemctl start dnsmasq` (or anything else that reads the file)
+    # sees the pre-FakeNet config — not the sinkhole one we wrote.
+    # Previously this step was missing; the file silently kept the
+    # sinkhole rule indefinitely. The backup guard at config_fake_dns
+    # ensures we don't overwrite this backup on the next `start`.
+    if [[ -f /etc/dnsmasq.conf.backup ]]; then
+        cp /etc/dnsmasq.conf.backup /etc/dnsmasq.conf
+        log "Restored original /etc/dnsmasq.conf from backup"
+    fi
 
     # Restore systemd-resolved
     systemctl enable systemd-resolved 2>/dev/null || true

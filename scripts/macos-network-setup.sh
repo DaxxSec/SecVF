@@ -28,6 +28,37 @@ VM_IP="${1:-$DEFAULT_IP}"
 echo -e "${GREEN}=== SecVF macOS Network Setup ===${NC}"
 echo ""
 
+# Safety guard: this script is designed to run INSIDE a macOS guest VM,
+# where it configures the guest's network for SecVF's virtual switch.
+# If you run it on a bare-metal Mac (the host), `networksetup -setmanual`
+# below will clobber your real network config and you will lose internet
+# until you manually restore DHCP via System Settings.
+#
+# Apple's Virtualization framework reports hw.model strings beginning with
+# "VirtualMacApple", "VMM-", "Apple Virtual Machine", or similar. A bare
+# Mac reports e.g. "MacBookPro18,1" or "Mac15,3". Refuse to run unless we
+# clearly see a VM model string.
+HW_MODEL=$(sysctl -n hw.model 2>/dev/null || echo "unknown")
+case "$HW_MODEL" in
+    *Virtual*|*VirtualMac*|*VMM-*|VZVirtualMachine*)
+        # Looks like a VM guest. Continue.
+        ;;
+    *)
+        echo -e "${RED}REFUSING TO RUN: this script is for macOS guest VMs only.${NC}"
+        echo -e "${YELLOW}Detected host model: ${HW_MODEL}${NC}"
+        echo ""
+        echo "Running this on a bare Mac would replace your real network"
+        echo "config with a SecVF lab IP and could lock you out of the"
+        echo "internet. If you genuinely want to run it anyway (e.g. you"
+        echo "are testing inside a nested VM that reports a Mac model),"
+        echo "override with:  SECVF_FORCE_HOST_NETSETUP=1 sudo ./macos-network-setup.sh"
+        if [ "${SECVF_FORCE_HOST_NETSETUP:-}" != "1" ]; then
+            exit 1
+        fi
+        echo -e "${YELLOW}Continuing because SECVF_FORCE_HOST_NETSETUP=1.${NC}"
+        ;;
+esac
+
 # Check if running as root
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}This script must be run as root (use sudo)${NC}"
