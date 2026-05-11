@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Contributing · SecVF</title>
+<meta name="description" content="How to contribute to SecVF — getting set up, coding conventions, tests, PR checklist, license &amp; trademark rules.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Contributing">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing" class="current">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Project · Contributing</p>
+          <h1>Contributing</h1>
+          <p class="lede">Patches, tests, doc fixes, distro updates, bug reports — all welcome. Read this first so your contribution lands on the first review.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#first-time">First-time setup</a></li>
+            <li><a href="#workflow">PR workflow</a></li>
+            <li><a href="#conventions">Coding conventions</a></li>
+            <li><a href="#tests">Tests</a></li>
+            <li><a href="#checklist">PR checklist</a></li>
+            <li><a href="#license">License &amp; CLA</a></li>
+            <li><a href="#trademark">Trademark</a></li>
+            <li><a href="#easy">Easy first contributions</a></li>
+          </ul>
+        </div>
+
+        <h2 id="first-time">First-time setup</h2>
+
+        <ol>
+          <li><strong>Fork &amp; clone:</strong>
+<pre><code>gh repo fork DaxxSec/SecVF --clone
+# or
+git clone https://github.com/&lt;you&gt;/SecVF.git
+cd SecVF
+git remote add upstream https://github.com/DaxxSec/SecVF.git</code></pre>
+          </li>
+          <li><strong>Build:</strong> <code>open SecVF.xcodeproj</code>, pick the SecVF scheme, hit <span class="kbds"><kbd>⌘</kbd><kbd>R</kbd></span>.</li>
+          <li><strong>Run tests:</strong> <span class="kbds"><kbd>⌘</kbd><kbd>U</kbd></span> in Xcode, or <code>xcodebuild test -scheme SecVF -destination 'platform=macOS'</code>.</li>
+          <li><strong>Build the CLI:</strong> <code>cd SecVF/cli &amp;&amp; swift build</code>.</li>
+          <li><strong>Optional but nice:</strong> install SwiftFormat (<code>brew install swiftformat</code>) and the project's pre-commit hook (<code>./scripts/install-hooks.sh</code> if present).</li>
+        </ol>
+
+        <h2 id="workflow">PR workflow</h2>
+
+        <ol>
+          <li><strong>Open an issue first</strong> for non-trivial changes — saves you from building something we won't merge.</li>
+          <li><strong>Branch from main:</strong> <code>git checkout -b feature/your-change</code>. Conventional branch prefixes: <code>feature/</code>, <code>fix/</code>, <code>docs/</code>, <code>test/</code>, <code>refactor/</code>.</li>
+          <li><strong>Keep commits atomic.</strong> One logical change per commit. Squash before PR if you have noise.</li>
+          <li><strong>Conventional commits:</strong> <code>feat:</code>, <code>fix:</code>, <code>docs:</code>, <code>test:</code>, <code>refactor:</code>, <code>chore:</code>. First line ≤72 chars. Body explains <em>why</em>, not what.</li>
+          <li><strong>Rebase, don't merge.</strong> Keep history linear: <code>git pull --rebase upstream main</code>.</li>
+          <li><strong>Open the PR</strong> against <code>main</code>. Fill the template. Link the issue.</li>
+          <li><strong>Address review.</strong> Push fixups; we'll squash on merge.</li>
+        </ol>
+
+        <h2 id="conventions">Coding conventions</h2>
+
+        <h3>Swift style</h3>
+        <ul>
+          <li>4-space indent. SwiftFormat applied.</li>
+          <li><strong>Match existing patterns</strong> before introducing new ones. Three similar lines is better than a premature abstraction.</li>
+          <li>UI classes are <code>@MainActor</code>. Domain singletons are <code>@MainActor</code>. Internal mutating state hides behind serial queues.</li>
+          <li>Errors are typed (<code>SecVFError</code>), not <code>NSError</code>. Add a new case with a <code>LocalizedError</code> recovery suggestion.</li>
+          <li>Prefer protocols at boundaries (<code>any VMManagerProtocol</code>) over concrete types — keeps tests easy.</li>
+        </ul>
+
+        <h3>Comments</h3>
+        <p>Comment <strong>why</strong>, never <strong>what</strong>. A well-named function doesn't need a doc comment that paraphrases its body. Comment when:</p>
+        <ul>
+          <li>The code is a workaround for a specific bug — link the issue or PR.</li>
+          <li>There's a hidden invariant a future reader would miss.</li>
+          <li>You did something non-obvious for performance — explain the alternative you rejected.</li>
+        </ul>
+
+        <h3>File organization</h3>
+        <p>One main type per file. Filename matches the type. Group <code>MARK:</code>-delimited sections inside large files. Don't refactor file structure as part of a feature PR — that's a separate PR.</p>
+
+        <h2 id="tests">Tests</h2>
+
+        <p>Tests use XCTest. Convention: <strong>Given-When-Then</strong>. Each test name reads as a sentence.</p>
+
+<pre><code>func test_givenStoppedVM_whenStarted_thenStateBecomesRunning() async throws {
+    // Given
+    let manager = MockVMManager()
+    let vm = TestHelpers.makeMockVM(name: "test", state: .stopped)
+    manager.addVM(vm)
+
+    // When
+    try await manager.startVM(name: "test")
+
+    // Then
+    XCTAssertEqual(manager.vm(named: "test")?.state, .running)
+}</code></pre>
+
+        <p>Use <code>TestHelpers.swift</code> for mock construction. Add helpers there rather than duplicating fixtures.</p>
+
+        <p>Required test coverage per PR:</p>
+        <ul>
+          <li>New domain method → at least one happy-path test, one failure-path test.</li>
+          <li>Bug fix → a test that fails without the fix and passes with it. Commit the test first if you can.</li>
+          <li>UI change → if a logic path is added; pure visual changes don't need tests.</li>
+          <li>CLI command → one functional test invoking through the protocol mock.</li>
+        </ul>
+
+        <h2 id="checklist">PR checklist</h2>
+
+        <p>Copy this into your PR description and tick off:</p>
+
+<pre><code>- [ ] Linked the issue this addresses (or explained why no issue).
+- [ ] Tests added/updated; all green.
+- [ ] No new public API without a docstring.
+- [ ] Followed `@MainActor` rules for UI and domain singletons.
+- [ ] Logs the right severity for new events (INFO / WARNING / CRITICAL).
+- [ ] CHANGELOG.md updated (under "Unreleased").
+- [ ] No GPL-licensed code introduced (see §License).
+- [ ] No new third-party dependencies without discussion in the issue.
+- [ ] If you touched network/security code: tagged the maintainer.
+- [ ] Self-reviewed the diff — no debug prints, no commented-out blocks.</code></pre>
+
+        <h2 id="license">License &amp; CLA</h2>
+
+        <p>The repo is <strong>MIT-licensed</strong>. By submitting a PR, you agree your contribution is offered under the same license. There's no separate CLA to sign.</p>
+
+        <h3>The GPL trap — please read</h3>
+
+        <p>SecVF dual-distributes (free direct download + Mac App Store). The App Store path is <strong>incompatible with GPL/LGPL/AGPL</strong> — Apple's EULA imposes restrictions that conflict with GPL §6.</p>
+
+        <p><strong>Do not</strong>:</p>
+        <ul>
+          <li>Submit code copied or adapted from GPL'd projects.</li>
+          <li>Add Swift Package Manager dependencies on GPL'd libraries.</li>
+          <li>Port a GPL-licensed plugin or dissector.</li>
+        </ul>
+
+        <p>If you have something you adapted from a GPL'd source — even at the design level — flag it in the PR. We'll figure out whether the design alone is okay (often it is) or whether we need to rewrite from a different reference.</p>
+
+        <p>For the full reasoning see <a href="https://github.com/DaxxSec/SecVF/blob/main/docs/LICENSE-REVIEW.md" rel="noopener">docs/LICENSE-REVIEW.md</a>.</p>
+
+        <h2 id="trademark">Trademark</h2>
+
+        <p>MIT covers code, not branding. The name <strong>SecVF</strong> and the shield logo are <em>not</em> granted by the source license.</p>
+
+        <ul>
+          <li><strong>Forking is fine.</strong> You can fork, distribute, and modify the source.</li>
+          <li><strong>Renaming when distributing is mandatory.</strong> If you publish a fork, rename it. Don't call your fork "SecVF" or use the logo without permission.</li>
+          <li><strong>App Store branding</strong> as "SecVF" is reserved for the canonical maintainer (this is the lever that lets the App Store version stay the recognizable product even though the source is open).</li>
+        </ul>
+
+        <p>This is standard practice — see UTM, VLC, WireGuard for how other projects handle the same line.</p>
+
+        <h2 id="easy">Easy first contributions</h2>
+
+        <p>Want to dip a toe in? Pick one of these — small, useful, learns the codebase.</p>
+
+        <ul>
+          <li><strong>Add a Linux distro</strong> to <code>Resources/distros.json</code>. The schema is documented inline. Test by creating a VM with your new distro.</li>
+          <li><strong>Write a test for an uncovered method.</strong> Run <code>xcodebuild -showCoverage</code>; pick something at 0% coverage.</li>
+          <li><strong>Wiki improvements</strong> — typos, clarifications, new troubleshooting entries. The whole wiki is in <code>website/wiki/</code> as plain HTML.</li>
+          <li><strong>CLI ergonomics</strong> — short-flag aliases, better error messages on common mistakes.</li>
+          <li><strong>A new helper command on the router VM</strong> — extend <code>scripts/kali-router-setup.sh</code>. Add a doc entry on <a href="/wiki/Router-VM#helpers">Router VM § helpers</a>.</li>
+        </ul>
+
+        <p>Browse <a href="https://github.com/DaxxSec/SecVF/labels/good%20first%20issue" rel="noopener">issues tagged <code>good first issue</code></a> for curated starter tasks.</p>
+
+        <div class="callout tip">
+          <strong>Don't hesitate to ask questions</strong> on the PR or in the issue. We'd rather you check before spending a weekend on the wrong approach. Bad questions don't exist; bad surprises do.</div>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/FAQ">
+            <span class="np-label">Previous</span>
+            <span>← FAQ</span>
+          </a>
+          <a class="np-card next" href="/wiki/">
+            <span class="np-label">Back to</span>
+            <span>Documentation home →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>File transfer · SecVF</title>
+<meta name="description" content="Every way to move files between the host and a guest VM in SecVF — VirtioFS, secvf vm copy, Scripts USB, virtual USB disks, scp over the virtual network, HTTP one-shot. Plus what's deliberately not supported.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/File-Transfer">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer" class="current">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">VM management · File transfer</p>
+          <h1>File transfer (host ↔ guest)</h1>
+          <p class="lede">Five working paths to move files between the host Mac and a guest VM, plus what's deliberately blocked. Pick by your network mode, your guest OS, and how much you trust the workload.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#picker">Quick picker</a></li>
+            <li><a href="#virtiofs">1. VirtioFS shared folder</a></li>
+            <li><a href="#cli-copy">2. secvf vm copy-to / copy-from</a></li>
+            <li><a href="#scripts-usb">3. Scripts USB</a></li>
+            <li><a href="#virtual-usb">4. Virtual USB disk</a></li>
+            <li><a href="#ssh">5. scp / sftp over the virtual network</a></li>
+            <li><a href="#http">6. HTTP one-shot</a></li>
+            <li><a href="#not-supported">What's NOT supported (and why)</a></li>
+            <li><a href="#malware-safe">Picking a path for malware analysis</a></li>
+            <li><a href="#troubleshooting">Troubleshooting</a></li>
+          </ul>
+        </div>
+
+        <h2 id="picker">Quick picker</h2>
+
+        <table>
+          <thead><tr><th>Your situation</th><th>Use</th></tr></thead>
+          <tbody>
+            <tr><td>Ongoing dev work, lots of file edits</td><td><a href="#virtiofs">VirtioFS shared folder</a> (rw)</td></tr>
+            <tr><td>One file, scripted, AI agent</td><td><a href="#cli-copy"><code>secvf vm copy-to</code></a></td></tr>
+            <tr><td>Setup scripts → router VM</td><td><a href="#scripts-usb">Scripts USB</a></td></tr>
+            <tr><td>Arbitrary bulk files, one-time</td><td><a href="#virtual-usb">Virtual USB disk</a></td></tr>
+            <tr><td>Guest has SSH and you have a route to it</td><td><a href="#ssh">scp</a></td></tr>
+            <tr><td>One file, no shared anything</td><td><a href="#http">HTTP one-shot</a></td></tr>
+            <tr><td>Malware sample, untrusted guest</td><td><a href="#virtual-usb">Virtual USB disk</a> (read-only)</td></tr>
+            <tr><td>Pull a file out of a compromised guest</td><td><a href="#cli-copy"><code>secvf vm copy-from</code></a></td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout warn">
+          <strong>Default stance:</strong> SecVF VMs have <em>no</em> shared filesystem with the host by default. This is intentional — it keeps the analysis surface clean. Every method below is opt-in and explicit.
+        </div>
+
+        <h2 id="virtiofs">1. VirtioFS shared folder</h2>
+
+        <p>The Apple Virtualization framework's <code>VZVirtioFileSystemDevice</code> is a host directory mounted into the guest as a real filesystem. High throughput, page-cache-aware, transparent to most software running in the guest.</p>
+
+        <h3>When to use</h3>
+        <p>Best for <strong>ongoing</strong> work — editing source from the host while building inside the guest, watching files change live, anything where the cost of attach/detach matters. Not for one-shot deliveries.</p>
+
+        <h3>Enabling</h3>
+
+        <ol>
+          <li>Stop the VM.</li>
+          <li>VM Library → right-click the VM → <strong>Edit configuration…</strong> → <strong>Shared folders</strong> tab.</li>
+          <li>Click <strong>+</strong>, pick the host directory you want to share.</li>
+          <li>Choose <strong>Read-only</strong> or <strong>Read-write</strong>. The default is read-only; flip to read-write only when you need the guest to write back.</li>
+          <li>Give the share a <strong>tag</strong> — this is the name the guest will see (e.g. <code>workspace</code>, <code>downloads</code>).</li>
+          <li>Save. Start the VM.</li>
+        </ol>
+
+        <h3>Mounting inside the guest</h3>
+
+        <p><strong>Linux:</strong></p>
+<pre><code># macOS 14+ Linux guests get virtiofs via the framework's standard driver.
+# Modern kernels include the module already.
+
+sudo mkdir -p /mnt/workspace
+sudo mount -t virtiofs workspace /mnt/workspace        # tag = workspace
+
+# Persist across reboots — add to /etc/fstab:
+echo "workspace  /mnt/workspace  virtiofs  defaults  0  0" \
+  | sudo tee -a /etc/fstab</code></pre>
+
+        <p><strong>macOS guest:</strong> the framework auto-presents the share. It appears under <code>/Volumes/&lt;tag&gt;</code>.</p>
+
+        <p><strong>Windows guest:</strong> Microsoft's WinFsp + a virtiofs driver are required. Less mature than the Linux path; expect more friction.</p>
+
+        <h3>Performance</h3>
+
+        <table>
+          <thead><tr><th>Operation</th><th>Latency (M2 Pro, Linux guest)</th></tr></thead>
+          <tbody>
+            <tr><td>4 KB read (cached on host)</td><td>~3 µs</td></tr>
+            <tr><td>4 KB read (cold, NVMe)</td><td>~30 µs</td></tr>
+            <tr><td>Large file streaming read</td><td>~1.5 GB/s</td></tr>
+            <tr><td>Small file batch (1000 × 4KB)</td><td>~5 ms total</td></tr>
+          </tbody>
+        </table>
+
+        <p>For comparison, scp over the virtual switch is roughly 50–100× slower for small-file workloads.</p>
+
+        <h3>Security considerations</h3>
+
+        <p>VirtioFS is a real conduit into your host. Things to know:</p>
+        <ul>
+          <li><strong>Owner of the inodes is the host.</strong> The guest can't change permissions or ownership in ways that escape the share's scope.</li>
+          <li><strong>Read-only is enforced at the framework level</strong>, not in the guest. A compromised guest can't write to a RO share.</li>
+          <li><strong>Symlinks within the share resolve inside it.</strong> A guest can't <code>ln -s /Users/me/.ssh /mnt/workspace/secrets</code> and read your keys through it.</li>
+          <li><strong>Don't share <code>/</code>, <code>/Users</code>, or <code>/Volumes</code>.</strong> SecVF will refuse those paths at the framework boundary, but other directories above an SSH key or a wallet are still bad choices.</li>
+          <li><strong>For malware:</strong> never enable a read-write VirtioFS share to a malware-analysis VM. Don't even share read-only unless you understand exactly what's inside the share — a clever sample can stage a payload there that you might later open from the host.</li>
+        </ul>
+
+        <h2 id="cli-copy">2. <code>secvf vm copy-to</code> / <code>copy-from</code></h2>
+
+        <p>One-shot transfer commands. Programmatic, scriptable, sensible defaults.</p>
+
+<pre><code>secvf vm copy-to   &lt;vm&gt; &lt;host-path&gt; &lt;guest-path&gt;
+secvf vm copy-from &lt;vm&gt; &lt;guest-path&gt; &lt;host-path&gt;</code></pre>
+
+        <h3>Examples</h3>
+<pre><code># Push a malware sample into a sandbox VM
+secvf vm copy-to malware-sandbox ./sample.bin /tmp/sample.bin
+
+# Pull a guest's syslog out for analysis
+secvf vm copy-from kali-router /var/log/syslog ./router-syslog.txt
+
+# Push an entire directory (tar over the wire)
+secvf vm copy-to dev-vm ./project /home/dev/project
+
+# Use --json for scripting
+secvf vm copy-to my-vm ./pcap.bin /tmp/p.bin --json
+# → {"success": true, "data": {"bytes": 12482, "duration_ms": 47}}</code></pre>
+
+        <h3>What's underneath</h3>
+
+        <p>The command transparently picks the best available transport:</p>
+        <ol>
+          <li><strong>VirtioFS</strong> if a share is already enabled — drops the file into the shared directory, then runs <code>mv</code> inside the guest. Fastest.</li>
+          <li><strong>vsock</strong> for AI sandbox VMs — uses the same channel as <code>secvf vm exec</code>, ~150 µs round-trip.</li>
+          <li><strong>scp fallback</strong> if the guest has SSH and is reachable on the virtual switch.</li>
+          <li><strong>Virtual USB</strong> as last resort — creates an ephemeral disk, attaches, mounts inside guest, copies, ejects, deletes.</li>
+        </ol>
+
+        <p>The chosen transport is in the <code>--json</code> output's <code>data.transport</code> field if you need to know which one ran.</p>
+
+        <h3>Use this when</h3>
+        <ul>
+          <li>You're scripting against the CLI (AI agents, batch detonation, CI).</li>
+          <li>You want one transfer without ongoing share setup.</li>
+          <li>You're not sure which transport will work — let the CLI pick.</li>
+        </ul>
+
+        <h2 id="scripts-usb">3. Scripts USB</h2>
+
+        <p>The dedicated pattern for shipping setup scripts into a guest. Read-only by design.</p>
+
+        <h3>From the GUI</h3>
+
+        <p>VM Library → right-click VM → <strong>Mount Scripts USB…</strong></p>
+
+        <p>SecVF builds a fresh DMG containing <code>scripts/</code> from the repo and attaches it. Inside the guest:</p>
+
+<pre><code>sudo mount /dev/sdb1 /mnt
+ls /mnt
+sudo bash /mnt/kali-router-setup.sh</code></pre>
+
+        <h3>From the CLI</h3>
+
+<pre><code>secvf usb create-virtual --name secvf-scripts --size 64 \
+                         --format dmg --source ./scripts \
+  &amp;&amp; secvf usb mount secvf-scripts --to kali-router</code></pre>
+
+        <h3>Use this when</h3>
+
+        <p>You're delivering the standard SecVF helper scripts (router setup, FakeNet, etc.). For the canonical workflow see <a href="/wiki/Scripts-Reference">Scripts reference</a>.</p>
+
+        <h2 id="virtual-usb">4. Virtual USB disk (arbitrary contents)</h2>
+
+        <p>Like the Scripts USB pattern but you choose what's inside. Great for shipping arbitrary files into an isolated VM without enabling VirtioFS.</p>
+
+<pre><code># Build it
+secvf usb create-virtual \
+    --name secvf-payload \
+    --size 256 \                   # MB — sized to fit your files
+    --format dmg \                 # or iso for read-only-by-construction
+    --source ./files-to-ship/
+
+# Attach
+secvf usb mount secvf-payload --to malware-sandbox
+
+# (inside guest)
+sudo mkdir -p /mnt/secvf
+sudo mount /dev/sdb1 /mnt/secvf
+ls /mnt/secvf
+# ... use them ...
+sudo umount /mnt/secvf
+
+# (back on host)
+secvf usb eject secvf-payload</code></pre>
+
+        <h3>Going the other way (guest → host)</h3>
+
+        <p>Create the virtual USB read-write, attach, write files inside the guest, eject. Then on the host:</p>
+
+<pre><code>hdiutil attach ~/.avf/VirtualUSB/secvf-payload.dmg
+# Read files from the mount point
+ls /Volumes/secvf-payload
+hdiutil detach /Volumes/secvf-payload</code></pre>
+
+        <h3>Use this when</h3>
+        <ul>
+          <li>One-time bulk file transfer (dozens of MB to a couple GB).</li>
+          <li>You want a <em>controlled, finite, ejectable</em> conduit — better security stance than VirtioFS for analysis VMs.</li>
+          <li>Guest OS has no SSH and you don't want to install one.</li>
+        </ul>
+
+        <div class="callout tip">
+          <strong>For malware analysis:</strong> use <strong>read-only ISO format</strong>, not DMG. The guest can't write back. Once the sample's seen it, the file is the same. Treat the virtual USB as a one-way drop.
+        </div>
+
+        <h2 id="ssh">5. scp / sftp over the virtual network</h2>
+
+        <p>If the guest has SSH and you have a route to it, plain old <code>scp</code> works.</p>
+
+        <h3>Route availability per network mode</h3>
+
+        <table>
+          <thead><tr><th>Network mode</th><th>Can the host scp into the guest?</th></tr></thead>
+          <tbody>
+            <tr><td><strong>NAT</strong></td><td>Yes. The framework's NAT subnet is reachable from the host (typically <code>192.168.&lt;n&gt;.0/24</code>). Find the guest IP from inside the guest (<code>ip addr</code>) or from the VM's status panel.</td></tr>
+            <tr><td><strong>Virtual Network</strong></td><td>Only if the host is also on the switch (rare — see <a href="/wiki/Scripts-Reference#macos-network"><code>macos-network-setup.sh</code></a>).</td></tr>
+            <tr><td><strong>Router VM</strong></td><td>Yes, if the host can reach the router VM's WAN side. Usually scp directly to the router; for lab guests behind the router, hop via the router.</td></tr>
+            <tr><td><strong>FakeNet</strong></td><td>Same as Router VM. The sinkholing only affects outbound from the lab — your host-to-router scp still works.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>Setting up SSH in the guest</h3>
+
+<pre><code># Linux guest, one-time
+sudo apt update &amp;&amp; sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+ip addr show                            # note the IP
+
+# (on host) verify reachability
+ping &lt;guest-ip&gt;
+ssh user@&lt;guest-ip&gt;</code></pre>
+
+        <h3>Push / pull files</h3>
+
+<pre><code># Push a single file
+scp ./local.txt user@&lt;guest-ip&gt;:/home/user/
+
+# Push a directory recursively
+scp -r ./project user@&lt;guest-ip&gt;:/home/user/
+
+# Pull a file
+scp user@&lt;guest-ip&gt;:/var/log/syslog ./
+
+# Interactive sftp
+sftp user@&lt;guest-ip&gt;</code></pre>
+
+        <h3>Use this when</h3>
+        <p>You're already comfortable with SSH workflows, the guest is one you're going to interact with regularly, and you have or are willing to set up SSH key auth.</p>
+
+        <div class="callout warn">
+          <strong>Don't enable SSH inside a malware sandbox VM.</strong> If the sample compromises the SSH daemon, that's now a foothold from the lab into wherever your host can reach. Use other methods.
+        </div>
+
+        <h2 id="http">6. HTTP one-shot</h2>
+
+        <p>Sometimes the fastest path is Python's <code>http.server</code> in one place and <code>curl</code> in the other.</p>
+
+        <h3>Host → guest</h3>
+
+<pre><code># On host
+cd /path/to/files
+python3 -m http.server 8080
+
+# On guest (Linux), in any directory
+curl -O http://&lt;host-ip&gt;:8080/file.txt
+# or
+wget http://&lt;host-ip&gt;:8080/file.txt</code></pre>
+
+        <h3>Guest → host</h3>
+
+<pre><code># On guest
+cd /path/in/guest
+python3 -m http.server 8080
+
+# On host
+curl -O http://&lt;guest-ip&gt;:8080/file.txt</code></pre>
+
+        <h3>Use this when</h3>
+        <ul>
+          <li>You want zero ceremony — no shares to enable, no SSH to install, no USB to build.</li>
+          <li>One file or a small handful.</li>
+          <li>Both sides have Python or wget/curl available.</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Reachability still applies.</strong> The guest must be able to reach the host's IP. NAT and Router VM modes generally allow this; Virtual Network mode does not unless you've explicitly bridged the host onto the switch.
+        </div>
+
+        <h2 id="not-supported">What's NOT supported (and why)</h2>
+
+        <h3>Clipboard sharing</h3>
+        <p>The Apple Virtualization framework exposes clipboard sharing only for macOS guests in recent versions. SecVF doesn't expose it yet — it's on the roadmap. Workaround: paste into a temp file on the host, transfer with any method above.</p>
+
+        <h3>Drag and drop</h3>
+        <p>Some VM apps (Parallels, VMware Fusion) implement drag-and-drop as a UI affordance on top of their own guest tools. SecVF stays close to the Apple framework, which doesn't ship guest tools — so no drag-drop. Workaround: VirtioFS share is the closest equivalent.</p>
+
+        <h3>Mounting a host directory directly into the guest's filesystem table</h3>
+        <p>You can't do this without VirtioFS being configured. There's no "magic" auto-mount.</p>
+
+        <h3>SMB or NFS from the guest to the host</h3>
+        <p>Technically possible — set up an SMB server on macOS or run NFS — but we don't recommend it. The protocols are noisy, the auth is finicky, and you've now opened a network listener on the host. Use VirtioFS instead.</p>
+
+        <h2 id="malware-safe">Picking a path for malware analysis</h2>
+
+        <p>The order, from most-to-least-recommended for analysis workloads:</p>
+
+        <ol>
+          <li><strong>Read-only virtual USB ISO.</strong> Finite contents you chose. Sample sees the file, can't write back, USB ejects clean. Best.</li>
+          <li><strong><code>secvf vm copy-to</code></strong> with the virtual-USB transport. Same shape, scripted.</li>
+          <li><strong>HTTP one-shot from a host-controlled server</strong> — you choose what's served. Sample sees one file, no back-channel.</li>
+          <li>Read-only VirtioFS share with a tightly-scoped directory — acceptable if you understand the share's contents.</li>
+          <li><strong>NOT</strong> read-write VirtioFS. Sample can plant payloads in the host-visible directory.</li>
+          <li><strong>NOT</strong> SSH inside the sample VM. SSH daemon is attack surface.</li>
+        </ol>
+
+        <h2 id="troubleshooting">Troubleshooting</h2>
+
+        <table>
+          <thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>VirtioFS share doesn't show up in guest</td><td>Share added but VM wasn't restarted</td><td>Stop VM, start again — share devices attach at boot</td></tr>
+            <tr><td><code>mount: unknown filesystem type 'virtiofs'</code></td><td>Old Linux kernel without the virtiofs module</td><td>Use a guest with kernel ≥5.4 (every modern distro)</td></tr>
+            <tr><td><code>secvf vm copy-to</code> says "no transport available"</td><td>No VirtioFS share, no SSH in guest, USB creation failed</td><td>Check disk space; check guest is running</td></tr>
+            <tr><td>scp times out</td><td>Wrong network mode — host can't reach guest</td><td>See the route availability table above</td></tr>
+            <tr><td>HTTP transfer fails between NAT VMs</td><td>NAT'd VMs are isolated from each other</td><td>Switch to Virtual Network or Router VM mode</td></tr>
+            <tr><td>Guest can't write to VirtioFS share</td><td>Share is read-only</td><td>Edit configuration → flip to read-write (only if you trust the guest)</td></tr>
+            <tr><td><code>secvf vm copy-from</code> on AI sandbox truncates large file</td><td>vsock buffer limit on huge transfers</td><td>Mount a virtual USB rw, write inside, eject, read host-side</td></tr>
+          </tbody>
+        </table>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Network-Modes">
+            <span class="np-label">Previous</span>
+            <span>← Network modes</span>
+          </a>
+          <a class="np-card next" href="/wiki/USB-Devices">
+            <span class="np-label">Next</span>
+            <span>USB devices →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

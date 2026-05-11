@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Architecture · SecVF</title>
+<meta name="description" content="SecVF internals — module map, threading model, NotificationCenter flow, Combine pipelines, dependency injection, the full data path for a capture session.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Architecture">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture" class="current">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Reference · Architecture</p>
+          <h1>Architecture</h1>
+          <p class="lede">Every module, every actor boundary, every singleton, every notification — the map a contributor needs in their head before changing anything.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#layers">Layered overview</a></li>
+            <li><a href="#modules">Module map</a></li>
+            <li><a href="#threading">Threading &amp; actor model</a></li>
+            <li><a href="#notifications">NotificationCenter contract</a></li>
+            <li><a href="#combine">Combine pipelines</a></li>
+            <li><a href="#singletons">Singletons &amp; their boundaries</a></li>
+            <li><a href="#protocols">Protocols &amp; DI</a></li>
+            <li><a href="#dataflow">Data flow: a capture session</a></li>
+            <li><a href="#tests">Test architecture</a></li>
+          </ul>
+        </div>
+
+        <h2 id="layers">Layered overview</h2>
+
+<pre><code>┌────────────────────────────────────────────────────────────────┐
+│  UI layer (AppKit, NSWindowController-based, @MainActor)        │
+│   - VMLibraryWindowController       (main window, ~2600 LOC)    │
+│   - PacketAnalysisWindowController  (filter bar, table, hex)    │
+│   - VM display windows              (one per running guest)     │
+└────────────────────────┬───────────────────────────────────────┘
+                         │  Notifications + Combine subscriptions
+                         ▼
+┌────────────────────────────────────────────────────────────────┐
+│  Domain layer (singletons, mostly @MainActor)                   │
+│   - VMManager.shared                                            │
+│   - VirtualNetworkSwitch.shared                                 │
+│   - PacketCaptureManager.shared                                 │
+│   - ISOCacheManager.shared                                      │
+│   - MacOSVMInstaller.shared                                     │
+│   - VMSecurityMonitor.shared                                    │
+└────────────────────────┬───────────────────────────────────────┘
+                         │  Reads/writes on background queues
+                         ▼
+┌────────────────────────────────────────────────────────────────┐
+│  Persistence + system layer                                     │
+│   - ~/.avf/ bundle filesystem (FileManager)                     │
+│   - Apple Virtualization framework (VZ*)                        │
+│   - URLSession (ISO/IPSW download)                              │
+│   - tshark subprocess (Process + Pipe + FIFO)                   │
+│   - Endpoint Security Framework (Network Extension target)      │
+└────────────────────────────────────────────────────────────────┘</code></pre>
+
+        <p>Three layers, well-defined responsibilities. The UI never talks to URLSession directly; the domain layer never owns NSView. Notifications and Combine are the glue.</p>
+
+        <h2 id="modules">Module map</h2>
+
+        <h3>Core</h3>
+        <ul>
+          <li><strong><code>AppDelegate.swift</code></strong> — application lifecycle, menu bar, NotificationCenter handlers, multi-window VM management. Owns the menu wiring and routes user actions to the domain layer.</li>
+          <li><strong><code>VMManager.swift</code></strong> — VM CRUD, bundle scanning, async initialization on background threads, transitions to <code>VZVirtualMachine</code>. The factory and the lifecycle authority.</li>
+          <li><strong><code>VMConfiguration.swift</code></strong> — Codable model. The source of truth for <code>metadata.json</code>. Version-bump-safe.</li>
+        </ul>
+
+        <h3>Network stack</h3>
+        <ul>
+          <li><strong><code>VirtualNetworkSwitch.swift</code></strong> — L2/L3 switch in Swift. Holds the MAC table, runs the forwarding loop, publishes frames.</li>
+          <li><strong><code>PacketCaptureManager.swift</code></strong> — owns the tshark subprocess, the FIFO, the JSON-EK parser. Publishes <code>DecodedFrame</code> via Combine.</li>
+          <li><strong><code>PacketAnalysisWindowController.swift</code></strong> — the Wireshark-style UI. Subscribes to <code>PacketCaptureManager</code>, drives the table, hex view, decoded-layers tree.</li>
+        </ul>
+
+        <h3>UI</h3>
+        <ul>
+          <li><strong><code>VMLibraryWindowController.swift</code></strong> — main window. Table view, packet log panel, Active VMs sidebar. By far the biggest file (~2600 LOC) because it's the central hub.</li>
+        </ul>
+
+        <h3>AI sandbox</h3>
+        <ul>
+          <li><strong><code>AISandboxMacVMConfiguration.swift</code></strong> — builds the <code>VZVirtualMachineConfiguration</code> for the ephemeral macOS guest, including the vsock device on port 2222 and the VirtioFS workspace share.</li>
+          <li><strong><code>AISandboxVMSession.swift</code></strong> — host-side session API: <code>cloneBase()</code>, <code>boot()</code>, <code>run()</code>, <code>destroy()</code>.</li>
+          <li><strong><code>AISandboxMacVMInstaller.swift</code></strong> — provisions the base bundle (IPSW download → restore → setup).</li>
+        </ul>
+
+        <h3>Security</h3>
+        <ul>
+          <li><strong><code>VMSecurityMonitor.swift</code></strong> — FSEvents-based observer. Filesystem deltas, resource pressure, severity-graded events.</li>
+          <li><strong><code>SecVFError.swift</code></strong> — typed error enum (11 categories) with <code>LocalizedError</code> conformance and recovery suggestions. Mirrors to <code>error-audit.log</code>.</li>
+        </ul>
+
+        <h3>Supporting</h3>
+        <ul>
+          <li><strong><code>ISOCacheManager.swift</code></strong> — ~1000 LOC. ISO download, SHA-256 verification, cache scanning. The provenance enforcer.</li>
+          <li><strong><code>DistroVersionFetcher.swift</code></strong> — discovers live distro versions from mirrors. Distro metadata in <code>Resources/distros.json</code>.</li>
+          <li><strong><code>MacOSVMInstaller.swift</code></strong> — IPSW download from Apple CDN with security validation.</li>
+          <li><strong><code>ScriptsUSBManager.swift</code></strong> — builds and attaches the Scripts USB image for guest scripts (router setup, FakeNet, etc.).</li>
+        </ul>
+
+        <h3>Protocols (DI seams)</h3>
+        <ul>
+          <li><strong><code>VMManagerProtocol.swift</code></strong></li>
+          <li><strong><code>NetworkSwitchProtocol.swift</code></strong></li>
+          <li><strong><code>PacketCaptureProtocol.swift</code></strong></li>
+        </ul>
+        <p>Each abstracts a singleton so tests can substitute a mock. Production code holds <code>any VMManagerProtocol</code> at the boundary.</p>
+
+        <h2 id="threading">Threading &amp; actor model</h2>
+
+        <p>Three execution domains:</p>
+
+        <table>
+          <thead><tr><th>Domain</th><th>Where it runs</th><th>What's on it</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Main actor</strong></td><td><code>@MainActor</code> Swift Concurrency</td><td>Every UI class, every window controller, the singletons (their public API is <code>@MainActor</code>).</td></tr>
+            <tr><td><strong>Capture queue</strong></td><td><code>DispatchQueue(label: "secvf.capture", qos: .userInitiated)</code></td><td>Frame forwarding, JSON-EK parsing. Never blocks the main thread.</td></tr>
+            <tr><td><strong>Async tasks</strong></td><td>Implicit <code>Task</code> contexts</td><td>VZ boot, IPSW restore, ISO download. <code>await</code>-resumed on the calling actor.</td></tr>
+          </tbody>
+        </table>
+
+        <p>The rules:</p>
+        <ol>
+          <li>All UI work is on the main actor. There is no exception.</li>
+          <li>All <em>publicly mutating</em> domain methods are on the main actor. Internal mutation (e.g. the MAC table update inside the switch) happens on the switch's serial queue and is re-published on main.</li>
+          <li>Long-running work — VZ boot, IPSW download — is an <code>async</code> function that suspends. The UI shows a progress indicator; the framework's callback completes on the main actor.</li>
+          <li>The capture pipeline is the one true "background" path. tshark output is parsed off-main and Combine-published to UI subscribers, which run on main by default.</li>
+        </ol>
+
+        <div class="callout">
+          <strong>Why singletons + @MainActor?</strong> SecVF is a desktop app with a single UI process. Domain state is intrinsically singleton — there is one VM library, one switch, one capture pipeline. <code>@MainActor</code> guarantees serial access to mutable shared state without locks; the queue is the framework's main run loop.
+        </div>
+
+        <h2 id="notifications">NotificationCenter contract</h2>
+
+        <p>The cross-cutting glue. Most of the UI subscribes to a small set of named notifications:</p>
+
+        <table>
+          <thead><tr><th>Notification</th><th>Posted by</th><th>userInfo</th></tr></thead>
+          <tbody>
+            <tr><td><code>Notification.Name.startVM</code></td><td>UI (menu, button) or AppDelegate</td><td><code>["name": String]</code></td></tr>
+            <tr><td><code>Notification.Name.stopVM</code></td><td>UI</td><td><code>["name": String, "force": Bool]</code></td></tr>
+            <tr><td><code>Notification.Name.pauseVM</code></td><td>UI</td><td><code>["name": String]</code></td></tr>
+            <tr><td><code>Notification.Name.vmStateChanged</code></td><td>VMManager</td><td><code>["name": String, "state": VMState]</code></td></tr>
+            <tr><td><code>Notification.Name.packetCaptured</code></td><td>PacketCaptureManager</td><td><code>["frame": DecodedFrame]</code></td></tr>
+            <tr><td><code>Notification.Name.securityEvent</code></td><td>VMSecurityMonitor</td><td><code>["event": SecurityEvent]</code></td></tr>
+          </tbody>
+        </table>
+
+        <p>Why NotificationCenter instead of Combine for these? Three reasons:</p>
+        <ol>
+          <li>The CLI (via <code>DistributedNotificationCenter</code>) posts the same notifications. NSDistributedNotification is the only cross-process channel that doesn't require XPC plumbing — and we want minimal IPC surface for security.</li>
+          <li>Multiple subscribers, no backpressure semantics needed (it's UI events, not high-rate data).</li>
+          <li>Easy to bridge to AppKit's existing notification idioms (NSWindow events, etc.).</li>
+        </ol>
+
+        <h2 id="combine">Combine pipelines</h2>
+
+        <p>Combine is used where backpressure-aware streaming matters:</p>
+
+        <h3>Packet pipeline</h3>
+<pre><code>VirtualNetworkSwitch.frames
+    : PassthroughSubject&lt;EthernetFrame, Never&gt;
+        │
+        ├──▶ PacketCaptureManager      (writes to FIFO)
+        │       │
+        │       ▼
+        │   tshark subprocess
+        │       │
+        │       ▼
+        │   PacketCaptureManager.decodedFrames
+        │       : PassthroughSubject&lt;DecodedFrame, Never&gt;
+        │
+        └──▶ VMSecurityMonitor         (looks for suspicious patterns)</code></pre>
+
+        <h3>Switch statistics</h3>
+<pre><code>VirtualNetworkSwitch.stats
+    : CurrentValueSubject&lt;SwitchStats, Never&gt;
+        │
+        ├──▶ Switch Statistics window  (subscribes, renders)
+        ├──▶ Status bar item            (live counter in menu bar)
+        └──▶ VMSecurityMonitor          (drop-rate alerts)</code></pre>
+
+        <h3>Why <code>CurrentValueSubject</code> for stats but <code>PassthroughSubject</code> for frames?</h3>
+        <p>Stats need a "current" — a new subscriber should see the latest counters immediately. Frames are events; if you subscribe mid-flight, you missed earlier frames and that's correct.</p>
+
+        <h2 id="singletons">Singletons &amp; their boundaries</h2>
+
+        <p>Five domain singletons. Their boundaries are deliberate:</p>
+
+        <table>
+          <thead><tr><th>Singleton</th><th>Owns</th><th>Talks to</th></tr></thead>
+          <tbody>
+            <tr><td><code>VMManager.shared</code></td><td>VM CRUD, bundle filesystem, <code>VZVirtualMachine</code> instances</td><td>The framework, persistence, posts notifications</td></tr>
+            <tr><td><code>VirtualNetworkSwitch.shared</code></td><td>Port assignments, MAC table, forwarding loop</td><td>VZNetworkDevice attachments, frame publisher</td></tr>
+            <tr><td><code>PacketCaptureManager.shared</code></td><td>tshark subprocess, FIFO, decoded frames</td><td>VirtualNetworkSwitch (subscribes to frames)</td></tr>
+            <tr><td><code>ISOCacheManager.shared</code></td><td>ISO downloads, SHA-256, cache directory</td><td>URLSession, FileManager, audit log</td></tr>
+            <tr><td><code>VMSecurityMonitor.shared</code></td><td>FSEvents, resource pressure, severity classification</td><td>Audit log writer, optional notification UI</td></tr>
+          </tbody>
+        </table>
+
+        <p>Cross-singleton calls are deliberate and few — chiefly <code>PacketCaptureManager</code> subscribing to <code>VirtualNetworkSwitch.frames</code>, and <code>VMSecurityMonitor</code> watching both. Anything else goes through notifications.</p>
+
+        <h2 id="protocols">Protocols &amp; dependency injection</h2>
+
+        <p>Each singleton has a matching protocol. Production code holds <code>any VMManagerProtocol</code> at the boundary, not <code>VMManager</code> directly:</p>
+
+<pre><code>// production
+final class VMLibraryWindowController: NSWindowController {
+    private let vmManager: any VMManagerProtocol
+
+    init(vmManager: any VMManagerProtocol = VMManager.shared) {
+        self.vmManager = vmManager
+        super.init(window: nil)
+    }
+}
+
+// tests
+let mockVMManager = MockVMManager()
+let controller = VMLibraryWindowController(vmManager: mockVMManager)
+// drive the controller against the mock
+</code></pre>
+
+        <p>This makes the entire UI testable in isolation. <code>TestHelpers.swift</code> provides factory functions for mocks.</p>
+
+        <h2 id="dataflow">Data flow: a capture session</h2>
+
+        <p>Walk one frame from wire to UI to demonstrate the whole stack:</p>
+
+        <ol>
+          <li><strong>Guest sends a packet</strong>. The guest's virtio-net driver writes a frame to its TX ring.</li>
+          <li><strong>VZ delivers it</strong> to <code>VirtualNetworkSwitch</code>'s port for that VM, off-main, on the switch's serial queue.</li>
+          <li><strong>Switch forwards.</strong> MAC lookup → destination port → write to that port's RX queue. Stats counters bump.</li>
+          <li><strong>Switch publishes.</strong> The <code>frames</code> <code>PassthroughSubject</code> emits an <code>EthernetFrame</code> with timestamp and port metadata.</li>
+          <li><strong>PacketCaptureManager subscribes.</strong> It packs the frame into a libpcap-format record and writes to the FIFO. tshark reads it.</li>
+          <li><strong>tshark emits JSON-EK</strong>. PacketCaptureManager's stdout reader splits on newlines, parses each line into a <code>DecodedFrame</code>.</li>
+          <li><strong>Decoded frame publishes.</strong> The <code>decodedFrames</code> subject emits.</li>
+          <li><strong>UI subscribers receive.</strong> The packet table view appends a row (on main); the protocol stats widget bumps its counter; the hex panel (if selected) renders.</li>
+          <li><strong>VMSecurityMonitor inspects.</strong> If the frame matches a suspicious pattern (e.g. SYN scan, DNS exfil), it raises a WARNING event.</li>
+        </ol>
+
+        <p>Total path from wire to UI: ~1–3 ms in the common case. The throttle is tshark's parse speed, not Swift's.</p>
+
+        <h2 id="tests">Test architecture</h2>
+
+        <p>Tests live in <code>SecVF/Tests/</code>, organized by component:</p>
+
+        <table>
+          <thead><tr><th>File</th><th>Covers</th></tr></thead>
+          <tbody>
+            <tr><td><code>TestHelpers.swift</code></td><td>Mock VM bundle creation, async assertion helpers, XCTest extensions.</td></tr>
+            <tr><td><code>VMConfigurationTests.swift</code></td><td>Codable encode/decode, schema versioning.</td></tr>
+            <tr><td><code>VMManagerTests.swift</code></td><td>CRUD lifecycle, transitions, bundle scanning. Uses the <code>VMManagerProtocol</code> seam.</td></tr>
+            <tr><td><code>VirtualNetworkSwitchTests.swift</code></td><td>MAC learning, broadcast, drop policy, stats counters.</td></tr>
+            <tr><td><code>ISOCacheManagerTests.swift</code></td><td>Provenance enforcement, SHA-256 mismatch handling, hostname allowlist.</td></tr>
+            <tr><td><code>VMLibraryUITests.swift</code></td><td>UI smoke tests through the protocol mocks.</td></tr>
+            <tr><td><code>IntegrationTests.swift</code></td><td>End-to-end paths (skipped in CI; require physical Apple Silicon).</td></tr>
+          </tbody>
+        </table>
+
+        <p>Convention: <strong>Given-When-Then</strong>. Each test name reads as a sentence. <code>test_givenStoppedVM_whenStarted_thenStateBecomesRunning()</code> — that style.</p>
+
+        <div class="callout tip">
+          <strong>Want to contribute?</strong> The fastest way to learn the code is to add a test. Pick an uncovered method, write a GWT test, send a PR. See <a href="/wiki/Contributing">Contributing</a>.
+        </div>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Security-Model">
+            <span class="np-label">Previous</span>
+            <span>← Security model</span>
+          </a>
+          <a class="np-card next" href="/wiki/Troubleshooting">
+            <span class="np-label">Next</span>
+            <span>Troubleshooting →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

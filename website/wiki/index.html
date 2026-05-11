@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Documentation · SecVF</title>
+<meta name="description" content="The SecVF wiki — installation, VM management, packet analysis, AI sandbox, security model, troubleshooting.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/" class="current">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Documentation</p>
+          <h1>SecVF wiki</h1>
+          <p class="lede">Run malware safely. Capture every packet. Spin up isolated AI agents. Read the architecture, follow the workflows, file an issue if anything bites.</p>
+        </header>
+
+        <p>SecVF is a native macOS app built on Apple's Virtualization framework. This wiki covers every feature: installing the app, creating VMs, configuring network modes, capturing traffic with tshark, running the Kali router and FakeNet honeypot, using the AI sandbox, the command line and the terminal UI, the security model, and how to contribute.</p>
+
+        <div class="callout tip">
+          <strong>New here?</strong> Start with <a href="/wiki/Installation">Installation</a>, then <a href="/wiki/First-VM">Your first VM</a>. Twenty minutes from clone to detonating a sample.
+        </div>
+
+        <h2>What's in the docs</h2>
+
+        <h3>Get started</h3>
+        <ul>
+          <li><a href="/wiki/Installation">Installation</a> — system requirements, getting the source, building, signing.</li>
+          <li><a href="/wiki/First-VM">Your first VM</a> — create a Linux guest, attach to a network, boot it, take a snapshot.</li>
+        </ul>
+
+        <h3>VM management</h3>
+        <ul>
+          <li><a href="/wiki/VM-Management">Managing VMs</a> — the VM library, multi-window sessions, ISO cache, macOS guests, lifecycle.</li>
+          <li><a href="/wiki/Network-Modes">Network modes</a> — NAT, virtual switch, router VM, FakeNet — when to use which.</li>
+          <li><a href="/wiki/File-Transfer">File transfer</a> — every way to move files host↔guest: VirtioFS, <code>vm copy-to</code>, virtual USB, scp, HTTP one-shot.</li>
+          <li><a href="/wiki/USB-Devices">USB devices &amp; passthrough</a> — physical USB to guests, virtual USB disks, hardware keys, SDR/JTAG dongles.</li>
+        </ul>
+
+        <h3>Capture &amp; analysis</h3>
+        <ul>
+          <li><a href="/wiki/Packet-Analysis">Packet analysis</a> — live capture, display filters, protocol breakdown, PCAP export.</li>
+          <li><a href="/wiki/Router-VM">Router VM</a> — Kali Linux as gateway, traffic interception, helper commands.</li>
+          <li><a href="/wiki/Traffic-Analysis">Traffic analysis workflows</a> — concrete recipes: DNS exfil hunt, JA3, beacon timing, FakeNet reveals, hidden C2 discovery.</li>
+          <li><a href="/wiki/FakeNet">FakeNet honeypot</a> — DNS sinkhole + fake HTTP/HTTPS responders for offline malware behavior capture.</li>
+        </ul>
+
+        <h3>Detection &amp; SIEM</h3>
+        <ul>
+          <li><a href="/wiki/SIEM">SIEM &amp; detection</a> — opt-in detection stack (Loki + Promtail + Grafana + Suricata + YARA) with pre-built dashboards and Sigma-derived alerts.</li>
+          <li><a href="/wiki/Containment-Breakout">Containment breakout</a> — the four isolation boundaries, indicators, response procedures, severity matrix.</li>
+        </ul>
+
+        <h3>Scripts &amp; provisioning</h3>
+        <ul>
+          <li><a href="/wiki/Scripts-Reference">Scripts reference</a> — every shell script SecVF ships, per-file documentation.</li>
+        </ul>
+
+        <h3>AI sandbox</h3>
+        <ul>
+          <li><a href="/wiki/AI-Sandbox">AI sandbox</a> — ephemeral macOS guests, APFS CoW session cloning, vsock IPC, DTrace and ESF telemetry.</li>
+        </ul>
+
+        <h3>CLI, TUI &amp; automation</h3>
+        <ul>
+          <li><a href="/wiki/CLI">CLI reference</a> — every <code>secvf-cli</code> command and flag.</li>
+          <li><a href="/wiki/TUI">TUI guide</a> — the Textual-based terminal UI for headless work.</li>
+          <li><a href="/wiki/Automation">Automation &amp; AI agents</a> — drive SecVF programmatically; JSON CLI, agent loops, MCP integration, safety rails.</li>
+        </ul>
+
+        <h3>Reference</h3>
+        <ul>
+          <li><a href="/wiki/Architecture">Architecture</a> — every module, every protocol, every notification.</li>
+          <li><a href="/wiki/Security-Model">Security model</a> — the threat model, isolation guarantees, audit trail.</li>
+          <li><a href="/wiki/Logging">Logging &amp; telemetry</a> — every log surface, per-window detail, on-disk schemas, SIEM bridging.</li>
+          <li><a href="/wiki/Troubleshooting">Troubleshooting</a> — common errors and how to recover.</li>
+          <li><a href="/wiki/FAQ">FAQ</a> — what people ask before they file an issue.</li>
+        </ul>
+
+        <h3>Project</h3>
+        <ul>
+          <li><a href="/wiki/Contributing">Contributing</a> — coding conventions, test pattern, PR checklist.</li>
+        </ul>
+
+        <h2>Conventions used in these docs</h2>
+        <table>
+          <thead><tr><th>Symbol</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>~/.avf/</code></td><td>The SecVF data directory. VM bundles, logs, caches.</td></tr>
+            <tr><td><span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span></td><td>A keyboard shortcut. Mac modifier symbols.</td></tr>
+            <tr><td><code>// Swift</code></td><td>Swift code in the SecVF macOS app.</td></tr>
+            <tr><td><code># bash</code></td><td>Shell command, run on host (or guest where noted).</td></tr>
+            <tr><td><span class="badge tip">tip</span></td><td>A non-obvious win.</td></tr>
+            <tr><td><span class="badge warn">caution</span></td><td>Read before you do it.</td></tr>
+            <tr><td><span class="badge danger">danger</span></td><td>Destructive or hostile-input territory.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="next-prev">
+          <span></span>
+          <a class="np-card next" href="/wiki/Installation">
+            <span class="np-label">Next</span>
+            <span>Installation →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div>
+      <h4>Product</h4>
+      <ul>
+        <li><a href="/#stack">The stack</a></li>
+        <li><a href="/#downloads">Download</a></li>
+        <li><a href="/wiki/">Documentation</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Source</h4>
+      <ul>
+        <li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Security</h4>
+      <ul>
+        <li><a href="/wiki/Security-Model">Threat model</a></li>
+        <li><a href="/.well-known/security.txt">security.txt</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

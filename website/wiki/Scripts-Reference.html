@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Scripts reference · SecVF</title>
+<meta name="description" content="Every script in the Scripts USB / repo scripts directory — what each does, when to run it, what it changes, how to recover.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Scripts-Reference">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference" class="current">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Scripts · Scripts reference</p>
+          <h1>Scripts reference</h1>
+          <p class="lede">Every shell script SecVF ships, in one place — what it does, when to run it, what it changes, how to back out. Most of these live on the Scripts USB; a few run host-side.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#overview">The Scripts USB at a glance</a></li>
+            <li><a href="#delivery">How to deliver a script to a guest</a></li>
+            <li><a href="#kali-router">kali-router-setup.sh</a></li>
+            <li><a href="#kali-fakenet">kali-fakenet-setup.sh</a></li>
+            <li><a href="#kali-sleep">kali-disable-sleep.sh</a></li>
+            <li><a href="#macos-network">macos-network-setup.sh</a></li>
+            <li><a href="#provision">provision-macos-vm.sh</a></li>
+            <li><a href="#test-switch">test_virtual_switch.sh</a></li>
+            <li><a href="#build-release">build-release.sh</a></li>
+            <li><a href="#helpers">Helper commands installed by the router setup</a></li>
+            <li><a href="#config-files">Config files written</a></li>
+          </ul>
+        </div>
+
+        <h2 id="overview">The Scripts USB at a glance</h2>
+
+        <p>The Scripts USB is a virtual disk SecVF builds on demand. It packages the scripts from <code>scripts/</code> in the repo, creates an HFS+ disk image, and attaches it to a chosen guest as a USB device. The guest mounts it, runs whatever it needs, then ejects.</p>
+
+<pre><code>scripts/                              # in the SecVF repo
+├── README.md                          # this is summarized below
+├── kali-router-setup.sh               # primary router setup
+├── kali-fakenet-setup.sh              # FakeNet on top of router
+├── kali-disable-sleep.sh              # keep router VMs awake
+├── macos-network-setup.sh             # host-side network config
+├── provision-macos-vm.sh              # AI sandbox base bundle setup
+├── test_virtual_switch.sh             # diagnostic
+├── build-release.sh                   # release builder (host-only)
+├── generate-icon.swift                # icon generator (build tooling)
+└── writemon.d/                        # (reserved — write-monitor DTrace probes)</code></pre>
+
+        <h2 id="delivery">How to deliver a script to a guest</h2>
+
+        <p>Two paths:</p>
+
+        <ol>
+          <li><strong>Scripts USB (GUI):</strong> VM Library → right-click VM → <strong>Mount Scripts USB…</strong>. SecVF builds a fresh image and attaches it. Inside the guest, mount and run.</li>
+          <li><strong>CLI:</strong> <code>secvf usb create-virtual --name secvf-scripts --size 64 --format dmg --source ./scripts &amp;&amp; secvf usb mount secvf-scripts --to &lt;vm&gt;</code>.</li>
+        </ol>
+
+        <p>From inside any Linux guest after mount:</p>
+
+<pre><code>sudo mount /dev/sdb1 /mnt                       # mount point varies
+cd /mnt
+ls                                              # see all scripts
+sudo bash &lt;script-name&gt;</code></pre>
+
+        <h2 id="kali-router">kali-router-setup.sh</h2>
+
+        <span class="badge tip">required for router workflow</span>
+
+        <h3>Purpose</h3>
+        <p>Converts a clean Kali Linux VM into the analysis lab's router. Configures static IP, IP forwarding, DHCP, DNS, iptables, traffic-analysis tooling, and installs the three helper commands (<code>secvf-status</code>, <code>secvf-monitor</code>, <code>secvf-capture</code>).</p>
+
+        <h3>When to run</h3>
+        <ul>
+          <li><strong>First time:</strong> immediately after installing a fresh Kali VM that you intend to use as the router.</li>
+          <li><strong>After reset:</strong> if the router VM gets in a weird state and you'd rather rebuild from a clean Kali than untangle it.</li>
+          <li><strong>Idempotent:</strong> safe to re-run — it skips parts already done and re-applies anything that drifted.</li>
+        </ul>
+
+        <h3>What it changes</h3>
+        <ul>
+          <li>Sets static IP <code>10.0.100.1/24</code> on <code>eth0</code> via <code>/etc/network/interfaces.d/eth0</code></li>
+          <li>Enables IP forwarding in <code>/etc/sysctl.d/99-secvf.conf</code></li>
+          <li>Installs <code>isc-dhcp-server</code> + config, <code>dnsmasq</code> + config</li>
+          <li>Installs analysis tools: <code>tcpdump</code>, <code>tshark</code>, <code>wireshark</code>, <code>nmap</code>, <code>netcat</code>, <code>socat</code>, <code>ettercap</code>, <code>dsniff</code>, <code>arpwatch</code>, <code>iftop</code>, <code>nethogs</code>, <code>vnstat</code>, <code>bettercap</code>, <code>suricata</code>, <code>zeek</code></li>
+          <li>Writes iptables rules to <code>/etc/iptables/rules.v4</code> and enables <code>netfilter-persistent</code></li>
+          <li>Creates <code>/etc/secvf-router.conf</code> with detected interface name (used by the FakeNet script)</li>
+          <li>Drops the three helper scripts in <code>/usr/local/bin/</code></li>
+          <li>Creates <code>/var/captures/</code> for packet captures</li>
+          <li>Writes setup log to <code>/var/log/secvf-router-setup.log</code></li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code>sudo /mnt/kali-router-setup.sh
+# Then reboot — required for the network changes to take cleanly.
+sudo reboot</code></pre>
+
+        <h3>Recovery / rollback</h3>
+        <p>The script has no dedicated <code>--undo</code>. To revert: re-create the VM from a clean Kali ISO (cheapest path), or manually undo each section (<code>apt-get remove</code>, restore <code>/etc/network/interfaces.d/eth0</code>, etc.). Always snapshot the VM before running for the first time so you can roll back the whole bundle if needed.</p>
+
+        <h2 id="kali-fakenet">kali-fakenet-setup.sh</h2>
+
+        <span class="badge tip">required for FakeNet workflow</span>
+
+        <h3>Purpose</h3>
+        <p>Layers FakeNet honeypot capability on top of an already-router-configured Kali VM. All DNS resolves to the router; HTTP/HTTPS/FTP/SMTP/IRC/POP3 are answered by fake services.</p>
+
+        <h3>Prerequisite</h3>
+        <p><strong>Must</strong> run <code>kali-router-setup.sh</code> first — it consumes <code>/etc/secvf-router.conf</code> for the interface name.</p>
+
+        <h3>When to run</h3>
+        <ul>
+          <li>When you need offline malware behaviour capture — see <a href="/wiki/FakeNet">FakeNet</a>.</li>
+          <li>When you want to reveal hidden C2 infrastructure (see <a href="/wiki/Traffic-Analysis#hidden">Traffic analysis</a>).</li>
+        </ul>
+
+        <h3>What it changes</h3>
+        <ul>
+          <li>Replaces <code>/etc/dnsmasq.conf</code> with a wildcard-A-record sinkhole config</li>
+          <li>Adds an nginx server block at <code>/etc/nginx/sites-available/fakenet</code> on ports 80 + 443</li>
+          <li>Generates a self-signed CA in <code>/etc/ssl/fakenet/</code></li>
+          <li>Configures <code>sslsplit</code> as a transparent TLS MITM</li>
+          <li>Configures <code>inetsim</code> for FTP/SMTP/POP3/IRC/NTP/daytime/discard/quotd</li>
+          <li>Adds iptables PREROUTING redirects to capture outbound 80/443 → mitm</li>
+          <li>Creates <code>/var/log/fakenet/</code> with logrotate config</li>
+          <li>Modes: <code>start</code> (default), <code>stop</code>, <code>status</code> — the script is its own toggle</li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code>sudo /mnt/kali-fakenet-setup.sh start    # activate FakeNet
+sudo /mnt/kali-fakenet-setup.sh stop     # restore live-internet routing
+sudo /mnt/kali-fakenet-setup.sh status   # show what's running</code></pre>
+
+        <h3>Recovery / rollback</h3>
+        <p>Use <code>stop</code> — it restores the saved <code>/etc/dnsmasq.conf.orig</code> and flushes the iptables NAT PREROUTING chain. Cleaner approach: keep two router bundles (live and FakeNet) and switch lab gateways via VM Library.</p>
+
+        <h2 id="kali-sleep">kali-disable-sleep.sh</h2>
+
+        <span class="badge">specific scenario</span>
+
+        <h3>Purpose</h3>
+        <p>Disables every sleep, lock-screen, screen-blanking, and DPMS pathway on a Kali Linux VM. Without this, a long-running router VM can lock its screen mid-analysis and obscure logs you wanted to glance at.</p>
+
+        <h3>When to run</h3>
+        <ul>
+          <li>On the router VM if you're going to leave it running unattended (overnight detonations, multi-hour beacon studies).</li>
+          <li>On any analysis VM where you need the desktop visible at all times for ongoing observation.</li>
+          <li><strong>Not needed</strong> for headless or short-session VMs.</li>
+        </ul>
+
+        <h3>What it changes</h3>
+        <ul>
+          <li><code>systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target</code></li>
+          <li><code>setterm -blank 0 -powerdown 0</code> + persistent <code>consoleblank=0</code> kernel param via grub</li>
+          <li>Writes <code>/etc/X11/xorg.conf.d/10-no-blanking.conf</code> for X11 DPMS-off</li>
+          <li>Disables gnome-screensaver / lock-on-suspend if GNOME is installed</li>
+          <li>Reverses the autosuspend USB power management</li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code>sudo /mnt/kali-disable-sleep.sh
+# Reboot to make the grub change take effect for the console blank.
+sudo reboot</code></pre>
+
+        <h3>Recovery / rollback</h3>
+        <p>To undo: <code>sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target</code>, remove <code>/etc/X11/xorg.conf.d/10-no-blanking.conf</code>, edit <code>/etc/default/grub</code> to remove <code>consoleblank=0</code>, <code>update-grub</code>, reboot.</p>
+
+        <h2 id="macos-network">macos-network-setup.sh</h2>
+
+        <span class="badge">host-side · specific scenario</span>
+
+        <h3>Purpose</h3>
+        <p>Configures the <em>host macOS</em> network interface to participate in the SecVF virtual network. Sets a static IP, configures DNS pointing at the Kali router, and verifies the configuration.</p>
+
+        <h3>When to run</h3>
+        <ul>
+          <li>Only when the host itself needs a presence on the analysis lab's subnet — e.g. running an inspection tool on the host that needs to reach a lab VM directly.</li>
+          <li><strong>Skip</strong> in normal use. SecVF's switch is intra-VM; the host doesn't usually need to be on it.</li>
+        </ul>
+
+        <h3>What it changes</h3>
+        <ul>
+          <li>Sets manual IP on the host's primary network service: <code>networksetup -setmanual</code></li>
+          <li>Sets DNS to the router IP: <code>networksetup -setdnsservers</code></li>
+          <li>Defaults to <code>10.0.100.50/24</code> with gateway <code>10.0.100.1</code>; override via first argument</li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code># Run on the HOST (not in a VM). Requires sudo.
+sudo /Users/me/SecVF/scripts/macos-network-setup.sh                # uses default IP
+sudo /Users/me/SecVF/scripts/macos-network-setup.sh 10.0.100.99    # custom IP</code></pre>
+
+        <h3>Recovery / rollback</h3>
+<pre><code># Restore DHCP on the host's primary service
+sudo networksetup -setdhcp Wi-Fi
+# or
+sudo networksetup -setdhcp Ethernet</code></pre>
+
+        <h2 id="provision">provision-macos-vm.sh</h2>
+
+        <span class="badge">runs inside macOS guest · base-bundle setup</span>
+
+        <h3>Purpose</h3>
+        <p>Sets up the AI sandbox <em>base bundle</em>. Runs <strong>inside</strong> a fresh macOS guest VM after the framework's installer finishes, before the bundle is frozen as the canonical base for cloning.</p>
+
+        <p>This is the only script that ships with the macOS guest provisioner — it's not on the Scripts USB by default; SecVF mounts it during base-bundle build via vsock.</p>
+
+        <h3>When to run</h3>
+        <p><strong>Only once per base bundle generation.</strong> SecVF runs this automatically as part of the AI sandbox install flow. You only invoke it manually if you're rebuilding a base bundle or debugging the provisioning steps.</p>
+
+        <h3>What it changes (inside the guest)</h3>
+        <ul>
+          <li>Sets SIP flags for ESF / DTrace — does <strong>not</strong> fully disable SIP</li>
+          <li>Disables Spotlight, Time Machine, telemetry, push notifications</li>
+          <li>Installs Homebrew + Node.js 22</li>
+          <li>Installs the AI agent runtime (Claude Code CLI) with a staged-tarball fallback if network is restricted</li>
+          <li>Creates the <code>agent</code> non-admin user with workspace-only write access</li>
+          <li>Configures VirtioFS mount points at <code>/workspace</code> and <code>/sessions-ro</code></li>
+          <li>Starts the vsock exec agent on port 2222 (the host-to-guest command channel)</li>
+          <li>Installs DTrace probes + an ESF helper for syscall tracing</li>
+          <li>Writes provision manifest at <code>/var/db/secvf-provision.json</code></li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code># Inside the macOS guest, manually (only during base build):
+sudo /var/run/secvf/provision-macos-vm.sh
+
+# Idempotent — re-running validates and refreshes anything stale.</code></pre>
+
+        <h3>Recovery / rollback</h3>
+        <p>Don't rollback a session bundle — destroy it and clone fresh from the base. For the base bundle itself: if provisioning gets stuck, rebuild from IPSW (the bundle keeps the original IPSW, so this is reasonably fast).</p>
+
+        <h2 id="test-switch">test_virtual_switch.sh</h2>
+
+        <span class="badge">diagnostic</span>
+
+        <h3>Purpose</h3>
+        <p>End-to-end smoke test for the host-side <code>VirtualNetworkSwitch</code>. Useful when troubleshooting network issues that smell host-side rather than guest-side.</p>
+
+        <h3>When to run</h3>
+        <ul>
+          <li>VMs can't talk to each other even on the same virtual switch.</li>
+          <li>Switch Statistics shows zero forwarding.</li>
+          <li>Network logs aren't being written.</li>
+          <li>Before opening an issue on GitHub — include the output.</li>
+        </ul>
+
+        <h3>What it checks</h3>
+        <ul>
+          <li>Socket directory exists: <code>~/.avf/sockets/</code></li>
+          <li>Network log file is being written: <code>~/.avf/logs/network-YYYY-MM-DD.log</code></li>
+          <li>Per-VM socket count under <code>~/.avf/sockets/vm-*.sock</code></li>
+          <li>Recent log entries (tail of the network log)</li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code># On the host. No sudo.
+bash scripts/test_virtual_switch.sh</code></pre>
+
+        <h3>Output interpretation</h3>
+        <ul>
+          <li><strong>All PASS:</strong> switch is healthy. Issue is somewhere else.</li>
+          <li><strong>Socket dir missing:</strong> SecVF has never started the switch — check the app is running and at least one VM is on Virtual or Router mode.</li>
+          <li><strong>Log file missing:</strong> the switch is running but logging is disabled or the logs directory has permission issues.</li>
+          <li><strong>Zero connected VMs but VMs are running:</strong> guest's virtio-net failed to attach. Check <code>~/.avf/logs/error-audit.log</code>.</li>
+        </ul>
+
+        <h2 id="build-release">build-release.sh</h2>
+
+        <span class="badge">developer · host-only</span>
+
+        <h3>Purpose</h3>
+        <p>Builds a signed, archived release of SecVF for direct distribution. Handles version increment, archive, export, and notarisation prep.</p>
+
+        <h3>When to run</h3>
+        <p>Only when cutting a release. You don't need this for everyday development.</p>
+
+        <h3>What it does</h3>
+        <ul>
+          <li>Reads <code>MARKETING_VERSION</code> and <code>CURRENT_PROJECT_VERSION</code> from <code>SecVF.xcodeproj</code></li>
+          <li>Increments the build number (or marketing version if specified)</li>
+          <li>Runs <code>xcodebuild archive</code> into <code>build/SecVF.xcarchive</code></li>
+          <li>Exports the <code>.app</code> bundle into <code>build/Release/</code></li>
+          <li>Codesigns with the Developer ID identity in the build settings</li>
+          <li>Prepares a <code>.dmg</code> wrapper for upload</li>
+        </ul>
+
+        <h3>Usage</h3>
+<pre><code>cd ~/Code/SecVF
+./scripts/build-release.sh              # increments build number
+./scripts/build-release.sh --version 1.2.0   # bumps marketing version</code></pre>
+
+        <h2 id="helpers">Helper commands installed by the router setup</h2>
+
+        <p>These three commands live in <code>/usr/local/bin/</code> on the router VM after <code>kali-router-setup.sh</code> runs. They're documented in detail on the <a href="/wiki/Router-VM#helpers">Router VM page</a>; quick reference here:</p>
+
+        <table>
+          <thead><tr><th>Command</th><th>What it shows</th></tr></thead>
+          <tbody>
+            <tr><td><code>secvf-status</code></td><td>Router state: IP, services, conntrack, iptables, DHCP/DNS status — one-shot summary.</td></tr>
+            <tr><td><code>secvf-monitor</code></td><td>Live: connections, DNS queries, ARP activity. Curses UI, 4 Hz refresh.</td></tr>
+            <tr><td><code>secvf-capture</code></td><td>tcpdump wrapper with rotating files, sensible defaults, host/port filters.</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="config-files">Config files written</h2>
+
+        <p>Quick reference for "where did setup put this":</p>
+
+        <table>
+          <thead><tr><th>Path</th><th>Written by</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>/etc/secvf-router.conf</code></td><td>kali-router-setup</td><td>Detected interface, IP, network. Consumed by FakeNet script.</td></tr>
+            <tr><td><code>/etc/network/interfaces.d/eth0</code></td><td>kali-router-setup</td><td>Static IP for the LAN interface.</td></tr>
+            <tr><td><code>/etc/sysctl.d/99-secvf.conf</code></td><td>kali-router-setup</td><td>IP forwarding, syncookies, other sysctl knobs.</td></tr>
+            <tr><td><code>/etc/dhcp/dhcpd.conf</code></td><td>kali-router-setup</td><td>DHCP pool for lab guests.</td></tr>
+            <tr><td><code>/etc/dnsmasq.conf</code></td><td>kali-router-setup</td><td>DNS forwarder. Replaced by FakeNet variant when active.</td></tr>
+            <tr><td><code>/etc/iptables/rules.v4</code></td><td>kali-router-setup</td><td>Persistent firewall + NAT rules.</td></tr>
+            <tr><td><code>/etc/ssl/fakenet/{ca,cert,key}.pem</code></td><td>kali-fakenet-setup</td><td>Self-signed CA + leaf for sslsplit.</td></tr>
+            <tr><td><code>/etc/nginx/sites-available/fakenet</code></td><td>kali-fakenet-setup</td><td>Wildcard HTTP/HTTPS responder.</td></tr>
+            <tr><td><code>/var/log/secvf-router-setup.log</code></td><td>kali-router-setup</td><td>Setup audit trail.</td></tr>
+            <tr><td><code>/var/log/iptables.log</code></td><td>kali-router-setup</td><td>Firewall hits.</td></tr>
+            <tr><td><code>/var/log/fakenet/*</code></td><td>kali-fakenet-setup</td><td>Per-protocol fake-service logs.</td></tr>
+            <tr><td><code>/var/captures/</code></td><td>kali-router-setup</td><td>Default PCAP output directory.</td></tr>
+            <tr><td><code>/usr/local/bin/secvf-{status,monitor,capture}</code></td><td>kali-router-setup</td><td>The helper commands.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/FakeNet">
+            <span class="np-label">Previous</span>
+            <span>← FakeNet</span>
+          </a>
+          <a class="np-card next" href="/wiki/USB-Devices">
+            <span class="np-label">Next</span>
+            <span>USB devices →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

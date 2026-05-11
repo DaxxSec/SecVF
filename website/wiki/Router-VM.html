@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Router VM · SecVF</title>
+<meta name="description" content="Kali Linux as the gateway for the analysis lab. Static IP, iptables NAT, DHCP, traffic interception, helper commands.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Router-VM">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM" class="current">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Network &amp; capture · Router VM</p>
+          <h1>Router VM (Kali)</h1>
+          <p class="lede">A dedicated Kali Linux VM acts as the gateway for the analysis lab. Static <code>10.0.100.1/24</code> on the LAN side, iptables NAT outbound, DHCP for the bus, and a pre-installed tap pipeline that mirrors every frame to the host capture.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#why">Why a router VM (and not the host)</a></li>
+            <li><a href="#topology">Topology</a></li>
+            <li><a href="#provision">Provisioning the router</a></li>
+            <li><a href="#config">Network configuration</a></li>
+            <li><a href="#iptables">Firewall &amp; NAT rules</a></li>
+            <li><a href="#helpers">Helper commands</a></li>
+            <li><a href="#capture">In-guest capture vs host capture</a></li>
+            <li><a href="#hardening">Hardening the router</a></li>
+            <li><a href="#troubleshooting">Troubleshooting</a></li>
+          </ul>
+        </div>
+
+        <h2 id="why">Why a router VM (and not the host)</h2>
+
+        <p>Most VM apps NAT through the host's network stack. SecVF can do that too (it's the default "NAT" mode). But for analysis, routing through a dedicated guest is strictly better:</p>
+
+        <ul>
+          <li><strong>Tooling parity.</strong> Run <code>tcpdump</code>, <code>tshark</code>, or <code>nmap</code> on the router and you see exactly what malware sees on the wire. Host-side tools can't.</li>
+          <li><strong>iptables / netfilter access.</strong> Full Linux firewall stack — DNAT, mangle, conntrack — without touching the host's networking.</li>
+          <li><strong>Containment.</strong> If malware exploits a network stack bug, the explosion is in the router VM, not on macOS. Restore the snapshot, move on.</li>
+          <li><strong>Reproducibility.</strong> The router's state — config, certs, captures — is in <code>~/.avf/Linux/Kali-Router.bundle/</code>. Snapshot it, share it, version it.</li>
+          <li><strong>L7 instrumentation.</strong> Easy to wedge a transparent proxy (mitmproxy, sslsplit) inline. Can't do that with host NAT.</li>
+        </ul>
+
+        <h2 id="topology">Topology</h2>
+
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│  Host (macOS)                                               │
+│   ┌─────────────────────────────────────────────────────┐   │
+│   │  SecVF process                                      │   │
+│   │   ┌─────────────────────────────────────────────┐   │   │
+│   │   │  VirtualNetworkSwitch (in-process L2/L3)    │   │   │
+│   │   │  ┌──────┐  ┌──────┐  ┌──────┐  ┌─────────┐  │   │   │
+│   │   │  │ VM A │  │ VM B │  │ VM C │  │  Kali   │  │   │   │
+│   │   │  │      │  │      │  │      │  │ router  │  │   │   │
+│   │   │  └──┬───┘  └──┬───┘  └──┬───┘  └────┬────┘  │   │   │
+│   │   └─────┼─────────┼─────────┼───────────┼───────┘   │   │
+│   │         └─────────┴─────────┘           │           │   │
+│   │              LAN: 10.0.100.0/24         │  WAN      │   │
+│   │              (no host involvement)      │  via      │   │
+│   │                                         │  framework│   │
+│   │                                         │  NAT      │   │
+│   └─────────────────────────────────────────┼───────────┘   │
+│                                             ▼               │
+└─────────────────────────────────────────────────────────────┘
+                                                 Internet (or FakeNet)</code></pre>
+
+        <p>The router has two virtual NICs:</p>
+        <ul>
+          <li><strong>eth0 (LAN)</strong> — attached to the virtual switch with static <code>10.0.100.1/24</code>. Other VMs use this as their gateway.</li>
+          <li><strong>eth1 (WAN)</strong> — attached to the framework's NAT, gets DHCP from macOS. This is the only path out.</li>
+        </ul>
+
+        <h2 id="provision">Provisioning the router</h2>
+
+        <p>Start with a clean Kali install (see <a href="/wiki/First-VM">Your first VM</a>), then attach the Scripts USB:</p>
+
+        <ol>
+          <li>In the VM Library, right-click the Kali VM → <strong>Mount Scripts USB…</strong> SecVF creates an HFS+ disk image with <code>kali-router-setup.sh</code> on it and attaches it as a USB device.</li>
+          <li>Inside the guest, mount and run:
+<pre><code>sudo mount /dev/sdb1 /mnt
+cd /mnt
+sudo bash kali-router-setup.sh</code></pre>
+          </li>
+          <li>Reboot when the script finishes (<code>sudo reboot</code>). The router is now configured.</li>
+        </ol>
+
+        <p>The script (~250 lines, source at <a href="https://github.com/DaxxSec/SecVF/blob/main/scripts/kali-router-setup.sh" rel="noopener">scripts/kali-router-setup.sh</a>) does:</p>
+
+        <ul>
+          <li>Sets <code>eth0</code> static <code>10.0.100.1/24</code> via <code>/etc/network/interfaces.d/eth0</code></li>
+          <li>Enables IP forwarding (<code>net.ipv4.ip_forward = 1</code> in <code>/etc/sysctl.d/99-secvf.conf</code>)</li>
+          <li>Installs and configures <code>isc-dhcp-server</code> on eth0</li>
+          <li>Installs and configures <code>dnsmasq</code> on eth0 for DNS</li>
+          <li>Installs analysis tooling: <code>tcpdump</code>, <code>tshark</code>, <code>nmap</code>, <code>tcpflow</code>, <code>ngrep</code>, <code>bettercap</code></li>
+          <li>Adds the helper commands (<code>secvf-status</code>, <code>secvf-monitor</code>, <code>secvf-capture</code>) to <code>/usr/local/bin/</code></li>
+          <li>Writes iptables rules to <code>/etc/iptables/rules.v4</code> and enables <code>netfilter-persistent</code></li>
+          <li>Disables Kali's default services that aren't needed (cups, avahi, etc.)</li>
+        </ul>
+
+        <h2 id="config">Network configuration</h2>
+
+        <h3>Subnet layout</h3>
+
+        <table>
+          <thead><tr><th>Range</th><th>Use</th></tr></thead>
+          <tbody>
+            <tr><td><code>10.0.100.1</code></td><td>Router (eth0). Static.</td></tr>
+            <tr><td><code>10.0.100.10 – 10.0.100.99</code></td><td>DHCP pool. Most lab VMs land here.</td></tr>
+            <tr><td><code>10.0.100.100 – 10.0.100.199</code></td><td>Reserved for static assignments (mitmproxy hosts, FakeNet endpoints).</td></tr>
+            <tr><td><code>10.0.100.200 – 10.0.100.254</code></td><td>Free-form; use for ad-hoc IPs.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>DHCP server (isc-dhcp-server)</h3>
+
+        <p>Config at <code>/etc/dhcp/dhcpd.conf</code>:</p>
+
+<pre><code>option domain-name "secvf.lab";
+option domain-name-servers 10.0.100.1;
+default-lease-time 600;
+max-lease-time 7200;
+authoritative;
+
+subnet 10.0.100.0 netmask 255.255.255.0 {
+  range 10.0.100.10 10.0.100.99;
+  option routers 10.0.100.1;
+  option broadcast-address 10.0.100.255;
+}</code></pre>
+
+        <h3>DNS resolver (dnsmasq)</h3>
+
+        <p>Default config forwards upstream to <code>1.1.1.1</code> and <code>9.9.9.9</code>. Override with FakeNet by replacing <code>/etc/dnsmasq.conf</code> with the FakeNet variant — see <a href="/wiki/FakeNet">FakeNet</a>.</p>
+
+        <h2 id="iptables">Firewall &amp; NAT rules</h2>
+
+        <p>The router's <code>/etc/iptables/rules.v4</code>:</p>
+
+<pre><code>*filter
+:INPUT DROP [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -i eth0 -p icmp -j ACCEPT
+-A INPUT -i eth0 -p tcp --dport 22 -j ACCEPT      # SSH from LAN
+-A INPUT -i eth0 -p udp --dport 53 -j ACCEPT      # DNS
+-A INPUT -i eth0 -p udp --dport 67 -j ACCEPT      # DHCP
+COMMIT
+
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+-A POSTROUTING -o eth1 -j MASQUERADE                # NAT out via WAN
+COMMIT</code></pre>
+
+        <p>Reload with <code>sudo iptables-restore &lt; /etc/iptables/rules.v4</code> or just <code>sudo systemctl restart netfilter-persistent</code>.</p>
+
+        <div class="callout warn">
+          <strong>FORWARD is ACCEPT by default.</strong> This is permissive — you almost certainly want to tighten it once the lab stabilizes. Common refinement: only allow forwarding from <code>eth0 → eth1</code> (so guests can reach the internet) but drop <code>eth1 → eth0</code> (so the outside can never initiate to lab guests).
+        </div>
+
+        <h2 id="helpers">Helper commands</h2>
+
+        <p>Three commands ship with the router setup. All live in <code>/usr/local/bin/</code> and run as root via sudoers entry.</p>
+
+        <h3><code>secvf-status</code></h3>
+
+        <p>One-shot summary of the router state. Useful first-thing diagnostic.</p>
+
+<pre><code>$ secvf-status
+== SecVF Router ==
+IP forwarding   : enabled
+LAN (eth0)      : 10.0.100.1/24 UP
+WAN (eth1)      : 192.168.64.7/24 UP (gw 192.168.64.1)
+DHCP            : running (4 active leases)
+DNS             : running (forwarders 1.1.1.1, 9.9.9.9)
+iptables FORWARD: ACCEPT (default)
+NAT             : POSTROUTING MASQUERADE on eth1
+Conntrack       : 213 entries, max 65536</code></pre>
+
+        <h3><code>secvf-monitor</code></h3>
+
+        <p>Live tail of new connections, DNS queries, and ARP activity. Curses-based, refreshes 4 Hz.</p>
+
+<pre><code>$ secvf-monitor
+─ Connections (last 30s) ─────────────────────────
+  10.0.100.15 → 1.1.1.1:53 (UDP)
+  10.0.100.15 → 142.250.80.46:443 (TCP, ESTABLISHED)
+  10.0.100.42 → 185.199.108.153:443 (TCP, SYN_SENT)
+─ DNS (last 30s) ────────────────────────────────
+  10.0.100.15 ?  google.com           → 142.250.80.46
+  10.0.100.42 ?  github.io            → 185.199.108.153
+  10.0.100.42 ?  evil.example.invalid → (no answer)
+─ ARP ─────────────────────────────────────────
+  10.0.100.15 = 52:54:00:a3:b1:90
+  10.0.100.42 = 52:54:00:c8:d2:e4</code></pre>
+
+        <h3><code>secvf-capture</code></h3>
+
+        <p>Wrapper around <code>tcpdump</code>/<code>tshark</code> with sensible defaults — rotating files at 100 MB each, in <code>/var/captures/</code>, with hostname + timestamp filenames.</p>
+
+<pre><code>$ secvf-capture start                       # capture all eth0 traffic
+[+] writing /var/captures/kali-router-2026-05-10T14-32-00.pcap (rotate 100 MB)
+
+$ secvf-capture status
+running: pid 1234, 2 files, 187 MB total
+
+$ secvf-capture stop
+[+] stopped. files in /var/captures/
+
+$ secvf-capture --host 10.0.100.15 start    # filter to one client
+$ secvf-capture --port 443 --no-rotate start</code></pre>
+
+        <h2 id="capture">In-guest capture vs host capture</h2>
+
+        <p>You have two places you can capture traffic when running in Router-VM mode. Use both for full coverage:</p>
+
+        <table>
+          <thead><tr><th>Location</th><th>What you see</th><th>What you miss</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Host (SecVF packet panel)</strong></td><td>Every frame on the virtual switch — before the router touches it.</td><td>Internet-side traffic past the router's MASQUERADE.</td></tr>
+            <tr><td><strong>Router (<code>secvf-capture</code>)</strong></td><td>eth1 (post-NAT) traffic — what the internet actually sees.</td><td>Inter-VM lab traffic that the router never sees.</td></tr>
+          </tbody>
+        </table>
+
+        <p>For a typical malware analysis: start the host capture <em>before</em> detonation (catches first-stage staging traffic, fast), and start <code>secvf-capture</code> on the router (gives you post-NAT correlation with anything external).</p>
+
+        <h2 id="hardening">Hardening the router</h2>
+
+        <p>Defaults are convenient, not secure. Once your lab is stable:</p>
+
+        <ol>
+          <li><strong>Tighten FORWARD.</strong> Replace the default <code>ACCEPT</code> with a curated set of rules: allow <code>eth0 → eth1</code> only, drop <code>eth1 → eth0</code>, optionally rate-limit.</li>
+          <li><strong>Lock down OUTPUT.</strong> The router itself shouldn't be initiating connections except to its known forwarders (DNS) and its package mirror.</li>
+          <li><strong>Disable SSH password auth.</strong> <code>PasswordAuthentication no</code> in <code>/etc/ssh/sshd_config.d/secvf.conf</code>. Only key-based access from the host.</li>
+          <li><strong>Snapshot it.</strong> Once configured, duplicate the bundle (see <a href="/wiki/VM-Management#snapshots">Snapshots</a>). If a future analysis bricks the router, restore in seconds.</li>
+          <li><strong>Disable systemd services you don't need.</strong> <code>cups</code>, <code>avahi-daemon</code>, <code>bluetooth</code> — none of them belong on a router VM. The provision script does most of this; review the final list with <code>systemctl list-unit-files --state=enabled</code>.</li>
+        </ol>
+
+        <h2 id="troubleshooting">Troubleshooting</h2>
+
+        <table>
+          <thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Lab VMs get DHCP but no internet</td><td>IP forwarding disabled, or MASQUERADE missing</td><td><code>sysctl net.ipv4.ip_forward</code> should be <code>1</code>; <code>iptables -t nat -L POSTROUTING -v</code> should show MASQUERADE rule</td></tr>
+            <tr><td>No DHCP lease at all</td><td>isc-dhcp-server not running, or listening on the wrong interface</td><td><code>systemctl status isc-dhcp-server</code>; check <code>/etc/default/isc-dhcp-server</code> has <code>INTERFACESv4="eth0"</code></td></tr>
+            <tr><td>DNS resolves on host but not lab guest</td><td>dnsmasq not running, or guest pointing at host's resolver</td><td><code>systemctl status dnsmasq</code>; in lab guest, <code>resolvectl status</code> should show <code>10.0.100.1</code></td></tr>
+            <tr><td>External hosts can reach lab VMs (bad)</td><td>FORWARD is ACCEPT by default — see hardening above</td><td>Tighten FORWARD chain</td></tr>
+            <tr><td>Router itself can't reach the internet</td><td>eth1 not getting a DHCP lease, or upstream firewalled</td><td><code>dhclient -v eth1</code> from inside the router; check Apple framework's NAT range</td></tr>
+            <tr><td><code>secvf-status</code> reports "command not found"</td><td>Scripts USB not mounted, or setup script never ran</td><td>Re-mount Scripts USB and re-run <code>kali-router-setup.sh</code></td></tr>
+          </tbody>
+        </table>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Packet-Analysis">
+            <span class="np-label">Previous</span>
+            <span>← Packet analysis</span>
+          </a>
+          <a class="np-card next" href="/wiki/FakeNet">
+            <span class="np-label">Next</span>
+            <span>FakeNet honeypot →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

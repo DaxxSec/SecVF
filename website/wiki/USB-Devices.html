@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>USB devices &amp; passthrough · SecVF</title>
+<meta name="description" content="Attach physical USB devices to guests, create virtual USB disks, and ship files into VMs. The Apple Virtualization framework's USB device passthrough explained.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/USB-Devices">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices" class="current">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">VM management · USB devices</p>
+          <h1>USB devices &amp; passthrough</h1>
+          <p class="lede">Two related capabilities: attach a physical USB device (stick, hardware key, debugger) to a guest, and ship a virtual USB disk full of files (the Scripts USB pattern). Both ride the same Apple Virtualization framework primitives — but with different security implications.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#two-flavours">Two flavours of USB</a></li>
+            <li><a href="#physical">Physical USB passthrough</a></li>
+            <li><a href="#virtual">Virtual USB disks (the Scripts pattern)</a></li>
+            <li><a href="#cli">CLI surface</a></li>
+            <li><a href="#use-cases">Use cases</a></li>
+            <li><a href="#hardware-keys">Hardware keys &amp; smart cards</a></li>
+            <li><a href="#guest-side">Inside the guest: mounting</a></li>
+            <li><a href="#security">Security considerations</a></li>
+            <li><a href="#limits">What the framework doesn't do</a></li>
+            <li><a href="#troubleshooting">Troubleshooting</a></li>
+          </ul>
+        </div>
+
+        <h2 id="two-flavours">Two flavours of USB</h2>
+
+        <table>
+          <thead><tr><th></th><th>Physical passthrough</th><th>Virtual disk</th></tr></thead>
+          <tbody>
+            <tr><td>Source</td><td>An actual USB device on your Mac</td><td>A file SecVF generates on demand</td></tr>
+            <tr><td>Backed by</td><td><code>VZUSBMassStorageDeviceConfiguration</code> + IOKit handoff</td><td>A <code>.dmg</code> or <code>.iso</code> presented as USB mass storage</td></tr>
+            <tr><td>Lifetime</td><td>While the device is attached &amp; the VM running</td><td>Until you eject and delete</td></tr>
+            <tr><td>Visible to guest</td><td>As real USB hardware (matching VID/PID)</td><td>As a generic USB mass storage device</td></tr>
+            <tr><td>Use cases</td><td>Hardware keys, ICS dongles, hardware debuggers, USB-connected radios</td><td>Shipping scripts, ISO transfers, throwaway file exchange</td></tr>
+            <tr><td>Security risk</td><td>Higher — real hardware, real driver surface</td><td>Lower — controlled bytes you assembled</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="physical">Physical USB passthrough</h2>
+
+        <h3>How it works</h3>
+        <p>SecVF enumerates connected USB devices via IOKit. When you mount a device to a VM, the framework detaches it from the host kernel and re-attaches it to the guest's virtual USB controller. The guest sees the device's real VID/PID and any vendor-specific descriptors — so device-driver matching inside the guest works the same as on bare metal.</p>
+
+<pre><code>┌─────────────────────────────────────────────┐
+│  host macOS                                  │
+│   IOKit ──→ SecVF (USBManagerBridge)        │
+│              │                               │
+│              ▼  mount                        │
+│   VZUSBMassStorageDeviceConfiguration       │
+│              │                               │
+│              ▼                               │
+│   guest's virtio-usb controller              │
+│              │                               │
+│              ▼                               │
+│   guest kernel sees: vendor=0x0951 model=DTSE9│
+└─────────────────────────────────────────────┘</code></pre>
+
+        <h3>From the GUI</h3>
+        <ol>
+          <li>Plug in the device.</li>
+          <li>VM Library → select the target VM → right-click → <strong>Attach USB device…</strong></li>
+          <li>SecVF lists every host-visible USB device with vendor, model, and current status. Pick one. Click <strong>Attach</strong>.</li>
+          <li>The device disappears from the host (Finder ejects it) and appears inside the guest. The guest's automount flow takes over from there.</li>
+          <li>To detach: VM Library → <strong>Eject USB</strong>, or right-click the device row in the Active USB sidebar.</li>
+        </ol>
+
+        <h3>From the CLI</h3>
+<pre><code># Enumerate
+secvf usb list
+
+# Attach a device to a VM (use the device's name or ID from `list`)
+secvf usb mount "Kingston DT 32GB" --to malware-sandbox
+
+# Eject
+secvf usb eject "Kingston DT 32GB"</code></pre>
+
+        <h3>Constraints (from the framework)</h3>
+        <ul>
+          <li><strong>Mass storage only</strong> for some host macOS versions. The Virtualization framework's USB support is biased toward storage; HID and serial passthrough have caveats.</li>
+          <li><strong>Single guest at a time.</strong> A device is owned by one VM until ejected — you can't share a USB stick between two running guests.</li>
+          <li><strong>Boot devices excluded.</strong> The host's own boot disk and primary storage are never offered for passthrough.</li>
+          <li><strong>The framework owns the USB controller.</strong> SecVF doesn't expose raw bus-level access; if your tool wants the underlying USB transactions, you'd need to do that inside the guest's USB stack.</li>
+        </ul>
+
+        <h2 id="virtual">Virtual USB disks (the Scripts pattern)</h2>
+
+        <h3>What it is</h3>
+        <p>A file (DMG or ISO) presented to the guest as a USB mass-storage device. SecVF builds it on demand, populates it from a host directory you choose, and attaches it to the VM. The guest sees a generic USB disk it can mount, read, and (if you configure it that way) write.</p>
+
+        <h3>The Scripts USB workflow</h3>
+        <p>The most common use is shipping setup scripts into a Kali router VM:</p>
+
+        <ol>
+          <li>VM Library → right-click the Kali VM → <strong>Mount Scripts USB…</strong></li>
+          <li>SecVF builds a fresh DMG containing the contents of <code>scripts/</code> from the repo and attaches it.</li>
+          <li>Inside the guest: <code>sudo mount /dev/sdb1 /mnt &amp;&amp; cd /mnt &amp;&amp; sudo bash kali-router-setup.sh</code>.</li>
+          <li>Eject from the VM Library when done. The DMG file is cleaned up.</li>
+        </ol>
+
+        <h3>From the CLI</h3>
+<pre><code>secvf usb create-virtual \
+    --name secvf-scripts \
+    --size 64 \                        # MB
+    --format dmg \                     # or iso
+    --source ./scripts                 # host directory to include
+
+# Then attach
+secvf usb mount secvf-scripts --to kali-router</code></pre>
+
+        <h3>What the guest sees</h3>
+        <p>An <code>HFS+</code> volume on <code>/dev/sdb1</code> (or similar). Mounts the same way any USB stick would. Read-only or read-write depending on the format you chose at creation time.</p>
+
+        <h2 id="cli">CLI surface</h2>
+
+        <p>Full reference is on the <a href="/wiki/CLI#usb">CLI page</a>. Quick:</p>
+
+<pre><code>secvf usb list                              # all devices, physical + virtual
+secvf usb list --include-virtual            # explicitly include virtual
+secvf usb list --json                       # for scripting
+secvf usb mount &lt;device&gt; --to &lt;vm&gt;          # attach
+secvf usb eject &lt;device&gt;                    # detach
+secvf usb create-virtual \                  # build a virtual disk
+    --name &lt;name&gt; --size &lt;MB&gt; \
+    --format dmg|iso \
+    [--source &lt;host-dir&gt;]                   # populate from a dir</code></pre>
+
+        <h2 id="use-cases">Use cases</h2>
+
+        <h3>Shipping scripts into a guest</h3>
+        <p>The Scripts USB pattern. Cleanest way to deliver a directory of files to a VM that has no shared folders by default. See <a href="/wiki/Scripts-Reference">Scripts reference</a> for what to ship.</p>
+
+        <h3>Exfil-resistant file transfer</h3>
+        <p>You want to give a guest a binary to detonate, but you don't want shared folders open (which would give the malware writable host paths). A read-only virtual USB is a perfect drop — guest reads, malware runs, USB ejects, transfer complete.</p>
+
+        <h3>Hardware key for testing on a guest</h3>
+        <p>YubiKey, FIDO2 token, hardware wallet. Plug into host, attach to guest, the guest sees the device's real descriptors and any vendor driver in the guest matches. Useful for testing how malware interacts with hardware tokens (some samples ignore them; others try to harvest).</p>
+
+        <h3>ICS / SCADA dongles</h3>
+        <p>Industrial protocol dongles (Modbus over USB, Profibus adapters) often only have Windows drivers. Pass through to a Windows guest for testing without needing a dedicated Windows host.</p>
+
+        <h3>USB-connected radios &amp; SDRs</h3>
+        <p>HackRF, BladeRF, RTL-SDR — pass through to a Kali guest with GNU Radio or SDR# for wireless analysis. The SDR sees the host's USB controller and operates normally inside the guest.</p>
+
+        <h3>Hardware debuggers</h3>
+        <p>JTAG, SWD probes — pass through to embedded-target reverse engineering VMs.</p>
+
+        <h3>Capturing USB activity from malware</h3>
+        <p>This one's <strong>asymmetric</strong>: if you attach a USB stick to a malware sandbox VM, you can see what files the malware tries to write or modify on it. <em>Use a freshly-wiped, isolated USB stick for this.</em> Don't pass through your everyday work USB.</p>
+
+        <h2 id="hardware-keys">Hardware keys &amp; smart cards</h2>
+
+        <p>Specific notes for the FIDO2 / smart card use case:</p>
+
+        <ul>
+          <li><strong>HID-based keys</strong> (YubiKey OTP, FIDO2) — pass through works on macOS 14+ with the framework's HID support. The guest needs a matching driver/PCSC stack.</li>
+          <li><strong>CCID smart cards</strong> — pass through works; the guest needs <code>pcscd</code> + <code>opensc</code> for the reader to show up properly.</li>
+          <li><strong>U2F</strong> — works, but the U2F binding includes the host's app identifier. If you're testing browser-based U2F in the guest, the binding is per-guest-browser, not transferable.</li>
+        </ul>
+
+        <div class="callout warn">
+          <strong>Don't pass through a hardware key to a malware sample VM</strong> unless that's your explicit analysis goal. A hostile guest with access to your hardware key can perform U2F signing on your behalf. Keep the threat model honest.
+        </div>
+
+        <h2 id="guest-side">Inside the guest: mounting</h2>
+
+        <h3>Linux guest</h3>
+<pre><code># See what's there
+lsblk
+dmesg | tail -20                              # confirm the device showed up
+
+# Mount (usually /dev/sdb1, but check lsblk output)
+sudo mkdir -p /mnt/secvf
+sudo mount /dev/sdb1 /mnt/secvf
+
+# When done
+sudo umount /mnt/secvf</code></pre>
+
+        <h3>Windows guest</h3>
+        <p>Windows auto-mounts USB mass storage. The drive appears as a new letter. Use Disk Management for finer control.</p>
+
+        <h3>macOS guest</h3>
+        <p>Auto-mounts via DiskArbitration, just like on host. Appears in Finder sidebar.</p>
+
+        <h2 id="security">Security considerations</h2>
+
+        <p>USB is a real attack surface. Things to weigh:</p>
+
+        <ul>
+          <li><strong>Hostile guest with attached USB:</strong> the guest's USB stack can attempt to fuzz the host's view of the device. The framework mediates, so the blast radius is contained to the framework's USB implementation — but it's a non-zero surface.</li>
+          <li><strong>Hostile USB device:</strong> if you plug in an untrusted USB stick and pass it to a hardened VM for analysis, that's good practice. But the device touches your host briefly during the attach — Bad-USB-style firmware attacks could fire there.</li>
+          <li><strong>Persistence via USB:</strong> a clever sample might write a payload to the USB and hope you re-attach it elsewhere. Treat any USB that's been touched by a malware VM as contaminated.</li>
+          <li><strong>USB descriptors leak host info:</strong> the device passes through with its real VID/PID. Don't pass through a serial-numbered device you'd rather not associate with the analysis (e.g. your personal YubiKey).</li>
+        </ul>
+
+        <h2 id="limits">What the framework doesn't do</h2>
+
+        <p>For honesty:</p>
+
+        <ul>
+          <li><strong>No raw USB bus exposure.</strong> If your tool needs to manipulate USB transactions (libusb at the lowest level), you need to do that inside the guest.</li>
+          <li><strong>No USB hub passthrough.</strong> You attach individual devices, not the entire hub-and-everything-on-it.</li>
+          <li><strong>No "USB redirector"-style network passthrough.</strong> Devices on remote machines can't be attached as if local.</li>
+          <li><strong>No granular permission per device.</strong> Either the framework allows passthrough or it doesn't. There's no per-device entitlement.</li>
+        </ul>
+
+        <h2 id="troubleshooting">Troubleshooting</h2>
+
+        <table>
+          <thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>Device shows in <code>usb list</code> but Attach is disabled</td><td>Device is currently mounted on the host (Finder, Disk Utility)</td><td>Eject from host first, then attach to VM</td></tr>
+            <tr><td>Attach succeeds but guest doesn't see anything</td><td>Guest USB driver missing / stack not loaded</td><td>Check <code>dmesg</code> in guest; install relevant kernel modules</td></tr>
+            <tr><td>Eject hangs</td><td>Guest has the device busy (open file, mount)</td><td>Unmount inside the guest first: <code>sudo umount /mnt/...</code></td></tr>
+            <tr><td>HID device works on host, not in guest</td><td>HID passthrough has stricter framework rules</td><td>Try mass-storage class only; HID may need a guest USB driver SecVF can't influence</td></tr>
+            <tr><td>Virtual USB creation fails: "image too large"</td><td>Exceeded host's available disk</td><td>Use a smaller <code>--size</code>, or free up host disk</td></tr>
+            <tr><td>Virtual USB shows up but is empty</td><td>Source dir was empty or unreadable when creation ran</td><td>Verify <code>--source</code> exists and has files; re-run</td></tr>
+          </tbody>
+        </table>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/File-Transfer">
+            <span class="np-label">Previous</span>
+            <span>← File transfer</span>
+          </a>
+          <a class="np-card next" href="/wiki/Packet-Analysis">
+            <span class="np-label">Next</span>
+            <span>Packet analysis →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

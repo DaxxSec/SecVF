@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Installation · SecVF</title>
+<meta name="description" content="Install SecVF on macOS — system requirements, Xcode build, code signing, optional dependencies, first-run permissions.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Installation">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation" class="current">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Get started · Installation</p>
+          <h1>Installation</h1>
+          <p class="lede">Two paths: install the signed <code>.dmg</code> for the fastest start, or build from source if you want the bleeding edge or plan to contribute.</p>
+        </header>
+
+        <div class="toc" aria-label="On this page">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#requirements">System requirements</a></li>
+            <li><a href="#install-dmg">Install from .dmg</a></li>
+            <li><a href="#build-source">Build from source</a></li>
+            <li><a href="#optional-deps">Optional dependencies</a></li>
+            <li><a href="#first-run">First run &amp; permissions</a></li>
+            <li><a href="#data-dir">Data directory layout</a></li>
+            <li><a href="#verify">Verify the install</a></li>
+            <li><a href="#uninstall">Uninstall</a></li>
+          </ul>
+        </div>
+
+        <h2 id="requirements">System requirements</h2>
+        <table>
+          <thead><tr><th>Requirement</th><th>Minimum</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>macOS</td><td><strong>14.0 Sonoma</strong></td><td>Some features (vsock, VirtioFS) require Apple Virtualization framework features only available on macOS 14+.</td></tr>
+            <tr><td>Architecture</td><td>Apple Silicon (M1+) or Intel</td><td>macOS guest VMs require Apple Silicon. Linux guests run on either.</td></tr>
+            <tr><td>RAM</td><td>16 GB</td><td>The host needs enough headroom to run a guest VM (typically 4–8 GB) plus everything else you have open.</td></tr>
+            <tr><td>Disk</td><td>20 GB free</td><td>VM bundles add up fast. A typical Linux VM disk is 20 GB; a macOS guest is 50–80 GB.</td></tr>
+            <tr><td>Xcode</td><td>15.0+ <em>(source builds only)</em></td><td>Includes the Swift toolchain SecVF compiles with.</td></tr>
+            <tr><td>tshark</td><td>4.x <em>(optional)</em></td><td>Required only for live packet capture. <code>brew install wireshark</code>.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>Why macOS 14?</strong> SecVF leans on Apple Virtualization framework features added in Sonoma — including the rosetta translation layer for Linux guests, and the Virtio socket (vsock) device used by the AI sandbox for host↔guest IPC.
+        </div>
+
+        <h2 id="install-dmg">Install from .dmg</h2>
+
+        <p>The <code>.dmg</code> is the recommended path for everyday use. It's signed with a Developer ID certificate and notarized by Apple, which means Gatekeeper trusts it on first launch.</p>
+
+        <ol>
+          <li>Download the latest release from the <a href="https://github.com/DaxxSec/SecVF/releases/latest" rel="noopener">GitHub releases page</a>.</li>
+          <li>Verify the download (the SHA-256 is published next to the asset on the releases page):
+<pre><code>shasum -a 256 SecVF-x.y.z.dmg
+# compare against the SHA-256 column on the release page</code></pre>
+          </li>
+          <li>Mount the <code>.dmg</code> by double-clicking. Drag <strong>SecVF.app</strong> into <strong>Applications</strong>.</li>
+          <li>Eject the disk image, then launch SecVF from Applications or Spotlight.</li>
+        </ol>
+
+        <div class="callout warn">
+          <strong>If Gatekeeper blocks first launch</strong> ("cannot be opened because the developer cannot be verified"), don't right-click → Open as a workaround — that bypasses notarization. Re-download the binary, re-verify the SHA-256, and check that the signature is intact: <code>codesign --verify --deep --strict --verbose=2 /Applications/SecVF.app</code>. A failed verify means the file was tampered with or didn't download cleanly.
+        </div>
+
+        <h2 id="build-source">Build from source</h2>
+
+        <p>Use this path if you want the latest commit, want to modify SecVF, or are setting up a contributor environment.</p>
+
+        <h3>Clone</h3>
+<pre><code>git clone https://github.com/DaxxSec/SecVF.git
+cd SecVF</code></pre>
+
+        <h3>Build with Xcode (GUI)</h3>
+        <ol>
+          <li><code>open SecVF.xcodeproj</code></li>
+          <li>Select the <strong>SecVF</strong> scheme and the <strong>My Mac (Designed for iPad off)</strong> destination.</li>
+          <li>Press <span class="kbds"><kbd>⌘</kbd><kbd>R</kbd></span> to build &amp; run.</li>
+        </ol>
+
+        <h3>Build from the command line</h3>
+<pre><code># Debug
+xcodebuild -scheme SecVF -configuration Debug \
+           -destination 'platform=macOS,arch=arm64' build
+
+# Release
+xcodebuild -scheme SecVF -configuration Release \
+           -destination 'platform=macOS,arch=arm64' build</code></pre>
+
+        <p>The product appears at <code>~/Library/Developer/Xcode/DerivedData/SecVF-*/Build/Products/&lt;config&gt;/SecVF.app</code>.</p>
+
+        <h3>Code signing for personal use</h3>
+
+        <p>To run a custom build outside Xcode you need a signed binary — the Virtualization framework refuses to load unsigned guest configurations. Easiest path is your free Apple ID team:</p>
+<pre><code># Pick the team in the Xcode project settings:
+# SecVF target → Signing &amp; Capabilities → Team → &lt;your Apple ID&gt;
+# Bundle ID must be unique per team — change it from the default if you hit
+# "this bundle id is already in use".</code></pre>
+
+        <div class="callout">
+          <strong>Distributing to others</strong> requires a paid Apple Developer Program membership ($99/yr) for Developer ID signing + notarization. Free Apple IDs only sign for the local machine.
+        </div>
+
+        <h2 id="optional-deps">Optional dependencies</h2>
+
+        <h3>tshark (packet capture)</h3>
+        <p>Without tshark, the live packet panel still receives switch frames, but the deep-decode and PCAP export paths are disabled.</p>
+<pre><code>brew install wireshark            # CLI + GUI
+# or, headless-only:
+brew install wireshark --no-quarantine --formula  # CLI only</code></pre>
+        <p>SecVF discovers tshark via <code>$PATH</code>. After install, restart the app — it caches the binary path on launch.</p>
+
+        <h3>just (CLI quality-of-life)</h3>
+        <p>The repo's <code>justfile</code> wraps common dev commands. Optional, only if you're building from source frequently.</p>
+<pre><code>brew install just
+just                              # see available recipes</code></pre>
+
+        <h2 id="first-run">First run &amp; permissions</h2>
+
+        <p>On first launch SecVF prompts macOS for two permissions. Grant both.</p>
+
+        <table>
+          <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Network</strong></td><td>Downloading ISOs and IPSWs, talking to guest VMs over the virtual switch.</td></tr>
+            <tr><td><strong>Files &amp; Folders → Downloads</strong></td><td>Optional; only required if you import VM bundles or ISOs from <code>~/Downloads</code>. Grant on demand.</td></tr>
+          </tbody>
+        </table>
+
+        <p>SecVF does <strong>not</strong> ask for Full Disk Access, Accessibility, Screen Recording, or Camera. If a future build requests one of these, read the change log first — there should be a clear reason.</p>
+
+        <h2 id="data-dir">Data directory layout</h2>
+
+        <p>Everything SecVF persists lives under <code>~/.avf/</code> in your home directory:</p>
+
+<pre><code>~/.avf/
+├── Linux/&lt;VMName&gt;.bundle/      # Linux guest VMs
+│   ├── Disk.img                # Disk image (sparse)
+│   ├── NVRAM                   # Virtual NVRAM
+│   ├── MachineIdentifier       # Stable VM ID
+│   └── metadata.json           # CPU/RAM/network mode
+├── MacOS/&lt;VMName&gt;.bundle/      # macOS guest VMs (same shape + .ipsw)
+├── AISandbox/                  # AI sandbox base images + sessions
+├── ISOCache/                   # SHA-256-verified ISO downloads
+└── logs/
+    ├── security-YYYY-MM-DD.log # Security event log (rotated daily)
+    └── error-audit.log         # Typed-error audit trail</code></pre>
+
+        <div class="callout tip">
+          <strong>Backups:</strong> the entire <code>~/.avf</code> tree is portable. Copy it to another Mac (Apple Silicon ↔ Apple Silicon) and SecVF will pick up the bundles. Don't include <code>~/.avf/logs</code> if you're sharing with someone.
+        </div>
+
+        <h2 id="verify">Verify the install</h2>
+
+        <p>Quick sanity checks after launch:</p>
+        <ol>
+          <li><strong>Menu bar shows "SecVF"</strong> — app launched and is the front process.</li>
+          <li><strong>VM Library window opens</strong> — the empty state shows the "+ New VM" button.</li>
+          <li><strong>Settings → About</strong> shows your version and build commit hash.</li>
+          <li><strong>Optional: tshark detected</strong> — open Packet Analysis (<span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span>); if tshark is installed and on <code>$PATH</code>, the "Start capture" button is enabled.</li>
+        </ol>
+
+        <p>If anything looks off, the audit log usually has the answer:</p>
+<pre><code>tail -f ~/.avf/logs/error-audit.log</code></pre>
+
+        <h2 id="uninstall">Uninstall</h2>
+
+        <p>Three steps to leave no trace:</p>
+<pre><code># 1. Quit SecVF
+osascript -e 'quit app "SecVF"'
+
+# 2. Remove the application
+rm -rf /Applications/SecVF.app
+
+# 3. Remove the data directory (this includes all VM bundles and logs)
+rm -rf ~/.avf</code></pre>
+
+        <div class="callout danger">
+          <strong>Step 3 is destructive.</strong> Deleting <code>~/.avf</code> wipes every VM bundle, ISO cache entry, and log. Back up any guest VMs you want to keep before running it.
+        </div>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/">
+            <span class="np-label">Previous</span>
+            <span>← Documentation home</span>
+          </a>
+          <a class="np-card next" href="/wiki/First-VM">
+            <span class="np-label">Next</span>
+            <span>Your first VM →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div>
+      <h4>Product</h4>
+      <ul>
+        <li><a href="/#stack">The stack</a></li>
+        <li><a href="/#downloads">Download</a></li>
+        <li><a href="/wiki/">Documentation</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Source</h4>
+      <ul>
+        <li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li>
+        <li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Security</h4>
+      <ul>
+        <li><a href="/wiki/Security-Model">Threat model</a></li>
+        <li><a href="/.well-known/security.txt">security.txt</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

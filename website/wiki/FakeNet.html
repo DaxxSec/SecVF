@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>FakeNet honeypot · SecVF</title>
+<meta name="description" content="Offline malware behaviour capture. DNS sinkhole, fake HTTP/HTTPS/FTP/SMTP/IRC responders running inside the router VM so samples reveal C2 patterns without leaving the lab.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/FakeNet">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet" class="current">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Network &amp; capture · FakeNet</p>
+          <h1>FakeNet honeypot</h1>
+          <p class="lede">Convert the Kali router into a sealed simulation of the internet. Every DNS query resolves to the router itself; fake HTTP, HTTPS, FTP, SMTP, and IRC responders satisfy any outbound request. The malware phones home — to your honeypot.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#why">Why use FakeNet</a></li>
+            <li><a href="#prereqs">Prerequisites</a></li>
+            <li><a href="#install">Installing FakeNet</a></li>
+            <li><a href="#dns">DNS sinkhole</a></li>
+            <li><a href="#http">HTTP/HTTPS responders</a></li>
+            <li><a href="#tls">TLS interception with sslsplit</a></li>
+            <li><a href="#other">Other protocol responders</a></li>
+            <li><a href="#logs">Log layout</a></li>
+            <li><a href="#workflow">Analysis workflow</a></li>
+            <li><a href="#switching">Switching back to live router</a></li>
+          </ul>
+        </div>
+
+        <h2 id="why">Why use FakeNet</h2>
+
+        <p>Sandbox detection used to be the malware's job. Modern samples reach for the internet within seconds of execution: DNS lookup of a hardcoded C2, HTTP GET of a stage-two payload, HTTPS callback with the victim's fingerprint. If the network is "missing" (DNS NXDOMAIN, no route, no DHCP), the malware sleeps or self-destructs and you learn nothing.</p>
+
+        <p>FakeNet solves that. From inside the lab guest, the network looks normal:</p>
+        <ul>
+          <li>DNS resolves — every name returns the router's IP.</li>
+          <li>HTTP returns 200 OK with plausible HTML.</li>
+          <li>HTTPS presents a cert (self-signed; depending on sample, this matters or doesn't).</li>
+          <li>FTP says hello and lets you list a fake directory.</li>
+          <li>SMTP accepts mail.</li>
+          <li>IRC accepts JOIN and lets the bot register.</li>
+        </ul>
+
+        <p>The malware proceeds through its kill chain, and every step is logged.</p>
+
+        <h2 id="prereqs">Prerequisites</h2>
+
+        <ul>
+          <li>Router VM provisioned per <a href="/wiki/Router-VM">Router VM</a>.</li>
+          <li>The lab guests should be in Router-VM network mode and getting their DHCP/DNS from the Kali router.</li>
+          <li>Host capture (<span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span>) is recommended — you'll want a clean recording of the whole session.</li>
+        </ul>
+
+        <div class="callout warn">
+          <strong>FakeNet replaces the router's live internet behaviour.</strong> While FakeNet is active, the lab guests cannot reach the real internet — even traffic you might want to allow (package updates inside a clean analysis VM, etc.). Switch back before doing anything that needs real outbound. See <a href="#switching">Switching back</a>.
+        </div>
+
+        <h2 id="install">Installing FakeNet</h2>
+
+        <p>The FakeNet flip is a single script: <code>kali-fakenet-setup.sh</code> in <code>scripts/</code>. It runs <em>on top of</em> the router setup — install Kali router first, then layer FakeNet on it.</p>
+
+        <ol>
+          <li>Mount the Scripts USB (VM Library → right-click router → Mount Scripts USB).</li>
+          <li>From inside the router guest:
+<pre><code>sudo mount /dev/sdb1 /mnt
+cd /mnt
+sudo bash kali-fakenet-setup.sh</code></pre>
+          </li>
+          <li>Restart networking: <code>sudo systemctl restart dnsmasq nginx ssl-redirect.socket</code></li>
+        </ol>
+
+        <p>The script installs (or configures, if already present):</p>
+
+        <ul>
+          <li><strong>dnsmasq</strong> — DNS responder, wildcard A record for everything → <code>10.0.100.1</code></li>
+          <li><strong>nginx</strong> — HTTP listener on :80, HTTPS listener on :443 with a snake-oil cert</li>
+          <li><strong>sslsplit</strong> — transparent TLS MITM for samples that don't pin certs</li>
+          <li><strong>inetsim</strong> — fake servers for FTP, SMTP, POP3, IRC, daytime, discard, quotd</li>
+          <li>iptables NAT rules to <strong>redirect outbound :80 / :443 / etc.</strong> back to the router itself, so even hard-coded IP destinations land on FakeNet</li>
+          <li>A log directory at <code>/var/log/fakenet/</code> rotated daily</li>
+        </ul>
+
+        <h2 id="dns">DNS sinkhole</h2>
+
+        <p>dnsmasq config flips from "forward upstream" to "answer everything with the router IP":</p>
+
+<pre><code># /etc/dnsmasq.conf (FakeNet variant)
+domain-needed
+bogus-priv
+no-resolv          # do NOT consult /etc/resolv.conf
+address=/#/10.0.100.1   # wildcard: anything → 10.0.100.1
+no-hosts           # don't read /etc/hosts</code></pre>
+
+        <p>Every <code>A</code> query returns <code>10.0.100.1</code>. Every <code>AAAA</code> returns nothing (sinkhole). Reverse lookups (PTR) get a synthetic <code>secvf.lab</code>.</p>
+
+        <p>Logs at <code>/var/log/fakenet/dns.log</code>:</p>
+
+<pre><code>2026-05-10T14:32:01Z client=10.0.100.42 query=evil-c2.example.com type=A  answer=10.0.100.1
+2026-05-10T14:32:01Z client=10.0.100.42 query=evil-c2.example.com type=AAAA answer=(sinkhole)
+2026-05-10T14:32:03Z client=10.0.100.42 query=update.example.com type=A   answer=10.0.100.1</code></pre>
+
+        <p>Use this log first when triaging a sample — every hostname the malware ever tries to reach is recorded.</p>
+
+        <h2 id="http">HTTP/HTTPS responders</h2>
+
+        <p>nginx config at <code>/etc/nginx/sites-available/fakenet</code> sets up a default server block that answers everything with a small JSON or HTML response:</p>
+
+<pre><code>server {
+    listen 80 default_server;
+    listen 443 ssl default_server;
+    ssl_certificate     /etc/ssl/fakenet/cert.pem;
+    ssl_certificate_key /etc/ssl/fakenet/key.pem;
+    server_name _;
+
+    access_log /var/log/fakenet/http.log custom;
+    error_log  /var/log/fakenet/http.err warn;
+
+    location / {
+        default_type application/octet-stream;
+        return 200 '<!doctype html><html><body>OK</body></html>';
+    }
+    # canonical "update" payload that many bots GET
+    location ~ ^/(update|payload|stage2|gate\.php)$ {
+        return 200 'OK';
+    }
+}</code></pre>
+
+        <p>Logs in <code>/var/log/fakenet/http.log</code> include:</p>
+
+<pre><code>10.0.100.42 - [14:32:04 +0000] "GET /gate.php?id=ABC123&v=1.2 HTTP/1.1" 200 32 "-" "Mozilla/4.0 (compatible)"
+10.0.100.42 - [14:32:04 +0000] "POST /upload HTTP/1.1" 200 32 "-" "winhttp/1.0"</code></pre>
+
+        <h2 id="tls">TLS interception with sslsplit</h2>
+
+        <p>nginx serves a self-signed cert — fine for unauthenticated TLS but useless if the malware verifies. For samples that don't pin (the majority), nginx is enough. For those that do pin, you get a TLS error in the malware's logs (and that's still useful information).</p>
+
+        <p>For middle-ground samples that <em>check</em> a cert but don't pin to a specific issuer, sslsplit runs in transparent-MITM mode and presents a forged cert with the requested CN. Configuration:</p>
+
+<pre><code># sslsplit running on the router, transparent mode
+sslsplit -c /etc/ssl/fakenet/ca.pem \
+         -k /etc/ssl/fakenet/ca.key \
+         -l /var/log/fakenet/sslsplit.connect.log \
+         -L /var/log/fakenet/sslsplit.content.log \
+         https 0.0.0.0 8443
+
+# iptables redirect — outbound :443 from the LAN goes to sslsplit
+iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 -j REDIRECT --to-ports 8443</code></pre>
+
+        <p>The CA at <code>/etc/ssl/fakenet/ca.pem</code> can be installed in your analysis VMs (<code>/usr/local/share/ca-certificates/</code> on Debian-flavored) — then sslsplit becomes a clean MITM and you see decrypted plaintext.</p>
+
+        <div class="callout">
+          <strong>Don't install the FakeNet CA in the malware sandbox.</strong> The whole point is to watch the malware fail to verify; installing the CA hides that signal. Only install in your <em>analysis</em> VM if you want to inspect traffic you generate yourself for comparison.
+        </div>
+
+        <h2 id="other">Other protocol responders</h2>
+
+        <p>inetsim runs on the router and answers most other classical protocols. Each listens on its standard port, accepts the conversation, logs everything, and replies with the bare minimum that keeps the client talking.</p>
+
+        <table>
+          <thead><tr><th>Port</th><th>Protocol</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td>21</td><td>FTP</td><td>Accepts USER/PASS, LIST returns canned directory.</td></tr>
+            <tr><td>25, 587</td><td>SMTP</td><td>Accepts MAIL FROM / RCPT TO / DATA; bodies logged.</td></tr>
+            <tr><td>110</td><td>POP3</td><td>Lets bots check empty inboxes.</td></tr>
+            <tr><td>123</td><td>NTP</td><td>Returns the router's clock — good enough.</td></tr>
+            <tr><td>6667</td><td>IRC</td><td>NICK/USER/JOIN accepted; channel messages logged.</td></tr>
+            <tr><td>9, 13, 17, 19</td><td>discard/daytime/quotd/chargen</td><td>Classic. Mostly there for low-and-slow recon detection.</td></tr>
+          </tbody>
+        </table>
+
+        <p>inetsim's logs at <code>/var/log/fakenet/inetsim/</code> are one file per protocol; the format is human-readable, easy to grep.</p>
+
+        <h2 id="logs">Log layout</h2>
+
+<pre><code>/var/log/fakenet/
+├── dns.log              # every DNS query + the sinkhole answer
+├── http.log             # nginx access log (HTTP + HTTPS)
+├── http.err             # nginx errors
+├── sslsplit.connect.log # one line per intercepted TLS connection
+├── sslsplit.content.log # full plaintext when CA is trusted by guest
+├── inetsim/
+│   ├── ftp.log
+│   ├── smtp.log
+│   ├── irc.log
+│   └── …
+├── iptables-redirects.log
+└── archive/             # daily-rotated previous logs (logrotate)</code></pre>
+
+        <p>For sharing with a teammate or filing with an analysis: <code>tar -czf fakenet-session-&lt;date&gt;.tar.gz /var/log/fakenet</code> gets you everything.</p>
+
+        <h2 id="workflow">Analysis workflow</h2>
+
+        <p>A repeatable FakeNet-based sample triage:</p>
+
+        <ol>
+          <li><strong>Snapshot the lab.</strong> Duplicate the malware sandbox bundle so you can roll back instantly.</li>
+          <li><strong>Confirm FakeNet is hot.</strong> From a lab VM: <code>dig evil-c2.example.com</code> should return <code>10.0.100.1</code>. <code>curl http://evil-c2.example.com</code> should return the canned OK page.</li>
+          <li><strong>Start the host capture.</strong> <span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>P</kbd></span> → Start. This catches everything on the virtual switch.</li>
+          <li><strong>Start in-guest capture on the router.</strong> <code>secvf-capture start</code>. You want both vantage points.</li>
+          <li><strong>Detonate.</strong> Run the sample inside the lab VM.</li>
+          <li><strong>Wait.</strong> Most malware does the bulk of its talking in the first 30–60 seconds. Some wait longer to evade sandboxing; if the sample looks dormant, leave it alone for 10–20 minutes.</li>
+          <li><strong>Stop captures.</strong> Save the PCAPs. Copy <code>/var/log/fakenet/</code> off the router.</li>
+          <li><strong>Restore the snapshot.</strong> Now you have a known-good lab again for the next sample.</li>
+        </ol>
+
+        <h2 id="switching">Switching back to live router</h2>
+
+        <p>FakeNet flips dnsmasq and adds iptables redirects. To revert:</p>
+
+<pre><code>sudo bash /mnt/kali-router-restore.sh    # provided alongside the FakeNet script
+# or manually:
+sudo cp /etc/dnsmasq.conf.orig /etc/dnsmasq.conf
+sudo iptables -t nat -F PREROUTING
+sudo iptables-restore &lt; /etc/iptables/rules.v4
+sudo systemctl restart dnsmasq</code></pre>
+
+        <p>Or — easier and safer — keep two router bundles: <code>Kali-Router</code> (live) and <code>Kali-Router-FakeNet</code> (sinkhole). Switch between them via VM Library → Edit configuration on each lab guest's gateway.</p>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Router-VM">
+            <span class="np-label">Previous</span>
+            <span>← Router VM</span>
+          </a>
+          <a class="np-card next" href="/wiki/AI-Sandbox">
+            <span class="np-label">Next</span>
+            <span>AI sandbox →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

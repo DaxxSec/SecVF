@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Troubleshooting · SecVF</title>
+<meta name="description" content="Common issues and how to fix them — VM won't start, capture won't run, ISO downloads fail, macOS install hangs, the app crashes. Plus a diagnostic flow.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Troubleshooting">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting" class="current">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Reference · Troubleshooting</p>
+          <h1>Troubleshooting &amp; common issues</h1>
+          <p class="lede">Symptoms, causes, fixes. Walk the diagnostic flow before opening an issue — most problems live in three log files and twenty minutes of methodical checks.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#flow">Diagnostic flow</a></li>
+            <li><a href="#logs">Where logs live</a></li>
+            <li><a href="#vm-issues">VM won't start / boot</a></li>
+            <li><a href="#network-issues">Network issues</a></li>
+            <li><a href="#capture-issues">Packet capture issues</a></li>
+            <li><a href="#iso-issues">ISO / IPSW download issues</a></li>
+            <li><a href="#macos-guest">macOS guest install issues</a></li>
+            <li><a href="#ai-sandbox-issues">AI sandbox issues</a></li>
+            <li><a href="#app-issues">App crashes / hangs</a></li>
+            <li><a href="#perf-issues">Performance problems</a></li>
+            <li><a href="#recovery">Recovery procedures</a></li>
+            <li><a href="#bug-report">Filing a useful bug report</a></li>
+          </ul>
+        </div>
+
+        <h2 id="flow">Diagnostic flow</h2>
+
+        <p>When something breaks, walk this in order. 90% of issues fall out by step 4.</p>
+
+        <ol>
+          <li><strong>Reproduce.</strong> Can you trigger the issue intentionally? If it was a one-off, note timing &amp; conditions but move on.</li>
+          <li><strong>Check the obvious.</strong> Disk full? macOS version current? SecVF version current?</li>
+          <li><strong>Read the audit log.</strong> <code>tail -50 ~/.avf/logs/error-audit.log</code> — the typed error is often diagnostic on its own.</li>
+          <li><strong>Read the security log.</strong> <code>tail -100 ~/.avf/logs/security-$(date +%F).log</code> — WARNING and CRITICAL entries near the failure time.</li>
+          <li><strong>Check Console.app.</strong> Filter by process <code>SecVF</code>. Look for crash reports and OS-level errors the app may not have caught.</li>
+          <li><strong>Check the guest.</strong> If the guest can boot at all: <code>journalctl -xe</code> inside it.</li>
+        </ol>
+
+        <h2 id="logs">Where logs live</h2>
+
+        <table>
+          <thead><tr><th>Path</th><th>What's in it</th></tr></thead>
+          <tbody>
+            <tr><td><code>~/.avf/logs/security-YYYY-MM-DD.log</code></td><td>Daily-rotated security events, INFO → EMERGENCY.</td></tr>
+            <tr><td><code>~/.avf/logs/error-audit.log</code></td><td>Typed errors with recovery suggestions. Append-only.</td></tr>
+            <tr><td><code>~/.avf/logs/&lt;vm&gt;-start-&lt;ts&gt;.log</code></td><td>Per-VM-launch subprocess stdout/stderr (for headless VM spawns).</td></tr>
+            <tr><td><code>~/Library/Logs/SecVF/</code></td><td>App-level OSLog stream archived here.</td></tr>
+            <tr><td><code>Console.app</code></td><td>Live system log; filter by process <code>SecVF</code>.</td></tr>
+            <tr><td><code>~/Library/Application Support/CrashReporter/SecVF*.ips</code></td><td>Crash reports if the app died.</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="vm-issues">VM won't start / boot</h2>
+
+        <h3>"Start" button does nothing</h3>
+        <p>Open <code>error-audit.log</code> — there's almost certainly a typed error with <code>category: "vm-start"</code>. Common subtypes:</p>
+        <ul>
+          <li><code>missing-disk-image</code> — bundle is corrupt or moved. Restore from snapshot, or recreate.</li>
+          <li><code>insufficient-memory</code> — host doesn't have enough free RAM. Close other apps; reduce VM RAM in config.</li>
+          <li><code>entitlement-denied</code> — running from an unsigned build. Re-sign per <a href="/wiki/Installation#build-source">Installation</a>.</li>
+        </ul>
+
+        <h3>VM boots to a black screen</h3>
+        <p>The framework started, the guest is running, but you see nothing.</p>
+        <ul>
+          <li>Click inside the VM window once — sometimes the display device needs a "wake" event.</li>
+          <li>For Linux guests, check if the boot got past GRUB — press <kbd>Enter</kbd> to pick a kernel.</li>
+          <li>If the cursor is just blinking: the guest is at a TTY login but the framebuffer didn't initialize. Try <code>Ctrl+Alt+F2</code> to switch TTYs.</li>
+          <li>For macOS guests, a black screen for &gt;30 s usually means the guest panicked. Force-stop, snapshot the bundle, file a report.</li>
+        </ul>
+
+        <h3>VM starts but can't boot the OS</h3>
+        <p>"No bootable device" in the firmware screen.</p>
+        <ul>
+          <li>Is the install ISO still attached? After OS install you must <strong>eject the ISO</strong> before the guest can boot from its disk.</li>
+          <li>Check <code>NVRAM</code> file in the bundle exists and is non-zero. If empty, the install never wrote a boot entry.</li>
+          <li>Recreate the VM and re-install the OS. Disk images are sparse — the old disk file might be salvageable.</li>
+        </ul>
+
+        <h3>VM hangs at "Booting…"</h3>
+        <ul>
+          <li>Give it 60 seconds — the first boot after install can take that long while the OS initializes.</li>
+          <li>Force-stop, restart. Some guests don't recover well from a paused → resumed transition on the first boot.</li>
+          <li>If repeatable: capture the audit log + an Activity Monitor screenshot showing the SecVF process and file an issue.</li>
+        </ul>
+
+        <h2 id="network-issues">Network issues</h2>
+
+        <h3>Guest can't reach the internet (NAT mode)</h3>
+        <ul>
+          <li>Inside guest: <code>ip addr show</code> — interface should have an IP (Apple's NAT gives DHCP).</li>
+          <li><code>ping 1.1.1.1</code> from inside the guest. If that works but <code>ping google.com</code> doesn't, it's DNS — check <code>resolv.conf</code>.</li>
+          <li>Check the host's firewall (System Settings → Network → Firewall). Some configurations block VM network attachments.</li>
+        </ul>
+
+        <h3>VMs can't see each other on the virtual switch</h3>
+        <ul>
+          <li>Open <strong>Monitoring → Switch Statistics</strong> (<span class="kbds"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>3</kbd></span>). Both VMs should show in the MAC table.</li>
+          <li>If only one shows: the other isn't actually attached. Check its network mode — VM Library → right-click → Edit configuration → Network mode.</li>
+          <li>Verify the VMs are in the <em>same</em> mode. "Virtual" and "Router" are different networks; they only intersect via the router VM as gateway.</li>
+        </ul>
+
+        <h3>Router VM mode: lab guests get DHCP but no internet</h3>
+        <ul>
+          <li>SSH into the Kali router. <code>secvf-status</code> — IP forwarding should be enabled.</li>
+          <li><code>sudo sysctl net.ipv4.ip_forward</code> should return <code>1</code>. If <code>0</code>, the router setup script didn't run or sysctl was reset.</li>
+          <li><code>sudo iptables -t nat -L POSTROUTING -v</code> — MASQUERADE rule on <code>eth1</code> must be present.</li>
+        </ul>
+
+        <h2 id="capture-issues">Packet capture issues</h2>
+
+        <h3>"Start capture" is disabled</h3>
+        <ul>
+          <li>tshark not installed: <code>brew install wireshark</code>, then restart SecVF.</li>
+          <li>tshark installed but not on PATH: <code>which tshark</code>. If empty, your shell's PATH isn't seeing it. Common cause: <code>/opt/homebrew/bin</code> not in PATH for GUI apps (only for terminal sessions). Add it via <code>launchctl setenv PATH "$PATH"</code> or use the App Store path that uses libpcap.</li>
+        </ul>
+
+        <h3>Capture starts but no packets show up</h3>
+        <ul>
+          <li>The selected VM isn't generating traffic — try <code>ping 1.1.1.1</code> from inside.</li>
+          <li>Wrong interface — set the interface dropdown to <strong>any switch traffic</strong>.</li>
+          <li>BPF prefilter is too aggressive — clear it and retry.</li>
+        </ul>
+
+        <h3>Capture drops packets under load</h3>
+        <ul>
+          <li>Switch Statistics shows non-zero <code>Packets Dropped</code>. The capture queue is saturating.</li>
+          <li>Increase buffer size: Settings → Capture → Buffer size (default 50,000 frames). Try 200,000.</li>
+          <li>Tighten the BPF prefilter to drop noise at capture time.</li>
+          <li>Capture to disk directly (File → Capture to disk…) to skip the in-memory buffer.</li>
+        </ul>
+
+        <h3>PCAP export produces a corrupt file</h3>
+        <ul>
+          <li>Almost always a disk-full issue. <code>df -h ~</code>.</li>
+          <li>If disk has space: try a different output path — sandbox restrictions may apply on the App Store build.</li>
+        </ul>
+
+        <h2 id="iso-issues">ISO / IPSW download issues</h2>
+
+        <h3>"Download failed: hostname not in allowlist"</h3>
+        <p>The distro's URL doesn't match the pinned mirror. Causes:</p>
+        <ul>
+          <li>Distro changed mirrors — <code>distros.json</code> needs updating. File an issue with the new mirror URL.</li>
+          <li>A redirect routes through a CDN we don't recognize (e.g. Cloudflare). The allowlist is strict on purpose; we'd rather refuse than trust an unknown intermediary.</li>
+        </ul>
+
+        <h3>"Download failed: SHA-256 mismatch"</h3>
+        <p>Most often this is upstream — the mirror's checksum file changed but the ISO hasn't fully rotated yet (or vice versa). Retry in 10 minutes. If persistent, log a bug — could indicate a real supply chain issue.</p>
+
+        <h3>Download hangs at 99%</h3>
+        <ul>
+          <li>Network instability — abort and retry. The cache won't keep partial files.</li>
+          <li>Disk is full — the final move from temp to cache needs space equal to the file size.</li>
+        </ul>
+
+        <h2 id="macos-guest">macOS guest install issues</h2>
+
+        <h3>IPSW download is very slow</h3>
+        <p>Apple's CDN can be sluggish. Typical IPSW is 12–14 GB. Expect 10–30 minutes on a residential connection.</p>
+
+        <h3>"Restore failed: invalid IPSW"</h3>
+        <ul>
+          <li>IPSW corrupted in transit. Delete from <code>~/.avf/MacOS/&lt;vm&gt;.bundle/&lt;version&gt;.ipsw</code> and retry.</li>
+          <li>IPSW version doesn't match the chip — Apple has separate IPSWs per chip generation. SecVF should pick correctly; if it didn't, file a bug with your chip model.</li>
+        </ul>
+
+        <h3>Setup Assistant loops on language selection</h3>
+        <p>Known macOS guest VM quirk — the framework's virtual keyboard sometimes doesn't register the first click. Force-stop, restart, click somewhere on the language screen first to focus, then proceed.</p>
+
+        <h3>"Apple ID sign-in not available"</h3>
+        <p>macOS VMs can't activate FaceTime or iMessage. Apple has restricted these to physical hardware. Skip Apple ID setup (or use a separate account) and continue.</p>
+
+        <h2 id="ai-sandbox-issues">AI sandbox issues</h2>
+
+        <h3>"Base bundle not found"</h3>
+        <p>You haven't provisioned the AI sandbox base. Run the AI sandbox installer (Settings → AI Sandbox → Install base). One-time, ~30 min.</p>
+
+        <h3>"Session clone fell back to full copy"</h3>
+        <p>Your <code>~/.avf</code> directory isn't on APFS. Move it to an APFS volume or accept slow cloning.</p>
+        <p>Check: <code>diskutil info $(df -P ~/.avf | tail -1 | awk '{print $1}') | grep "File System"</code> — must say <code>APFS</code>.</p>
+
+        <h3>vsock connection times out</h3>
+        <ul>
+          <li>The guest's vsock daemon failed to start. Check <code>~/.avf/AISandbox/sessions/&lt;session&gt;.bundle/audit.log</code>.</li>
+          <li>If the daemon isn't running, the base bundle is stale — re-provision it.</li>
+        </ul>
+
+        <h2 id="app-issues">App crashes / hangs</h2>
+
+        <h3>SecVF beachballs</h3>
+        <ul>
+          <li>Usually a runaway capture pipeline — the UI is starving while the table view recomputes. Stop the capture; see <a href="#capture-issues">Capture issues</a>.</li>
+          <li>Switch to Activity Monitor → SecVF → Sample. The sampled stack trace usually points at the blocker.</li>
+        </ul>
+
+        <h3>App crashes on launch</h3>
+        <ul>
+          <li>Check <code>~/Library/Logs/DiagnosticReports/</code> for <code>SecVF-*.ips</code> files.</li>
+          <li>Most launch crashes are corrupted preferences — try <code>defaults delete com.DaxxSec.SecVF</code> (or the legacy <code>com.ItzDaxxy.SecVF</code>).</li>
+          <li>Or corrupted state — move <code>~/.avf</code> aside (<code>mv ~/.avf ~/.avf.bak</code>) and relaunch. If it launches, restore bundles one at a time to find the offender.</li>
+        </ul>
+
+        <h3>App quits when starting a VM (no crash report)</h3>
+        <p>Almost always a code-signing issue. Run from Terminal: <code>/Applications/SecVF.app/Contents/MacOS/SecVF</code>. The terminal output will show the missing entitlement.</p>
+
+        <h2 id="perf-issues">Performance problems</h2>
+
+        <h3>Host gets slow when VMs are running</h3>
+        <ul>
+          <li>Sum of VM RAM allocations should be under ~75% of host RAM. macOS uses the rest for caches.</li>
+          <li>Check sustained CPU in Activity Monitor — if SecVF is consistently &gt;100%, a guest is spinning. Pause and investigate inside the guest.</li>
+        </ul>
+
+        <h3>Disk space disappearing</h3>
+        <ul>
+          <li>VM disk images are <em>sparse</em>. They grow as guests write. A 64 GB allocated disk can occupy 4 GB or 60 GB on host depending on usage.</li>
+          <li>AI sandbox sessions accumulate. <code>du -sh ~/.avf/AISandbox/sessions/*</code> — old session bundles can usually be deleted.</li>
+          <li>ISO cache: <code>du -sh ~/.avf/ISOCache</code> — delete cached ISOs you no longer use; SecVF will re-download on demand.</li>
+        </ul>
+
+        <h2 id="recovery">Recovery procedures</h2>
+
+        <h3>Restore a VM from snapshot</h3>
+        <ol>
+          <li>Stop the VM (force if needed).</li>
+          <li>Move the broken bundle aside: <code>mv ~/.avf/Linux/&lt;vm&gt;.bundle ~/.avf/Linux/&lt;vm&gt;-broken.bundle</code>.</li>
+          <li>In SecVF: right-click your snapshot bundle → Duplicate → name it the original name.</li>
+        </ol>
+
+        <h3>Nuke the AI sandbox state and start over</h3>
+<pre><code># Stop any running AI sandbox sessions first
+rm -rf ~/.avf/AISandbox/sessions
+# The base bundle stays; sessions are throwaway.</code></pre>
+
+        <h3>Clear the ISO cache</h3>
+<pre><code>rm -rf ~/.avf/ISOCache
+# Next VM create re-downloads (slow but safe).</code></pre>
+
+        <h3>Reset everything</h3>
+<pre><code># Last resort. Loses every VM bundle and log.
+osascript -e 'quit app "SecVF"'
+mv ~/.avf ~/.avf.bak.$(date +%Y%m%d)
+defaults delete com.DaxxSec.SecVF 2&gt;/dev/null
+defaults delete com.ItzDaxxy.SecVF 2&gt;/dev/null
+open -a SecVF</code></pre>
+
+        <h2 id="bug-report">Filing a useful bug report</h2>
+
+        <p>If you've walked the diagnostic flow and the issue is still real, file at <a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">github.com/DaxxSec/SecVF/issues</a>. A good report has:</p>
+
+        <ul>
+          <li><strong>Version</strong> (SecVF → About SecVF) + commit hash if you built from source.</li>
+          <li><strong>macOS version</strong> + chip (M1/M2/M3/Intel).</li>
+          <li><strong>Reproduction steps</strong> — bulleted, in order.</li>
+          <li><strong>Expected vs actual</strong> behaviour.</li>
+          <li><strong>Logs</strong> — last 100 lines of <code>error-audit.log</code> + the relevant slice of <code>security-YYYY-MM-DD.log</code>. Redact anything sensitive.</li>
+          <li><strong>Crash report</strong> if applicable — from <code>~/Library/Logs/DiagnosticReports/</code>.</li>
+        </ul>
+
+        <p>Security issues: <strong>don't</strong> file public — see <a href="/wiki/Security-Model#reporting">Security reporting</a>.</p>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Architecture">
+            <span class="np-label">Previous</span>
+            <span>← Architecture</span>
+          </a>
+          <a class="np-card next" href="/wiki/FAQ">
+            <span class="np-label">Next</span>
+            <span>FAQ →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

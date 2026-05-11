@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>FAQ · SecVF</title>
+<meta name="description" content="Common questions about SecVF — licensing, App Store, isolation, malware safety, performance, comparison with other tools.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/FAQ">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ" class="current">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Reference · FAQ</p>
+          <h1>FAQ</h1>
+          <p class="lede">Questions people actually ask. Answered honestly.</p>
+        </header>
+
+        <h2>General</h2>
+
+        <h3>Is SecVF free?</h3>
+        <p>Yes. The direct download from <a href="https://github.com/DaxxSec/SecVF/releases" rel="noopener">GitHub releases</a> is MIT-licensed and free forever. There's also a paid Mac App Store build at $6.99 — same code, sandbox-adjusted, packaged for auto-updates. The App Store price is a "support the developer" tier; it doesn't unlock features.</p>
+
+        <h3>What's the difference between the free and App Store versions?</h3>
+        <p>Same MIT-licensed code base. The App Store build is sandboxed (Apple's requirement), which moves VM bundles to a sandbox container and swaps the tshark shell-out for in-process libpcap. Functionally identical for nearly all workflows. See <a href="/wiki/Security-Model#sandbox">Security model</a> for details.</p>
+
+        <h3>Why MIT and not GPL?</h3>
+        <p>App Store distribution is incompatible with GPL (Apple's EULA imposes restrictions that conflict with GPL §6). MIT lets us dual-distribute. See <a href="https://github.com/DaxxSec/SecVF/blob/main/docs/LICENSE-REVIEW.md" rel="noopener">docs/LICENSE-REVIEW.md</a> for the full reasoning.</p>
+
+        <h3>Will it work on Intel Macs?</h3>
+        <p>Partially. Linux guests run on Intel; macOS guests require Apple Silicon (this is an Apple framework restriction, not ours). The AI sandbox needs macOS guests, so it's Apple-Silicon-only. Everything else works on Intel Macs that meet the macOS 14+ requirement.</p>
+
+        <h3>Why macOS only? No Linux / Windows host?</h3>
+        <p>SecVF is built on Apple's Virtualization framework — a macOS-only API. Porting to other hosts would mean rewriting the hypervisor layer from scratch (Linux + KVM, Windows + Hyper-V) and we'd lose the "native, no kext" property. For now it's macOS-native by design.</p>
+
+        <h2>Isolation &amp; safety</h2>
+
+        <h3>How does isolation compare to Docker or other VM apps?</h3>
+        <p>Stronger than Docker (containers share the host kernel; SecVF gives each guest its own kernel behind the hypervisor). Comparable to VMware Fusion / Parallels (same hypervisor primitive). Different from kata-containers or gVisor (those add a sandboxed kernel but inside a container; SecVF skips the container layer entirely). See the <a href="/wiki/AI-Sandbox#vs">vs. matrix on the AI sandbox page</a>.</p>
+
+        <h3>Can malware escape from a SecVF VM?</h3>
+        <p>Only via a hypervisor exploit. Apple's Virtualization framework is the trust boundary; an escape requires a 0-day in <em>that</em>, not in a Linux/macOS kernel. Such bugs exist but are rare and patched aggressively. See <a href="/wiki/Security-Model">Security model</a> for the full threat statement.</p>
+
+        <h3>Is it safe to run real malware in this?</h3>
+        <p>For analysis purposes — yes, with the right network mode (use Router VM or FakeNet, never plain NAT). Hardware boundaries are real. That said: don't run nation-state-targeted samples on your daily-driver Mac. For high-stakes analysis, use a dedicated analysis machine.</p>
+
+        <h3>Will my host get infected if a guest gets compromised?</h3>
+        <p>The guest can't directly touch the host filesystem (no shared folders by default), can't touch host memory (hardware-enforced), and can't escape its kernel without a hypervisor bug. Network is the only path out, and you control which mode that is.</p>
+
+        <h3>What about the AI agent in the sandbox writing malicious files to my workspace?</h3>
+        <p>That's the whole point of the workspace share — the agent <em>can</em> write to that one directory by design. The point of isolation is that the agent can't write outside that directory. If you mount a sensitive directory as the workspace, the agent can damage its contents. Don't do that. Use a scratch directory for agent workspaces.</p>
+
+        <h2>Features</h2>
+
+        <h3>Does it support snapshots?</h3>
+        <p>Yes — bundle-level. Stop the VM, right-click → Duplicate. On APFS volumes the clone is instant (copy-on-write); only divergent blocks consume disk. Live snapshots (running-VM state) aren't supported by Apple's framework yet.</p>
+
+        <h3>Can I run Windows in a guest?</h3>
+        <p>Yes — Windows for Apple Silicon via the Insider Preview ARM64 builds. SecVF doesn't ship a one-click Windows installer (Apple's framework requires a manual install), but it boots Windows ISOs fine. UTM's documentation has a good Windows-on-Apple-Silicon walkthrough that translates to SecVF.</p>
+
+        <h3>Does it support GPU acceleration?</h3>
+        <p>Linux guests get the framework's standard virtio-gpu — fine for desktop work, not for ML or 3D graphics. macOS guests get Apple's accelerated display device. There's no GPU passthrough; the framework doesn't expose Metal devices to guests yet.</p>
+
+        <h3>Can I share clipboard between host and guest?</h3>
+        <p>Not yet. The framework's clipboard sharing is macOS-guest-only and requires guest configuration; we haven't wired it up. On the roadmap.</p>
+
+        <h3>How do I get files into a VM?</h3>
+        <p>Three options:</p>
+        <ul>
+          <li><strong>Scripts USB</strong> — for shipping a directory of scripts (used by the router setup). VM Library → right-click → Mount Scripts USB.</li>
+          <li><strong>scp</strong> — once the guest is running and has IP, regular <code>scp</code> works.</li>
+          <li><strong>VirtioFS share</strong> — opt-in directory share. Off by default for isolation; enable per-VM in Edit configuration.</li>
+        </ul>
+
+        <h2>Performance</h2>
+
+        <h3>How fast is a VM compared to native?</h3>
+        <p>Apple's framework reports ~95–98% of native CPU performance. Disk I/O is close to native on APFS-backed disk images. Network through the virtual switch is ~1.2 Gbps single-core (not your wire speed, but plenty for analysis). The AI sandbox boot is ~5–8 s; session clone is sub-millisecond.</p>
+
+        <h3>How much RAM should I give a VM?</h3>
+        <p>Linux desktop: 4 GB. Linux headless analysis VM: 2 GB. macOS guest: 8 GB minimum. The framework doesn't oversubscribe — RAM allocated is RAM reserved.</p>
+
+        <h3>Why does my macOS guest feel slow?</h3>
+        <p>macOS guests are heavy. 4 GB and 2 cores is a bare minimum; 8 GB and 4 cores is more comfortable. The framework's graphics acceleration is good but not native.</p>
+
+        <h2>Tools &amp; integration</h2>
+
+        <h3>Do I need to install Wireshark?</h3>
+        <p>You need <code>tshark</code> (which ships with Wireshark) for the packet analysis features in the direct-download build. <code>brew install wireshark</code> is the easy path. The App Store build uses in-process libpcap and doesn't need tshark.</p>
+
+        <h3>Can I use Wireshark itself?</h3>
+        <p>Yes — export captures as pcapng and open in Wireshark. The display filters we use are Wireshark's, so anything you learn there works in SecVF.</p>
+
+        <h3>What's the Scripts USB?</h3>
+        <p>A virtual USB disk SecVF creates on demand to ship a directory of scripts into a guest (mostly used for the router VM setup). It's a regular HFS+ image attached as a USB device. The guest mounts and reads it like any USB stick.</p>
+
+        <h3>Does it work with Vagrant / Packer / Terraform?</h3>
+        <p>Not directly. The CLI (<code>secvf-cli</code>) is a reasonable target for shell-out integrations though — <code>secvf vm create</code> and <code>secvf vm start</code> are scriptable. A Packer plugin would be welcomed as a contribution.</p>
+
+        <h2>Project</h2>
+
+        <h3>Who builds SecVF?</h3>
+        <p>The project is maintained by <a href="https://github.com/DaxxSec" rel="noopener">DaxxSec</a>. Background: DFIR. Open source contributions welcome.</p>
+
+        <h3>How can I contribute?</h3>
+        <p>See <a href="/wiki/Contributing">Contributing</a>. Quickest win: pick an open issue, write a test, send a PR. We also welcome wiki improvements, distro additions to <code>distros.json</code>, and translation if you're feeling generous.</p>
+
+        <h3>Why is the App Store version a separate fork?</h3>
+        <p>Sandbox adjustments are non-trivial — VM bundle path changes, libpcap instead of tshark, no arbitrary subprocess exec. Keeping them in a downstream fork keeps the main repo clean and full-featured. The fork pulls from main regularly. See <a href="https://github.com/DaxxSec/SecVF/blob/main/docs/LICENSE-REVIEW.md" rel="noopener">LICENSE-REVIEW.md</a>.</p>
+
+        <h3>Will there be an iOS version?</h3>
+        <p>Apple's Virtualization framework is macOS-only. iPadOS got it briefly then lost it. So no, not without Apple changing course.</p>
+
+        <h3>What's your roadmap?</h3>
+        <p>Open items live as GitHub issues. Big themes:</p>
+        <ul>
+          <li>Live snapshots once the framework supports them</li>
+          <li>Better Windows-on-Apple-Silicon setup wizard</li>
+          <li>More display filters / Wireshark-grade decode for offline mode</li>
+          <li>Plugin API for custom packet dissectors</li>
+          <li>Clipboard sharing (host ↔ guest)</li>
+        </ul>
+
+        <h3>How do I report a security issue?</h3>
+        <p>Not in a public issue. See <a href="/wiki/Security-Model#reporting">Security model § reporting</a>. GitHub Security Advisories or <a href="mailto:security@daxxsec.tech">security@daxxsec.tech</a>.</p>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Troubleshooting">
+            <span class="np-label">Previous</span>
+            <span>← Troubleshooting</span>
+          </a>
+          <a class="np-card next" href="/wiki/Contributing">
+            <span class="np-label">Next</span>
+            <span>Contributing →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

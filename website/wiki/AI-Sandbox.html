@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>AI sandbox · SecVF</title>
+<meta name="description" content="Ephemeral macOS guest VMs for AI agent execution. APFS-CoW session cloning, vsock IPC, VirtioFS workspace, DTrace + ESF telemetry.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/AI-Sandbox">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox" class="current">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">AI sandbox</p>
+          <h1>AI sandbox</h1>
+          <p class="lede">Ephemeral macOS guest VMs for AI agent execution. A canonical base bundle is provisioned once; every session is an APFS clone that boots, runs commands over vsock, and gets destroyed. Hardware isolation, not container isolation.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#why">Why hardware VMs for AI agents</a></li>
+            <li><a href="#topology">Base + session topology</a></li>
+            <li><a href="#cow">APFS copy-on-write — how it costs nothing</a></li>
+            <li><a href="#provision">Provisioning the base bundle</a></li>
+            <li><a href="#lifecycle">Session lifecycle API</a></li>
+            <li><a href="#vsock">vsock command channel</a></li>
+            <li><a href="#workspace">Workspace sharing via VirtioFS</a></li>
+            <li><a href="#telemetry">DTrace + Endpoint Security telemetry</a></li>
+            <li><a href="#perf">Performance budget</a></li>
+            <li><a href="#vs">vs. Docker / Firecracker / lima</a></li>
+          </ul>
+        </div>
+
+        <h2 id="why">Why hardware VMs for AI agents</h2>
+
+        <p>Running an AI agent against untrusted prompts is dangerous. The agent will read, write, execute, and exfiltrate based on whatever language model output looks plausible. Anything you give the agent — disk, network, env vars — is in scope for that output.</p>
+
+        <p>Containers were the obvious choice for years. The honest accounting:</p>
+
+        <ul>
+          <li><strong>Container escape is a regular CVE.</strong> Docker, runc, containerd, kata — all have a recent escape history.</li>
+          <li><strong>Containers share the kernel</strong>. A kernel exploit in the guest is an escape to root on the host. Hypervisors put a hardware boundary between guest and host.</li>
+          <li><strong>Containers don't restrict speculation.</strong> Side-channel attacks across containers are well-documented; cross-VM attacks require defeating EPT/SLAT.</li>
+          <li><strong>Containers can't run macOS guests.</strong> If your agent needs to test macOS-specific behaviour (Xcode, code signing, AppKit), a container is useless.</li>
+        </ul>
+
+        <p>SecVF's AI sandbox trades a few milliseconds of session-start cost for a real hardware boundary — and uses APFS CoW to make that cost essentially zero.</p>
+
+        <h2 id="topology">Base + session topology</h2>
+
+        <p>Two layers:</p>
+
+<pre><code>~/.avf/AISandbox/
+├── ai-sandbox-base-v1.bundle/        ← provisioned ONCE
+│   ├── Disk.img                       (~60 GB sparse)
+│   ├── NVRAM
+│   ├── MachineIdentifier
+│   ├── auxiliary.bin / hardwareModel.bin
+│   ├── &lt;version&gt;.ipsw                 (kept for re-restore)
+│   └── metadata.json
+└── sessions/
+    ├── session-2026-05-10T14-22-00Z-a7f3.bundle/   ← clones
+    ├── session-2026-05-10T14-25-11Z-b1c2.bundle/
+    └── session-2026-05-10T14-30-44Z-e9d8.bundle/</code></pre>
+
+        <p>The <strong>base bundle</strong> is the canonical macOS guest: installed once, hardened, frozen. The <strong>sessions</strong> are ephemeral clones — created on demand, destroyed at end of session.</p>
+
+        <h2 id="cow">APFS copy-on-write — how it costs nothing</h2>
+
+        <p>APFS is the macOS filesystem, and APFS supports file-level CoW via the <code>F_CLONEFILE</code> fcntl. When SecVF clones a session bundle, it's not actually copying anything — it's calling <code>clonefile()</code> on each file, which creates a new inode that shares disk extents with the source.</p>
+
+<pre><code>// Roughly what AISandboxVMSession.cloneBase() does
+let base = URL(fileURLWithPath: "~/.avf/AISandbox/ai-sandbox-base-v1.bundle").resolvingSymlinksInPath()
+let session = URL(fileURLWithPath: "~/.avf/AISandbox/sessions/session-<UUID>.bundle")
+try FileManager.default.copyItem(at: base, to: session)
+// copyItem on APFS uses clonefile() under the hood — extents are shared
+// until either side writes, at which point the modified blocks diverge.</code></pre>
+
+        <p>Concrete consequences:</p>
+        <ul>
+          <li>Cloning a 60&nbsp;GB base bundle takes <strong>1–3 ms</strong>, not minutes.</li>
+          <li>Disk usage doesn't increase. Both bundles point at the same extents.</li>
+          <li>When the session writes a block — e.g. boots and writes a few hundred MB of system state — only those new blocks are unique on disk.</li>
+          <li>A typical session bundle, after a 5-minute task, occupies <strong>50–400&nbsp;MB</strong> of unique data.</li>
+          <li>Destroying the session is a normal <code>rm -rf</code>; only the divergent blocks are freed.</li>
+        </ul>
+
+        <div class="callout">
+          <strong>Why this requires APFS specifically.</strong> CoW at the file level isn't standard on macOS — HFS+ doesn't have it. If <code>~/.avf</code> sits on an HFS+ volume (rare on modern Macs, but possible if you mounted an external disk), the AI sandbox falls back to a full copy and you lose the speed. SecVF detects this at startup and warns.
+        </div>
+
+        <h2 id="provision">Provisioning the base bundle</h2>
+
+        <p>First-time setup is a one-shot install. The process:</p>
+
+        <ol>
+          <li>Download IPSW from <code>*.cdn-apple.com</code> (allowlist enforced, TLS 1.2+).</li>
+          <li>Restore via <code>VZMacOSInstaller</code> into <code>ai-sandbox-base-v1.bundle</code>.</li>
+          <li>First boot — wait for Setup Assistant.</li>
+          <li>Automated provisioning script attaches over vsock and configures:
+            <ul>
+              <li>Disables iCloud login screen (uses <code>AuthAuthority</code> tweak — see commit log)</li>
+              <li>Creates non-admin user <code>agent</code> with workspace-only write access</li>
+              <li>Installs <strong>Claude Code CLI</strong> as the runtime (staged-tarball fallback if network is restricted)</li>
+              <li>Sets up VirtioFS mount points (the workspace will land at <code>/Users/Shared/workspace</code>)</li>
+              <li>Configures vsock service on port 2222 (the command channel)</li>
+              <li>Installs DTrace probes (system call trace, file activity)</li>
+              <li>Disables Spotlight indexing on shared dirs (avoids host fingerprinting)</li>
+            </ul>
+          </li>
+          <li>Shut down the guest. The bundle is now the immutable base.</li>
+        </ol>
+
+        <div class="callout warn">
+          <strong>Re-provisioning.</strong> If a base bundle bug surfaces (e.g. a security update is needed), re-run the provision script. Don't try to patch a session bundle — sessions are throwaway by design.
+        </div>
+
+        <h2 id="lifecycle">Session lifecycle API</h2>
+
+        <p>The host-side API is small and explicit:</p>
+
+<pre><code>// Spin up a session
+let session = try await AISandboxVMSession.cloneBase()  // APFS clone, ~ms
+try await session.boot()                                // VM boot, ~5–8s
+defer { Task { try? await session.destroy() } }         // wipe at end
+
+// Run a command — synchronous-style API, vsock under the hood
+let result: CommandResult = try await session.run(
+    "clang --version &amp;&amp; sw_vers"
+)
+print(result.stdout)
+print(result.stderr)
+print(result.exitCode)
+
+// Mount a workspace (read-write inside guest, scoped to one host path)
+try await session.shareWorkspace(at: URL(fileURLWithPath: "/Users/me/sandbox-work"))
+
+// Stream a long-running process — yields output as it arrives
+for try await line in session.stream("npm install &amp;&amp; npm test") {
+    print(line)  // line-delimited stdout/stderr from guest
+}
+
+// Tear down
+try await session.destroy()                             // rm -rf the clone</code></pre>
+
+        <p>Each method is a <code>throws async</code> function. They're safe to call concurrently from different host tasks; the session uses an internal serial queue for vsock RPC ordering.</p>
+
+        <h2 id="vsock">vsock command channel</h2>
+
+        <p>The Virtio socket (vsock) is a low-overhead L4 socket between host and guest. No IP stack. No NAT. No DNS. Just a CID+port pair where:</p>
+
+        <ul>
+          <li>The guest is CID 3 (the conventional "guest" CID for a single-VM host).</li>
+          <li>The host is CID 2 (always — defined by the framework).</li>
+          <li>SecVF's command service listens on guest port <strong>2222</strong>.</li>
+        </ul>
+
+<pre><code>// host                                  // guest (daemon, written in Swift)
+let dev = vm.socketDevices.first!         while let conn = try await listener.accept() {
+let conn = try await dev.connect(         let req = try await conn.read(decode: Request.self)
+    cid: 3, port: 2222)                   let res = try await execute(req)  // runs the command
+                                          try await conn.write(encode: res)
+                                          await conn.close()
+                                      }</code></pre>
+
+        <h3>Why vsock instead of SSH?</h3>
+
+        <ul>
+          <li><strong>No network stack involvement</strong> — vsock doesn't traverse the virtual switch, doesn't need IP, can't be exfiltrated through DNS rebinding or similar tricks.</li>
+          <li><strong>No auth overhead</strong> — the CID is hypervisor-attested; only the host process that owns the VM can talk to it.</li>
+          <li><strong>Lower latency</strong> — round-trip is ~150 µs vs SSH's ~5 ms.</li>
+          <li><strong>No port-forwarding gymnastics</strong> — vsock is point-to-point.</li>
+        </ul>
+
+        <h3>The wire protocol</h3>
+
+        <p>Length-prefixed JSON, both directions. Schema:</p>
+
+<pre><code>// Request
+{
+  "id": "uuid-string",
+  "cmd": ["bash", "-c", "..."],   // argv-style
+  "env": { "PATH": "..." },
+  "cwd": "/Users/agent",
+  "timeoutSeconds": 300,
+  "stdin": ""                     // optional base64
+}
+// Response
+{
+  "id": "uuid-string",
+  "stdout": "...",                // base64 to preserve bytes
+  "stderr": "...",
+  "exitCode": 0,
+  "elapsedMs": 1247,
+  "killed": false
+}</code></pre>
+
+        <h2 id="workspace">Workspace sharing via VirtioFS</h2>
+
+        <p>The agent needs files. VirtioFS gives the guest a directory mount that's backed by a host directory — high-throughput, page-cache-aware, no SMB or NFS in sight.</p>
+
+<pre><code>let share = VZSharedDirectory(
+    url: URL(fileURLWithPath: "/Users/me/sandbox-work"),
+    readOnly: false
+)
+let device = VZVirtioFileSystemDeviceConfiguration(tag: "workspace")
+device.share = VZSingleDirectoryShare(directory: share)
+config.directorySharingDevices = [device]
+// Inside the guest, mount with:  mount -t virtiofs workspace /Users/Shared/workspace</code></pre>
+
+        <p>Hardened defaults:</p>
+        <ul>
+          <li><strong>One share, one directory.</strong> The agent sees nothing outside the workspace path.</li>
+          <li><strong>Non-admin guest user.</strong> The mount is owned by <code>agent</code> (uid 501-ish). System dirs are read-only by POSIX permission.</li>
+          <li><strong>Chown/chmod on mount is best-effort.</strong> Host owns the inodes; VirtioFS proxies the metadata. Some chown operations from inside the guest return EPERM — by design.</li>
+          <li><strong>No mount of host root, ever.</strong> Even with explicit config — SecVF rejects shares rooted at <code>/</code>, <code>/Users</code>, or <code>/Volumes</code> at the framework boundary.</li>
+        </ul>
+
+        <h2 id="telemetry">DTrace + Endpoint Security telemetry</h2>
+
+        <p>Sessions emit two telemetry streams:</p>
+
+        <h3>Inside the guest — DTrace</h3>
+
+        <p>A pre-installed DTrace script runs as the agent boots. It traces:</p>
+        <ul>
+          <li><code>syscall::exec*</code> — every process exec'd, with full argv</li>
+          <li><code>io:::start</code> — file I/O above a threshold</li>
+          <li>Network attempts (vsock isn't traced; only IP traffic)</li>
+        </ul>
+        <p>Output is fed through vsock back to the host and appended to the session's audit log at <code>~/.avf/AISandbox/sessions/&lt;session&gt;.bundle/audit.log</code>.</p>
+
+        <h3>On the host — Endpoint Security Framework</h3>
+
+        <p>SecVF subscribes to ESF events about the guest's VM process:</p>
+        <ul>
+          <li>Memory pressure events</li>
+          <li>Unusual file open patterns on the bundle directory</li>
+          <li>Host-side network attempts the guest's vmnet user-space helper makes (if any)</li>
+        </ul>
+
+        <p>Anything anomalous raises a <code>CRITICAL</code> event in <code>security-YYYY-MM-DD.log</code>.</p>
+
+        <h2 id="perf">Performance budget</h2>
+
+        <table>
+          <thead><tr><th>Operation</th><th>Time (M2 Pro)</th><th>What's happening</th></tr></thead>
+          <tbody>
+            <tr><td>cloneBase()</td><td>~1–3 ms</td><td>APFS <code>clonefile()</code> on every file in the bundle</td></tr>
+            <tr><td>boot()</td><td>~5–8 s</td><td>Cold boot of a macOS guest, framework restore + login</td></tr>
+            <tr><td>run() round-trip (small)</td><td>~200 µs + cmd time</td><td>vsock send + receive + JSON marshal</td></tr>
+            <tr><td>VirtioFS read (cached)</td><td>~3 µs / 4 KB block</td><td>Host page cache hit</td></tr>
+            <tr><td>VirtioFS read (cold)</td><td>~30 µs / 4 KB block</td><td>NVMe-backed</td></tr>
+            <tr><td>destroy()</td><td>~50–200 ms</td><td><code>rm -rf</code> on a CoW clone — only divergent blocks freed</td></tr>
+          </tbody>
+        </table>
+
+        <p>Bottom line: the marginal cost of a fresh isolated environment is dominated by boot time, not clone. Pre-boot a warm pool of sessions if your workload needs sub-second start.</p>
+
+        <h2 id="vs">vs. Docker / Firecracker / lima</h2>
+
+        <table>
+          <thead><tr><th>Tool</th><th>Isolation</th><th>Start time</th><th>macOS guest?</th></tr></thead>
+          <tbody>
+            <tr><td><strong>SecVF AI sandbox</strong></td><td>Hardware VM (Apple VZ)</td><td>~5–8 s</td><td>Yes</td></tr>
+            <tr><td>Docker / runc</td><td>Namespaces + cgroups</td><td>~100 ms</td><td>No (Linux only, or VM-backed on macOS)</td></tr>
+            <tr><td>Firecracker</td><td>Hardware VM (KVM)</td><td>~125 ms</td><td>No (Linux only)</td></tr>
+            <tr><td>lima</td><td>QEMU VM with VirtioFS</td><td>~10–20 s</td><td>No (Linux only)</td></tr>
+            <tr><td>Apple containerization</td><td>Linux VM per container, MacM-style</td><td>~1 s</td><td>No (Linux only)</td></tr>
+          </tbody>
+        </table>
+
+        <p>SecVF wins on isolation strength (hardware boundary on the official Apple framework, not a generic hypervisor) and macOS-guest support (the only option for this category of work on Apple Silicon). It loses on raw cold-start speed against Firecracker — but agent workloads are rarely throughput-bound on cold starts.</p>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Packet-Analysis">
+            <span class="np-label">Previous</span>
+            <span>← Packet analysis</span>
+          </a>
+          <a class="np-card next" href="/wiki/Router-VM">
+            <span class="np-label">Next</span>
+            <span>Router VM →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

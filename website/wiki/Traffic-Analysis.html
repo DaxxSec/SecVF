@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>Traffic analysis workflows · SecVF</title>
+<meta name="description" content="Concrete malware-analysis workflows using the SecVF Kali router — tcpdump, tshark, Suricata, Zeek, mitmproxy. C2 discovery, DNS exfil, JA3/JA4, FakeNet-driven C2 reveals.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/Traffic-Analysis">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis" class="current">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">Capture · Traffic analysis</p>
+          <h1>Traffic analysis workflows</h1>
+          <p class="lede">Routing through a Kali VM doesn't just isolate the sample — it gives you a privileged vantage point on the wire. Every byte the malware sends or receives is yours to capture, decode, modify, replay. Here are the workflows that actually find things.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#vantage">Why the router vantage matters</a></li>
+            <li><a href="#triage">First-look triage (5 minutes)</a></li>
+            <li><a href="#dns">DNS-based C2 &amp; exfiltration</a></li>
+            <li><a href="#fakenet-reveal">FakeNet reveals: making malware confess</a></li>
+            <li><a href="#tls">TLS fingerprinting &amp; SNI analysis (JA3/JA4)</a></li>
+            <li><a href="#beacon">Beaconing &amp; periodicity detection</a></li>
+            <li><a href="#hidden">Finding hidden C2 infrastructure</a></li>
+            <li><a href="#mitm">Inline TLS interception with mitmproxy</a></li>
+            <li><a href="#zeek-suricata">Offline analysis: Zeek &amp; Suricata</a></li>
+            <li><a href="#replay">PCAP replay &amp; re-analysis</a></li>
+            <li><a href="#tool-matrix">Tool matrix: when to use what</a></li>
+          </ul>
+        </div>
+
+        <h2 id="vantage">Why the router vantage matters</h2>
+
+        <p>A host-based capture sees what reaches the host. A router-based capture sees what the malware <em>thinks</em> it sent. Those aren't the same:</p>
+
+        <ul>
+          <li><strong>Pre-NAT visibility.</strong> The malware's source port assignments, its retry patterns, its real connection attempts — all visible before MASQUERADE rewrites them.</li>
+          <li><strong>Pre-DNS-resolution visibility.</strong> Failed lookups, fast-flux behaviour, hostnames the malware never actually reaches — you see them.</li>
+          <li><strong>Inline modification.</strong> iptables, mitmproxy, sslsplit can transform the traffic in-flight. Malware analysis is much more than passive sniffing.</li>
+          <li><strong>Replay potential.</strong> Captured traffic can be re-injected into a fresh detonation to test hypothesis-driven scenarios.</li>
+          <li><strong>No host noise.</strong> Your Mac's iCloud, Spotlight, App Store, browsers, and brew updates aren't on the wire here — the only traffic is what the lab generates.</li>
+        </ul>
+
+        <h2 id="triage">First-look triage (5 minutes)</h2>
+
+        <p>You just detonated something. Before anything else, get fast answers to three questions: <em>where is it talking, on what ports, and how loud?</em></p>
+
+<pre><code># 1. On the router. Start a rotating capture so you don't lose anything.
+ssh root@10.0.100.1
+sudo secvf-capture start                        # writes /var/captures/*.pcap
+
+# 2. While the sample runs, get live deltas:
+sudo tcpdump -i eth0 -nn -q -t -l \
+  | tee /tmp/live.txt                           # human-readable summary
+
+# 3. After 60s, hit Ctrl-C on tcpdump and snapshot what you've seen:
+secvf-monitor                                   # router status + conntrack
+</code></pre>
+
+        <p>Now answer the three questions:</p>
+
+<pre><code># Hosts the sample has reached
+awk '/IP/ {print $3, "->", $5}' /tmp/live.txt | sort -u
+
+# Top destinations by packet count
+awk '/IP/ {print $5}' /tmp/live.txt | sort | uniq -c | sort -rn | head
+
+# Ports it's hammering
+awk '/IP/ {n=split($5,a,"."); print a[n]}' /tmp/live.txt | sort | uniq -c | sort -rn</code></pre>
+
+        <p>If you see <em>nothing</em> after 60 seconds, the sample is probably sandbox-detecting. That's a finding. Move to FakeNet (below) to coax it out of dormancy.</p>
+
+        <h2 id="dns">DNS-based C2 &amp; exfiltration</h2>
+
+        <p>DNS is the single most useful protocol for tracking malware. Even encrypted payloads need to resolve names first.</p>
+
+        <h3>Watch every DNS query live</h3>
+
+<pre><code># On the router — listen for DNS, decode names, ignore everything else
+sudo tshark -i eth0 -Y "dns" -T fields \
+  -e ip.src -e dns.qry.name -e dns.qry.type -e dns.resp.name -e dns.a
+
+# Filter out chatter — only outbound queries from lab clients
+sudo tshark -i eth0 -Y "dns.flags.response == 0 and ip.src != 10.0.100.1" \
+  -T fields -e ip.src -e dns.qry.name</code></pre>
+
+        <h3>Look for DNS tunneling (exfiltration)</h3>
+
+        <p>DNS-tunneled C2 has tells: long random-looking subdomains, high query rates, TXT/NULL record types, or many different subdomains under one apex.</p>
+
+<pre><code># Long subdomains (often base32/base64 encoded data)
+sudo tshark -i eth0 -Y "dns.qry.name matches \"[a-z0-9]{20,}\""
+
+# TXT and NULL record types — unusual for normal browsing
+sudo tshark -i eth0 -Y "dns.qry.type == 16 or dns.qry.type == 10" \
+  -T fields -e dns.qry.name
+
+# Many subdomains under one apex (entropy + variance)
+sudo tcpdump -i eth0 -nn -A 'port 53' \
+  | grep -oE '[a-z0-9.-]+\.example\.com' | sort -u | wc -l</code></pre>
+
+        <h3>Pin DNS-tunneling to a specific process inside the guest</h3>
+
+        <p>On the lab guest itself:</p>
+<pre><code># Linux guest
+sudo ss -tunap | grep ":53"
+sudo lsof -i UDP:53 -n -P
+
+# Or use the auditd hooks the router setup script installs:
+auditctl -l | grep dns
+ausearch -k dns-watch | tail -20</code></pre>
+
+        <h2 id="fakenet-reveal">FakeNet reveals: making malware confess</h2>
+
+        <p>This is where SecVF earns its keep. FakeNet sinkholes every DNS query and answers every port with a plausible service. The malware behaves as if the internet exists — and reveals everything it would have done.</p>
+
+        <h3>The reveal workflow</h3>
+
+        <ol>
+          <li><strong>Switch to FakeNet mode.</strong> See the <a href="/wiki/FakeNet">FakeNet page</a> for setup.</li>
+          <li><strong>Pre-detonation: start tcpdump on the router</strong> capturing everything:
+<pre><code>sudo tcpdump -i eth0 -nn -w /var/captures/$(date +%F-%H%M)-fakenet.pcap \
+  -s 0 'not port 22'              # exclude your SSH</code></pre>
+          </li>
+          <li><strong>Detonate the sample.</strong> Run it inside the analysis VM.</li>
+          <li><strong>Watch FakeNet logs in real time</strong> across three terminals:
+<pre><code># Terminal 1: every DNS query the sample makes
+tail -f /var/log/fakenet/dns.log
+
+# Terminal 2: every HTTP/HTTPS request hitting nginx
+tail -f /var/log/fakenet/http.log
+
+# Terminal 3: TLS connections that hit sslsplit
+tail -f /var/log/fakenet/sslsplit.connect.log</code></pre>
+          </li>
+          <li><strong>After 5–15 minutes, stop and aggregate.</strong></li>
+        </ol>
+
+        <h3>What you'll typically see</h3>
+
+        <p>Real malware behaviour observed in this exact workflow:</p>
+
+        <ul>
+          <li><strong>Hardcoded C2 domains</strong> in DNS queries — including ones the malware would <em>never</em> have reached through real DNS (because the operator hasn't activated them yet).</li>
+          <li><strong>User-Agent strings</strong> that imitate real browsers but get subtle details wrong — perfect fingerprinting input.</li>
+          <li><strong>URI patterns</strong> like <code>/gate.php?id=ABC&amp;v=1.2</code> — the unique part is often a campaign identifier or version tag.</li>
+          <li><strong>Beacon timing</strong> with jitter — see <a href="#beacon">Beaconing detection</a>.</li>
+          <li><strong>Multiple staging hosts</strong> — the first request reveals the dropper; later requests reveal the post-exploitation payload server.</li>
+          <li><strong>Encrypted POST bodies</strong> over HTTP — the sample knows TLS is unreliable so it brings its own crypto. The <em>shape</em> of the body (length, byte distribution) is fingerprintable even when the content isn't.</li>
+        </ul>
+
+        <h3>Extract a clean IOC list from a FakeNet session</h3>
+
+<pre><code># Domains seen
+awk '/query=/ {print $4}' /var/log/fakenet/dns.log \
+  | sed 's/query=//' | sort -u > /tmp/iocs-domains.txt
+
+# Request paths
+awk -F'"' '/"GET|"POST/ {print $2}' /var/log/fakenet/http.log \
+  | awk '{print $2}' | sort -u > /tmp/iocs-paths.txt
+
+# User-Agents
+awk -F'"' '{print $(NF-1)}' /var/log/fakenet/http.log \
+  | sort -u > /tmp/iocs-uagents.txt
+
+# TLS SNI values (pre-decryption)
+awk '/SNI=/ {print $4}' /var/log/fakenet/sslsplit.connect.log \
+  | sort -u > /tmp/iocs-sni.txt</code></pre>
+
+        <p>These four files are the IOCs you'd hand to a threat-intel pipeline or stuff into a YARA rule.</p>
+
+        <h2 id="tls">TLS fingerprinting &amp; SNI analysis (JA3/JA4)</h2>
+
+        <p>Even without decrypting, TLS Client Hellos identify the calling library uniquely. Mass-produced malware reuses TLS stacks across campaigns; the fingerprint is often more durable than the C2 domain.</p>
+
+        <h3>SNI (cleartext)</h3>
+
+<pre><code># Every SNI value seen on the wire — pre-encryption
+sudo tshark -i eth0 -Y "tls.handshake.extensions_server_name" \
+  -T fields -e tls.handshake.extensions_server_name | sort -u</code></pre>
+
+        <h3>JA3 fingerprints</h3>
+
+<pre><code># Suricata or Zeek both compute JA3. Run a JA3-aware sensor against
+# either live traffic or a saved PCAP:
+sudo suricata -r /var/captures/sample.pcap -k none \
+  --runmode=offline -l /tmp/suricata
+
+# JA3 hashes will appear in /tmp/suricata/eve.json
+jq -r 'select(.event_type=="tls") | .tls.ja3.hash' /tmp/suricata/eve.json \
+  | sort | uniq -c | sort -rn</code></pre>
+
+        <h3>What a JA3 hash tells you</h3>
+
+        <p>Cross-reference against community databases — <code>abuse.ch/sslbl</code>, <code>ja3er.com</code>, your own internal corpus. Common fingerprints map to specific libraries (Cobalt Strike beacon, Sliver implant, Empire, etc.). When a malware sample's JA3 matches a known beacon framework's, that's high-confidence attribution before you've decoded a single byte of payload.</p>
+
+        <h2 id="beacon">Beaconing &amp; periodicity detection</h2>
+
+        <p>C2 channels usually have a sleep-then-call pattern. The interval is often jittered (e.g. "every 60 seconds, ±15s") but the average is stable enough to detect.</p>
+
+<pre><code># Extract timestamps + destination IP from a saved PCAP for one suspected C2
+tshark -r /var/captures/sample.pcap \
+  -Y "ip.dst == 192.0.2.10" \
+  -T fields -e frame.time_epoch -e ip.dst > /tmp/beacons.txt
+
+# Compute inter-packet deltas
+awk 'NR>1{print $1-prev} {prev=$1}' /tmp/beacons.txt | sort -n
+
+# Quick histogram
+awk 'NR>1{print int($1-prev)} {prev=$1}' /tmp/beacons.txt \
+  | sort | uniq -c | sort -rn | head -10</code></pre>
+
+        <p>A consistent delta of, say, 58–62 seconds is a beacon. The standard deviation tells you how much jitter the framework was configured with.</p>
+
+        <h3>Visual beacon detection</h3>
+
+<pre><code># RITA (Real Intelligence Threat Analytics) is purpose-built for this.
+# It runs offline against Zeek logs.
+zeek -r /var/captures/sample.pcap                      # produces logs in cwd
+rita import-zeek-logs ./ secvf-session
+rita show-beacons secvf-session</code></pre>
+
+        <h2 id="hidden">Finding hidden C2 infrastructure</h2>
+
+        <p>Malware often has primary, fallback, and "domain generation algorithm" (DGA) tiers. FakeNet exposes them all because the malware tries every tier when the primary doesn't respond correctly. In the real world, that infrastructure stays hidden until activation.</p>
+
+        <h3>DGA detection</h3>
+
+<pre><code># Domains with high lexical entropy
+python3 -c "
+import math, sys, collections, re
+for line in sys.stdin:
+    name = re.search(r'query=([^ ]+)', line)
+    if not name: continue
+    s = name.group(1).split('.')[0]
+    if len(s) &lt; 8: continue
+    p = collections.Counter(s)
+    H = -sum((c/len(s)) * math.log2(c/len(s)) for c in p.values())
+    if H &gt; 3.5: print(f'{H:.2f}  {name.group(1)}')
+" &lt; /var/log/fakenet/dns.log | sort -rn | head</code></pre>
+
+        <h3>Domain fronting / CDN abuse</h3>
+
+        <p>Some samples connect to a benign-looking CDN (CloudFront, Fastly, Cloudflare) and use the SNI to specify a different hidden backend. The TLS SNI doesn't match the actual application traffic:</p>
+
+<pre><code># Look for traffic to known CDN ASN ranges where the SNI is generic
+# (e.g. amazonaws.com, fastly.net) but the HTTP Host header — if seen —
+# disagrees. Since we sinkhole, the Host header inside the request is
+# the actual target.
+awk '/Host:/ {print $0}' /var/log/fakenet/http.log | sort -u</code></pre>
+
+        <h2 id="mitm">Inline TLS interception with mitmproxy</h2>
+
+        <p>For samples that don't certificate-pin, running mitmproxy in transparent mode on the router gives you decrypted application-layer traffic.</p>
+
+<pre><code># One-time setup: generate the CA, install it inside the analysis VMs
+# (NOT in the malware sample VM — we want failures to be visible).
+mitmproxy --mode transparent --certs /root/.mitmproxy/
+
+# Redirect outbound 80/443 from the lab to mitmproxy
+sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 \
+  -j REDIRECT --to-ports 8080
+sudo iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 \
+  -j REDIRECT --to-ports 8080
+
+# Now run mitmproxy
+mitmproxy --mode transparent</code></pre>
+
+        <p>For non-interactive use, swap to <code>mitmdump</code> with a script that logs decrypted bodies:</p>
+
+<pre><code>mitmdump --mode transparent -s /opt/secvf/log_decrypted.py</code></pre>
+
+        <p>(The router setup script writes a sample <code>log_decrypted.py</code> to <code>/opt/secvf/</code> on first install.)</p>
+
+        <h2 id="zeek-suricata">Offline analysis: Zeek &amp; Suricata</h2>
+
+        <p>Once you have a PCAP, run it through both engines. They give different views.</p>
+
+        <h3>Zeek — protocol-aware log generation</h3>
+
+<pre><code>cd /tmp/zeek-analysis
+zeek -r /var/captures/sample.pcap
+
+# Output: dozens of log files
+ls -la
+#   conn.log     — every connection summary (5-tuple, duration, bytes)
+#   dns.log      — every DNS query + response
+#   http.log     — every HTTP request + response
+#   ssl.log      — every TLS handshake (JA3 included if version supports)
+#   files.log    — every file transferred (with extracted MD5/SHA1)
+#   weird.log    — protocol anomalies (Zeek's instinct)
+#   notice.log   — Zeek's high-level observations</code></pre>
+
+        <p>Read <code>weird.log</code> and <code>notice.log</code> first. Zeek often flags malware behaviour that you'd otherwise miss.</p>
+
+        <h3>Suricata — signature-driven IDS</h3>
+
+<pre><code># Run against the same PCAP with the Emerging Threats ruleset
+sudo suricata -r /var/captures/sample.pcap -l /tmp/suricata \
+  -k none --runmode=offline
+
+# Alerts in eve.json
+jq -r 'select(.event_type=="alert") | "\(.timestamp) \(.alert.signature)"' \
+  /tmp/suricata/eve.json | sort -u</code></pre>
+
+        <p>A clean run with zero alerts is itself a signal — either the sample is using novel infrastructure (rare) or you don't have rules covering it (common). Add SIDs as you discover patterns.</p>
+
+        <h2 id="replay">PCAP replay &amp; re-analysis</h2>
+
+        <p>You captured something interesting. Now you want to test how a different defensive product, or a different malware version, would behave against the same traffic.</p>
+
+<pre><code># tcpreplay — inject the saved PCAP back onto an interface
+sudo tcpreplay -i eth0 --topspeed /var/captures/sample.pcap
+
+# Mid-stream slowdown / loop
+sudo tcpreplay -i eth0 --pps 100 --loop=3 /var/captures/sample.pcap
+
+# Modify the PCAP before replay (e.g. rewrite destination IP)
+tcprewrite --infile=in.pcap --outfile=out.pcap \
+  --dstipmap=192.0.2.10:10.0.100.50</code></pre>
+
+        <p>Combine with FakeNet for a fully offline regression workflow: replay → FakeNet responds → log diff against prior session.</p>
+
+        <h2 id="tool-matrix">Tool matrix: when to use what</h2>
+
+        <table>
+          <thead><tr><th>Need</th><th>Reach for</th><th>Why</th></tr></thead>
+          <tbody>
+            <tr><td>"What's happening right now?"</td><td><code>tcpdump</code></td><td>Lightest. Live, on the wire, no parsing overhead.</td></tr>
+            <tr><td>"Show me decoded protocols"</td><td><code>tshark -Y</code></td><td>Wireshark grammar; can filter on application fields.</td></tr>
+            <tr><td>"I want to click around"</td><td>Wireshark (offline, post-PCAP)</td><td>GUI for deep-dive once you have a capture.</td></tr>
+            <tr><td>"Find the C2 in a 10 GB capture"</td><td>Zeek</td><td>Protocol logs are structured; grep through <code>conn.log</code>.</td></tr>
+            <tr><td>"Match against known threat patterns"</td><td>Suricata + ET rules</td><td>Signature-based detection at line rate.</td></tr>
+            <tr><td>"Show me beaconing"</td><td>RITA (over Zeek logs)</td><td>Statistical periodicity built in.</td></tr>
+            <tr><td>"Decrypt non-pinning TLS"</td><td>mitmproxy / sslsplit</td><td>Inline MITM. Won't beat pinning.</td></tr>
+            <tr><td>"What's the calling library?"</td><td>JA3 hash via Suricata</td><td>Cross-reference against community feeds.</td></tr>
+            <tr><td>"Replay this traffic differently"</td><td><code>tcpreplay</code> + <code>tcprewrite</code></td><td>Modify + re-inject for regression.</td></tr>
+            <tr><td>"DNS exfil hunting"</td><td>tshark + entropy script</td><td>Manual; tooling is sparse here.</td></tr>
+            <tr><td>"File extraction from traffic"</td><td>Zeek <code>files.log</code> + extract</td><td>Pulls payloads with hash for further analysis.</td></tr>
+          </tbody>
+        </table>
+
+        <div class="callout tip">
+          <strong>Keep snapshots cheap.</strong> Duplicate the router VM bundle (APFS CoW, ~ms) before any destructive workflow — adding mitmproxy CAs, installing extra packages, modifying iptables. When you're done, delete the working copy and start fresh next time.
+        </div>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/Router-VM">
+            <span class="np-label">Previous</span>
+            <span>← Router VM</span>
+          </a>
+          <a class="np-card next" href="/wiki/FakeNet">
+            <span class="np-label">Next</span>
+            <span>FakeNet honeypot →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>

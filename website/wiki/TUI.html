@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0c29">
+<title>TUI guide · SecVF</title>
+<meta name="description" content="The Textual-based terminal UI for SecVF — launching, screens, keyboard shortcuts, architecture, troubleshooting headless workflows.">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<link rel="canonical" href="https://secvf.daxxsec.tech/wiki/TUI">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/icon-32.png">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" role="banner">
+  <div class="wrap nav-row">
+    <a class="brand" href="/" aria-label="SecVF home">
+      <span class="brand-glyph" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2 L28 8 V18 C28 24 22 28 16 30 C10 28 4 24 4 18 V8 Z" stroke="#a78bfa" stroke-width="2" fill="rgba(167,139,250,0.08)"/>
+          <path d="M11 16 L14.5 19.5 L21 13" stroke="#a78bfa" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </span>
+      <span class="brand-name">SecVF</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/#stack">The stack</a>
+      <a href="/#downloads">Download</a>
+      <a href="/wiki/" class="ext" aria-current="page">Docs</a>
+      <a href="https://github.com/DaxxSec/SecVF" rel="noopener noreferrer" class="ext">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="wiki-shell">
+
+    <aside class="wiki-side" aria-label="Documentation navigation">
+      <h4>Get started</h4>
+      <ul>
+        <li><a href="/wiki/">Home</a></li>
+        <li><a href="/wiki/Installation">Installation</a></li>
+        <li><a href="/wiki/First-VM">Your first VM</a></li>
+      </ul>
+      <h4>VM management</h4>
+      <ul>
+        <li><a href="/wiki/VM-Management">Managing VMs</a></li>
+        <li><a href="/wiki/Network-Modes">Network modes</a></li>
+        <li><a href="/wiki/File-Transfer">File transfer</a></li>
+        <li><a href="/wiki/USB-Devices">USB devices</a></li>
+      </ul>
+      <h4>Capture</h4>
+      <ul>
+        <li><a href="/wiki/Packet-Analysis">Packet analysis</a></li>
+        <li><a href="/wiki/Router-VM">Router VM (Kali)</a></li>
+        <li><a href="/wiki/Traffic-Analysis">Traffic analysis</a></li>
+        <li><a href="/wiki/FakeNet">FakeNet honeypot</a></li>
+      </ul>
+      <h4>Detection</h4>
+      <ul>
+        <li><a href="/wiki/SIEM">SIEM &amp; detection</a></li>
+        <li><a href="/wiki/Containment-Breakout">Containment breakout</a></li>
+      </ul>
+      <h4>Scripts</h4>
+      <ul><li><a href="/wiki/Scripts-Reference">Scripts reference</a></li></ul>
+      <h4>AI sandbox</h4>
+      <ul><li><a href="/wiki/AI-Sandbox">AI sandbox</a></li></ul>
+      <h4>CLI &amp; TUI</h4>
+      <ul>
+        <li><a href="/wiki/CLI">CLI reference</a></li>
+        <li><a href="/wiki/TUI" class="current">TUI guide</a></li>
+        <li><a href="/wiki/Automation">Automation &amp; AI agents</a></li>
+      </ul>
+      <h4>Reference</h4>
+      <ul>
+        <li><a href="/wiki/Architecture">Architecture</a></li>
+        <li><a href="/wiki/Security-Model">Security model</a></li>
+        <li><a href="/wiki/Logging">Logging &amp; telemetry</a></li>
+        <li><a href="/wiki/Troubleshooting">Troubleshooting</a></li>
+        <li><a href="/wiki/FAQ">FAQ</a></li>
+      </ul>
+      <h4>Project</h4>
+      <ul><li><a href="/wiki/Contributing">Contributing</a></li></ul>
+    </aside>
+
+    <section class="wiki-content">
+      <article class="prose">
+        <header class="page-head">
+          <p class="crumb">CLI &amp; TUI · TUI guide</p>
+          <h1>Terminal UI guide</h1>
+          <p class="lede">A full-screen, keyboard-driven UI for working with SecVF when you don't want (or can't reach) the macOS GUI. Written in Python on the <a href="https://textual.textualize.io/" rel="noopener">Textual</a> framework; talks to the same backend through <code>secvf-cli</code>.</p>
+        </header>
+
+        <div class="toc">
+          <h4>On this page</h4>
+          <ul>
+            <li><a href="#why">When to use the TUI</a></li>
+            <li><a href="#install">Install</a></li>
+            <li><a href="#launch">Launching</a></li>
+            <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+            <li><a href="#screens">Screens</a></li>
+            <li><a href="#arch">Architecture (Python ↔ Swift CLI)</a></li>
+            <li><a href="#dev">Running from source</a></li>
+            <li><a href="#trouble">Troubleshooting launch issues</a></li>
+          </ul>
+        </div>
+
+        <h2 id="why">When to use the TUI</h2>
+
+        <p>The macOS GUI is the canonical interface — every feature lives there first. Use the TUI when:</p>
+
+        <ul>
+          <li><strong>You're SSH'd into the host Mac</strong> and don't want to forward AppKit windows.</li>
+          <li><strong>You want everything on one screen</strong> at a glance — VM table + switch stats + capture log + USB devices in one pane each, no window juggling.</li>
+          <li><strong>You're scripting against the CLI</strong> and want a quick visual to see what your scripts did.</li>
+          <li><strong>You prefer keyboard-driven workflows.</strong> The TUI is fully navigable without a mouse.</li>
+        </ul>
+
+        <p>The TUI is feature-complete for day-to-day work but doesn't expose every advanced option — for that, drop down to <a href="/wiki/CLI">secvf-cli</a> or the GUI.</p>
+
+        <h2 id="install">Install</h2>
+
+        <h3>Prerequisites</h3>
+        <ul>
+          <li>Python 3.10 or newer (<code>brew install python@3.12</code> if you don't have it)</li>
+          <li>The Swift CLI built and on PATH (see <a href="/wiki/CLI#install">CLI install</a>)</li>
+        </ul>
+
+        <h3>Install the Python package</h3>
+
+<pre><code>cd SecVF/cli/tui
+pip install -e .
+# or with a venv:
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .</code></pre>
+
+        <p>Dependencies are minimal — Textual 0.47+ and Rich 13.7+. The <code>pyproject.toml</code> declares everything; no native compilation.</p>
+
+        <h2 id="launch">Launching</h2>
+
+        <p>Preferred path is via the Swift CLI:</p>
+
+<pre><code>secvf tui</code></pre>
+
+        <p>The Swift launcher finds Python, finds the TUI module, passes through its own absolute path so the TUI knows which CLI to call back into. This handles the awkward case where you have multiple SecVF installs side by side.</p>
+
+        <p>Direct Python invocation also works:</p>
+
+<pre><code># with the package installed
+secvf-tui
+
+# without install, from source
+cd SecVF/cli/tui
+python3 -m secvf_tui.app --cli-path /path/to/secvf-cli</code></pre>
+
+        <h2 id="shortcuts">Keyboard shortcuts</h2>
+
+        <table>
+          <thead><tr><th>Key</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Tab</kbd> / <kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>Switch between top-level tabs (VMs / Network / Capture / USB).</td></tr>
+            <tr><td><kbd>r</kbd></td><td>Refresh the current tab.</td></tr>
+            <tr><td><kbd>s</kbd></td><td>Start the selected VM.</td></tr>
+            <tr><td><kbd>x</kbd></td><td>Stop the selected VM.</td></tr>
+            <tr><td><kbd>n</kbd></td><td>Create a new VM (opens form).</td></tr>
+            <tr><td><kbd>d</kbd></td><td>Delete the selected VM (with confirmation).</td></tr>
+            <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Move row selection.</td></tr>
+            <tr><td><kbd>Enter</kbd></td><td>Open detail view for the selected item.</td></tr>
+            <tr><td><kbd>/</kbd></td><td>Focus the filter input on the current tab.</td></tr>
+            <tr><td><kbd>q</kbd> / <kbd>Ctrl</kbd>+<kbd>C</kbd></td><td>Quit.</td></tr>
+            <tr><td><kbd>?</kbd></td><td>Show keyboard shortcut overlay.</td></tr>
+          </tbody>
+        </table>
+
+        <h2 id="screens">Screens</h2>
+
+        <h3>VMs tab</h3>
+
+        <p>Tabular list of all VMs with state, OS, CPU, RAM, network mode, and last-started time. Filter input narrows the list by name or distro. Detail view (Enter) shows the full metadata, a live "uptime" counter, and quick-action buttons (Start, Stop, SSH, Show window, Delete).</p>
+
+<pre><code>┌─ VMs ──────────────────────────────────────────────────────────────────┐
+│  Filter: kali_                                                          │
+│                                                                         │
+│  STATE   NAME             OS      CPU  RAM    NET      UPTIME           │
+│  ●       kali-router      Linux   2    2 GB   virtual  1h 32m           │
+│  ○       ubuntu-malware   Linux   2    4 GB   virtual  --               │
+│  ○       fedora-analysis  Linux   4    8 GB   nat      --               │
+│                                                                         │
+│  [s] Start   [x] Stop   [n] New   [d] Delete   [Enter] Details          │
+└─────────────────────────────────────────────────────────────────────────┘</code></pre>
+
+        <h3>Network tab</h3>
+
+        <p>Three panes:</p>
+
+        <ul>
+          <li><strong>Switch status</strong> — running/stopped, port count, MACs learned, uptime. Updates every second.</li>
+          <li><strong>Port table</strong> — every connected VM with RX/TX byte counters.</li>
+          <li><strong>MAC table</strong> — every learned MAC, mapped to port and VM, with age.</li>
+        </ul>
+
+        <h3>Capture tab</h3>
+
+        <p>The capture screen has two views:</p>
+
+        <ul>
+          <li><strong>Status</strong> — current state (capturing/stopped), filter in effect, packet count, duration. Start/Stop buttons.</li>
+          <li><strong>Live</strong> — scrolling table of packets, just like <code>secvf capture live</code> but in a pane with selection support. Highlight a packet → press Enter to see decoded layers.</li>
+        </ul>
+
+        <h3>USB tab</h3>
+
+        <p>Physical and virtual USB devices, each with a status (Available / Mounted to &lt;VM&gt;). Buttons for Mount, Eject, Create Virtual.</p>
+
+        <h2 id="arch">Architecture (Python ↔ Swift CLI)</h2>
+
+        <p>The TUI is a thin presentation layer over <code>secvf-cli</code>. It never talks to SecVF.app directly.</p>
+
+<pre><code>┌────────────────────────────┐
+│ Textual UI                  │  ← secvf_tui/app.py + screens/ + widgets/
+│                             │
+│  ┌───────────────────────┐  │
+│  │ Controller (Python)   │  │  ← secvf_controller/controller.py
+│  │  - subprocess.run()   │  │
+│  │  - parse --json       │  │
+│  │  - map to models      │  │
+│  └───────┬───────────────┘  │
+└──────────┼──────────────────┘
+           │
+           ▼ argv + stdin/stdout
+┌────────────────────────────┐
+│ secvf-cli (Swift)           │  ← invoked with --json on every call
+│   - VMManagerBridge         │
+│   - SwitchManagerBridge     │
+│   - CaptureManagerBridge    │
+│   - USBManagerBridge        │
+└────────────────────────────┘
+           │
+           ▼ DistributedNotificationCenter / filesystem
+┌────────────────────────────┐
+│ SecVF.app                   │  ← the GUI process holds the actual state
+└────────────────────────────┘</code></pre>
+
+        <p>Every action the TUI takes is a CLI subprocess call. The controller layer (<code>secvf_controller</code>) wraps <code>secvf-cli</code> invocations, parses the <code>--json</code> output, and presents typed model objects (<code>VM</code>, <code>SwitchStats</code>, <code>USBDevice</code>) to the Textual app.</p>
+
+        <p>Practical implications:</p>
+        <ul>
+          <li>The TUI works headlessly (over SSH) as long as the CLI does.</li>
+          <li>Anything the CLI can do, the TUI can do — adding a new feature usually means adding a Textual screen, not a new RPC mechanism.</li>
+          <li>You can run the CLI and TUI side by side; both read from the same source of truth.</li>
+        </ul>
+
+        <h2 id="dev">Running from source</h2>
+
+        <p>Useful when you're modifying the TUI itself:</p>
+
+<pre><code>cd SecVF/cli/tui
+
+# Run without install
+python3 -m secvf_tui.app --cli-path /path/to/secvf-cli
+
+# Optional dev deps
+pip install -e ".[dev]"
+ruff check secvf_tui secvf_controller
+mypy secvf_tui secvf_controller
+pytest                                  # the test suite (light)</code></pre>
+
+        <p>The Textual devtools (<code>textual console</code>) are great for debugging — keep a separate terminal open with <code>textual console</code> and the TUI emits debug events you can inspect.</p>
+
+        <h2 id="trouble">Troubleshooting launch issues</h2>
+
+        <table>
+          <thead><tr><th>Symptom</th><th>Likely cause</th><th>Fix</th></tr></thead>
+          <tbody>
+            <tr><td>"Python 3.10+ not found"</td><td>System Python is 2.x; no python3 on PATH</td><td><code>brew install python@3.12</code></td></tr>
+            <tr><td>"TUI module not found"</td><td>Package not installed and CLI can't find source layout</td><td><code>cd SecVF/cli/tui &amp;&amp; pip install -e .</code></td></tr>
+            <tr><td>Blank screen, only border</td><td>Terminal doesn't support truecolor</td><td>Use a modern terminal (iTerm2, kitty, Terminal.app 14+, WezTerm)</td></tr>
+            <tr><td>"CLI not found at path …" inside TUI</td><td>Direct Python invocation without <code>--cli-path</code></td><td>Pass <code>--cli-path /full/path/to/secvf-cli</code></td></tr>
+            <tr><td>All VMs show "Unknown"</td><td>SecVF.app not running, only on-disk metadata visible</td><td>Launch SecVF.app on the host first</td></tr>
+            <tr><td>Keys don't work</td><td>Terminal multiplexer (tmux/screen) capturing them</td><td>Use a non-multiplexed session, or remap the conflict</td></tr>
+          </tbody>
+        </table>
+
+        <div class="next-prev">
+          <a class="np-card" href="/wiki/CLI">
+            <span class="np-label">Previous</span>
+            <span>← CLI reference</span>
+          </a>
+          <a class="np-card next" href="/wiki/Security-Model">
+            <span class="np-label">Next</span>
+            <span>Security model →</span>
+          </a>
+        </div>
+      </article>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap footer-grid">
+    <div>
+      <a class="brand" href="/"><span class="brand-name">SecVF</span></a>
+      <p class="footer-tag">Security Virtualization Framework. Native macOS. MIT.</p>
+    </div>
+    <div><h4>Product</h4><ul><li><a href="/#stack">The stack</a></li><li><a href="/#downloads">Download</a></li><li><a href="/wiki/">Documentation</a></li></ul></div>
+    <div><h4>Source</h4><ul><li><a href="https://github.com/DaxxSec/SecVF" rel="noopener">GitHub</a></li><li><a href="https://github.com/DaxxSec/SecVF/issues" rel="noopener">Issues</a></li></ul></div>
+    <div><h4>Security</h4><ul><li><a href="/wiki/Security-Model">Threat model</a></li><li><a href="/.well-known/security.txt">security.txt</a></li></ul></div>
+  </div>
+  <div class="wrap footer-base">
+    <span>© <span id="year">2026</span> SecVF. MIT licensed.</span>
+    <span>Not affiliated with Apple.</span>
+  </div>
+</footer>
+
+<script src="/scripts.js" defer></script>
+</body>
+</html>
