@@ -190,6 +190,61 @@ These require `--capability-tier=full` AND (optionally) a confirmation hook. Def
 
 ---
 
+## The Trust Boundary Principle
+
+The core design rule, codified:
+
+> 1. Tools are either **input** (host→VM, trusted-by-construction) or **output** (VM→host, untrusted-by-construction). Never both.
+>
+> 2. There is no general-purpose evaluation tool. No `secvf_eval(text)`, no `secvf_run_arbitrary(command_from_vm_output)`. The set of executable things equals the set of tools we shipped.
+>
+> 3. Untrusted outputs are wrapped with explicit `trust_boundary: "vm_output"` markers and a `trust_warning` directing the agent to treat content as data, not instructions. **This is a hint to the model, not an enforcement.**
+>
+> 4. The hard enforcement is the capability tier + the tool dispatch table. The agent cannot call tools that aren't registered. The user controls registration via `--capability-tier=`.
+>
+> 5. Dangerous patterns in `secvf_exec_in_vm` trigger server-side confirmation hooks. Patterns are user-extensible.
+>
+> 6. Every tool call is audit-logged before execution. Forensic record survives even successful injection.
+
+Every tool in the catalog has a `direction` field (`.input` or `.output`). Output-direction tools have their result payloads wrapped with the trust markers automatically — that wrapping is done by `Dispatcher.dispatch`, not by individual handlers, so it can't be forgotten.
+
+The complete `direction` mapping is in [`SecVFMCPCore/ToolRegistry.swift`](../SecVF/cli/Sources/SecVFMCPCore/ToolRegistry.swift) and is enforced at runtime by [`Dispatcher`](../SecVF/cli/Sources/SecVFMCPCore/Dispatcher.swift).
+
+---
+
+## Layered defense model
+
+Honest mapping of which security guarantees are hard (server-enforced) vs soft (model-dependent):
+
+| Layer | Type | What it does | What happens if breached |
+|---|---|---|---|
+| 1. Tool boundary (no `eval`, directional tools) | **HARD** — code-enforced | Agent can't call tools that aren't in the dispatch table | Requires modifying the binary to bypass |
+| 2. Capability tier | **HARD** — code-enforced | Server only exposes tools at or below the active tier | Requires modifying the binary to bypass |
+| 3. Pattern matching at `_exec_in_vm` | **MEDIUM** — heuristic | Server-side regex catches obvious dangerous commands and gates them | Sophisticated paraphrased attacks may slip through |
+| 4. Confirmation hook | **HARD if user attentive** | User-configurable hook receives tool call + params; must approve | User must be paying attention to the prompt |
+| 5. Prompt-level trust model (see [`MCP-RECOMMENDED-SYSTEM-PROMPT.md`](MCP-RECOMMENDED-SYSTEM-PROMPT.md)) | **SOFT** — model-dependent | Agent reasoning recognizes injection attempts and refuses | Weaker models or sophisticated injection can bypass |
+| 6. Audit log | **forensic** — post-hoc | Every call logged before execution | Doesn't prevent harm but you'll know what happened |
+
+**The thing that makes this story hold up:** even when Layer 5 (prompt-level) fails, Layers 1-4 still bound the blast radius. A successfully prompt-injected agent in `safe-mutate` mode cannot escape the tier — the destructive tools literally do not exist in its dispatch table. The most it can do is request more in-tier tool calls, which still pass through pattern matching + confirmation hooks where relevant.
+
+This is a defensible position: **we don't claim to defeat prompt injection. We claim to bound the blast radius.**
+
+---
+
+## Content provenance tracking (Layer 4.5)
+
+In addition to the prompt-level trust marker on output, the server tracks every chunk of VM-derived content it has emitted recently and refuses to let that exact content flow back as a parameter to a write tool.
+
+Mechanism:
+- Every `success` result from an `.output` direction tool is hashed and added to a rolling "recently emitted untrusted content" set
+- When the agent submits a parameter to a write tool (`secvf_exec_in_vm`, `secvf_file_push`, `secvf_vm_create`, etc.), the server checks if any parameter value contains substring matches against recently-emitted untrusted content
+- Match → trigger the confirmation hook with the message: *"Agent is about to execute content that appeared in `<tool>` N calls ago. Approve?"*
+- Set decays over time (default: 15 minutes); falsely-positive matches (legitimate command happens to share text with a packet log) are mitigated by reasonable substring thresholds (>20 chars verbatim, not just tokens)
+
+This catches the obvious failure mode where prompt injection works by tricking the agent into copying a VM-derived string **verbatim** into a destructive tool call. Paraphrased injection (rewording the command) bypasses this, but at that point the agent has done meaningful reasoning work and the trust-model prompt is more likely to fire.
+
+---
+
 ## Security model
 
 This is a security tool. The MCP server itself is a new attack surface. Three layers of containment:
@@ -377,6 +432,47 @@ If you greenlight this:
 6. **Documentation + Homebrew formula + MCP-servers PR** — 1 day
 
 ≈ 9 working days to a shippable Phase 1+2+1-composite. The remaining composites + destructive tier are post-launch.
+
+---
+
+## Implementation status (TDD progress)
+
+Live status of the test-driven rollout. Updated each loop iteration.
+
+### ✅ Done
+
+| Layer | File(s) | Tests |
+|---|---|---|
+| `CapabilityTier` enum + CLI parsing | `Sources/SecVFMCPCore/Capabilities.swift` | `CapabilityTierTests` (12) |
+| `ToolDescriptor` + `ToolCategory` + `ToolDirection` | `Sources/SecVFMCPCore/ToolDescriptor.swift` | (covered via registry) |
+| `ToolRegistry` (single source of truth for tool catalog) | `Sources/SecVFMCPCore/ToolRegistry.swift` | (covered via tier) |
+| `MCPAuditLogger` + `AuditSink` protocol | `Sources/SecVFMCPCore/AuditLog.swift` | `AuditLogTests` (6) |
+| `Dispatcher` (tier-gate → handler → trust-boundary wrap → audit) | `Sources/SecVFMCPCore/Dispatcher.swift` | `DispatcherTests` (7) |
+| JSON-RPC 2.0 framing (request parse, response serialize) | `Sources/SecVFMCPCore/JSONRPC.swift` | `JSONRPCTests` (11) |
+| Bridge protocols (`VMBridge`, `SwitchBridge`, `CaptureBridge`) | `Sources/SecVFMCPCore/Bridges.swift` | `BridgeProtocolTests` (8) |
+| Discovery handlers (`vm_list`, `vm_status`, `switch_status`, `capture_status`) | `Sources/SecVFMCPCore/Tools/DiscoveryHandlers.swift` | `DiscoveryHandlerTests` (8) |
+| `MCPRouter` (initialize / tools/list / tools/call) | `Sources/SecVFMCPCore/MCPRouter.swift` | `ServerRoutingTests` (6) |
+
+**Total: 58 tests passing across 7 suites.**
+
+### 🚧 In progress / coming next
+
+- Lifecycle handlers (`vm_start`, `vm_stop`, `vm_pause`, `vm_resume`, `capture_start`, `capture_stop`)
+- `secvf_detonate` composite workflow PoC (host→VM, capture, snapshot, report)
+- `AVFAuditSink` (concrete production adapter routing through `AVFAuditLog` for cross-process line coherence)
+- Confirmation hook + dangerous-command pattern matcher for `secvf_exec_in_vm`
+- stdio loop in `secvf-mcp/main.swift` connecting `MCPRouter` to real stdin/stdout
+
+### ⏳ Later phases
+
+- Composite workflows: `secvf_replay`, `secvf_compare_runs`, `secvf_summarize_run`, `secvf_export_run`
+- Forensics tools with real PCAP parsing: `secvf_packets_query`, `secvf_pcap_summarize`, `secvf_yara_scan`
+- Destructive tier tools: `secvf_vm_create`, `secvf_vm_clone`, `secvf_vm_delete`
+- VM allowlist (`agent_authorized` flag) wiring through to `metadata.json`
+- `brew install secvf-mcp` formula
+- Submission to [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers)
+
+---
 
 ---
 
