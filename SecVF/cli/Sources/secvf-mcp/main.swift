@@ -79,15 +79,22 @@ let auditLogger = MCPAuditLogger(sink: auditSink)
 // VMBridge: production = DNCVMBridge.
 //   - Reads (list / status) come from ~/.avf metadata files — works
 //     whether or not SecVF.app is running.
-//   - Writes (start / stop / force-stop) post DistributedNotification-
-//     Center notifications matching the existing com.secvf.cli.<action>
-//     contract SecVF.app's AppDelegate listens for. Fire-and-forget;
-//     agents poll secvf_vm_status to confirm the action.
+//   - Writes (start / stop / force-stop) post com.secvf.cli.<action>
+//     notifications matching SecVF.app's AppDelegate observers.
+//     Fire-and-forget; agents poll secvf_vm_status to confirm.
 //
-// Switch + Capture bridges: still stubs — these talk to in-process state
-// inside SecVF.app. The packet capture pipeline doesn't have a DNC-based
-// drive surface yet (would require new notification names in AppDelegate);
-// for now those tools return host_app_required.
+// CaptureBridge: production = DNCCaptureBridge.
+//   - start/stop post com.secvf.cli.capture-start / capture-stop with
+//     optional vmName / bpfFilter / pcapPath userInfo. SecVF.app drives
+//     PacketCaptureManager.shared on receipt — same singleton the GUI
+//     capture toggle uses.
+//   - status() is a fire-and-forget placeholder (no query-back DNC
+//     channel yet); agents who need live counters should call
+//     secvf_logs_network for new entries after starting.
+//
+// Switch bridge: stub — switch state is in-process inside SecVF.app and
+// doesn't have a DNC drive surface yet. Discovery returns "not running"
+// so tools/call rounds-trip cleanly.
 
 let avfRoot = ProcessInfo.processInfo.environment["SECVF_HOME"]
     ?? (NSHomeDirectory() + "/.avf")
@@ -104,29 +111,9 @@ actor StubSwitchBridge: SwitchBridge {
     }
 }
 
-actor StubCaptureBridge: CaptureBridge {
-    func status() async -> CaptureStatusRecord {
-        CaptureStatusRecord(
-            running: false,
-            startedAt: nil,
-            packetsCaptured: 0,
-            bytesCaptured: 0,
-            currentPcapPath: nil
-        )
-    }
-    func start(vm: String?, bpfFilter: String?, pcapPath: String?) async -> BridgeOutcome {
-        BridgeOutcome(success: false, errorCode: "host_app_required",
-                      errorMessage: "Packet capture is driven by SecVF.app's in-process tshark pipeline. Launch SecVF.app first.")
-    }
-    func stop() async -> BridgeOutcome {
-        BridgeOutcome(success: false, errorCode: "host_app_required",
-                      errorMessage: "Packet capture is driven by SecVF.app's in-process tshark pipeline.")
-    }
-}
-
 let vmBridge: any VMBridge = DNCVMBridge(avfRoot: avfRoot)
 let switchBridge = StubSwitchBridge()
-let captureBridge = StubCaptureBridge()
+let captureBridge: any CaptureBridge = DNCCaptureBridge()
 let runStore = RunStore()
 
 // VMWorkflowRunner — drives detonation runs through booting → capturing →

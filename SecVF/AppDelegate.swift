@@ -129,6 +129,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             name: NSNotification.Name("com.secvf.cli.force-stop"),
             object: nil
         )
+
+        // Capture lifecycle from MCP / CLI. The handlers drive the same
+        // PacketCaptureManager singleton the GUI uses — keeping one
+        // source of truth for the tshark pipeline.
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleCLIStartCapture(_:)),
+            name: NSNotification.Name("com.secvf.cli.capture-start"),
+            object: nil
+        )
+
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleCLIStopCapture(_:)),
+            name: NSNotification.Name("com.secvf.cli.capture-stop"),
+            object: nil
+        )
     }
 
     // MARK: - Notification Handlers
@@ -526,6 +543,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             }
         }
         NSLog("[CLI] VM not running or not found: \(vmName)")
+    }
+
+    // MARK: - CLI / MCP capture lifecycle
+    //
+    // PacketCaptureManager is the single source of truth for the tshark
+    // pipeline — the GUI capture toggle and these notification-driven
+    // handlers both route through it. Idempotent: starting an already-
+    // running capture or stopping a stopped one just logs and returns.
+
+    @objc private func handleCLIStartCapture(_ notification: Notification) {
+        let bpf = notification.userInfo?["bpfFilter"] as? String
+        let pcapPath = notification.userInfo?["pcapPath"] as? String
+        NSLog("[CLI] Start capture requested (bpf: %@, pcap: %@)",
+              bpf ?? "(none)", pcapPath ?? "(default)")
+
+        DispatchQueue.main.async {
+            let mgr = PacketCaptureManager.shared
+            if mgr.isCapturing {
+                NSLog("[CLI] Capture already running — ignoring duplicate start")
+                return
+            }
+            let ok = mgr.startCapture()
+            NSLog("[CLI] startCapture returned: %@", ok ? "true" : "false")
+            NotificationCenter.default.post(name: .captureStarted, object: nil)
+        }
+    }
+
+    @objc private func handleCLIStopCapture(_ notification: Notification) {
+        NSLog("[CLI] Stop capture requested")
+        DispatchQueue.main.async {
+            let mgr = PacketCaptureManager.shared
+            guard mgr.isCapturing else {
+                NSLog("[CLI] Capture not running — ignoring stop")
+                return
+            }
+            mgr.stopCapture()
+            NotificationCenter.default.post(name: .captureStopped, object: nil)
+        }
     }
 
     private func showMainWindowAndStartVM(for vmId: UUID) {
