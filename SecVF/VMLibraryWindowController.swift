@@ -85,6 +85,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         window?.minSize = NSSize(width: LayoutConstants.minWindowWidth,
                                  height: LayoutConstants.minWindowHeight)
 
+        // If `frameAutosaveName` restored a frame that no current screen
+        // overlaps (e.g., last run was on an external display that's no
+        // longer attached), center the window on the primary screen so it
+        // doesn't open off-screen.
+        if let win = window, !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(win.frame) }) {
+            win.center()
+        }
+
         // Apply dark theme, add sidebar, and add status bar
         applyDarkTheme()
         addSidebar()

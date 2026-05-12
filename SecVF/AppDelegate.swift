@@ -2849,9 +2849,28 @@ extension AppDelegate {
             libraryWindowController = VMLibraryWindowController()
         }
 
+        // Grab focus aggressively. Without `activate(ignoringOtherApps:)`
+        // first, makeKeyAndOrderFront() can leave the window behind the IDE
+        // or terminal that launched the app (race with the splash screen
+        // fade-out + dock activation). Bouncing the dock icon makes the
+        // window unmissable when SecVF was background-launched.
+        NSApp.activate(ignoringOtherApps: true)
         libraryWindowController?.showWindow(nil)
         libraryWindowController?.window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        libraryWindowController?.window?.orderFrontRegardless()
+
+        // A short deferred re-activate handles the case where another app
+        // grabs focus between `activate` and the splash-screen tear-down.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.libraryWindowController?.window?.makeKeyAndOrderFront(nil)
+        }
+
+        // Dock icon bounces once so the user can spot SecVF even if its
+        // window opened behind a fullscreen IDE. Uses `.informationalRequest`
+        // (one bounce) rather than `.criticalRequest` (continuous) so it's
+        // not annoying.
+        NSApp.requestUserAttention(.informationalRequest)
 
         // Refresh the table view (will trigger async load if needed)
         DispatchQueue.main.async {
