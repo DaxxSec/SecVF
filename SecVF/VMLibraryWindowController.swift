@@ -39,6 +39,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var tasksProgressBar: NSProgressIndicator?
     private var vmsPlaceholderLabel: NSTextField?
 
+    // Selected VM detail card (horizontal strip between table and packet panel)
+    private var selectedVMDetailCard: NSView?
+    private var detailNameLabel: NSTextField?
+    private var detailStatusPill: NSTextField?
+    private var detailOSLabel: NSTextField?
+    private var detailResourcesLabel: NSTextField?
+    private var detailDiskLabel: NSTextField?
+    private var detailNetworkModeLabel: NSTextField?
+    private var detailNetworkRateLabel: NSTextField?
+
     // Packet Log Panel
     private var packetLogPanel: NSView?
     private var packetLogTabControl: NSSegmentedControl?
@@ -546,10 +556,20 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Calculate areas - table above packet panel
+        // Calculate areas (bottom-up):
+        //   y=0:                 bottom of content view
+        //   buttons row:         padding → padding + 32
+        //   packet panel:        buttonRow + padding → packetPanel top
+        //   detail card:         packetPanel top + padding → detailCard top
+        //   table:               detailCard top + padding → top of content
+        let detailCardHeight: CGFloat = 70
+        let detailCardX = sidebarWidth + padding
+        let detailCardWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
+        let detailCardY = buttonRowHeight + padding + packetPanelHeight + padding
+
         let tableX = sidebarWidth + padding
-        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let tableY = buttonRowHeight + padding + packetPanelHeight + padding  // Above packet panel
+        let tableWidth = detailCardWidth
+        let tableY = detailCardY + detailCardHeight + padding
         let tableHeight = contentHeight - tableY - padding
 
         // Position the table scroll view
@@ -561,6 +581,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             scrollView.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
             scrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
         }
+
+        // Selected-VM detail card — at-a-glance summary for the highlighted
+        // row. Sits between the table and the packet panel.
+        addSelectedVMDetailCard(in: contentView,
+                                frame: NSRect(x: detailCardX, y: detailCardY,
+                                              width: detailCardWidth,
+                                              height: detailCardHeight))
 
         // Position buttons at the bottom, centered in the table area
         let buttons: [NSButton?] = [newButton, deleteButton, renameButton, cloneButton, importButton, configureButton, startButton]
@@ -574,6 +601,219 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             button.frame = NSRect(x: buttonX, y: padding, width: buttonWidth, height: 32)
             button.autoresizingMask = [.minYMargin, .minXMargin, .maxXMargin]
             buttonX += buttonWidth + buttonSpacing
+        }
+    }
+
+    // MARK: - Selected VM Detail Card
+
+    /// Build the horizontal "selected VM" detail strip and add it to the
+    /// content view. Cells are laid out in a single row:
+    ///
+    ///   [● STATUS] · name · OS · CPU·RAM · Disk · Network mode · ↓/↑ rate
+    ///
+    /// Empty state (no selection) shows a single muted hint.
+    private func addSelectedVMDetailCard(in contentView: NSView, frame: NSRect) {
+        // Remove the old card if we're being re-laid-out (window resize, etc.)
+        selectedVMDetailCard?.removeFromSuperview()
+
+        let card = NSView(frame: frame)
+        card.wantsLayer = true
+        card.layer?.backgroundColor = AppColors.backgroundPanel.cgColor
+        card.layer?.borderColor = AppColors.borderOD.cgColor
+        card.layer?.borderWidth = LayoutConstants.borderHairline
+        card.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        card.autoresizingMask = [.width, .minYMargin]
+
+        // Glow line along the top edge — visual cue that this card follows
+        // the table selection above it.
+        let glow = CAGradientLayer()
+        glow.frame = CGRect(x: 0, y: frame.height - 1, width: frame.width, height: 1)
+        glow.startPoint = CGPoint(x: 0, y: 0.5)
+        glow.endPoint = CGPoint(x: 1, y: 0.5)
+        glow.colors = [
+            NSColor.clear.cgColor,
+            AppColors.accentOD.cgColor,
+            NSColor.clear.cgColor
+        ]
+        glow.opacity = 0.5
+        card.layer?.addSublayer(glow)
+
+        let cellPadding: CGFloat = LayoutConstants.spacingLG
+        let cellY: CGFloat = (frame.height - 36) / 2  // Centered vertically for a 36pt-tall cell
+        var x: CGFloat = cellPadding
+
+        // ── STATUS pill ──────────────────────────────────────────────────
+        let pill = makeStatusPill()
+        pill.frame = NSRect(x: x, y: cellY + 6, width: 90, height: 22)
+        card.addSubview(pill)
+        detailStatusPill = pill
+        x += 90 + LayoutConstants.spacingLG
+
+        // ── Name (monospace, prominent) ──────────────────────────────────
+        let nameLabel = NSTextField(labelWithString: "")
+        nameLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .semibold)
+        nameLabel.textColor = AppColors.textPrimary
+        nameLabel.frame = NSRect(x: x, y: cellY + 2, width: 200, height: 30)
+        card.addSubview(nameLabel)
+        detailNameLabel = nameLabel
+        x += 200 + LayoutConstants.spacingLG
+
+        // ── OS / distro (muted mono) ─────────────────────────────────────
+        let osLabel = makeMetricLabel(caption: "OS", x: x, y: cellY, width: 130)
+        card.addSubview(osLabel.caption)
+        card.addSubview(osLabel.value)
+        detailOSLabel = osLabel.value
+        x += 130 + LayoutConstants.spacingMD
+
+        // ── CPU · RAM (mono) ─────────────────────────────────────────────
+        let resourcesLabel = makeMetricLabel(caption: "CPU · RAM", x: x, y: cellY, width: 100)
+        card.addSubview(resourcesLabel.caption)
+        card.addSubview(resourcesLabel.value)
+        detailResourcesLabel = resourcesLabel.value
+        x += 100 + LayoutConstants.spacingMD
+
+        // ── Disk usage ───────────────────────────────────────────────────
+        let diskLabel = makeMetricLabel(caption: "Disk", x: x, y: cellY, width: 110)
+        card.addSubview(diskLabel.caption)
+        card.addSubview(diskLabel.value)
+        detailDiskLabel = diskLabel.value
+        x += 110 + LayoutConstants.spacingMD
+
+        // ── Network mode (color-coded) ───────────────────────────────────
+        let netModeLabel = makeMetricLabel(caption: "Network", x: x, y: cellY, width: 90)
+        card.addSubview(netModeLabel.caption)
+        card.addSubview(netModeLabel.value)
+        detailNetworkModeLabel = netModeLabel.value
+        x += 90 + LayoutConstants.spacingMD
+
+        // ── Live rate (only meaningful when VM is running) ───────────────
+        let netRateLabel = makeMetricLabel(caption: "↓ / ↑", x: x, y: cellY, width: 140)
+        card.addSubview(netRateLabel.caption)
+        card.addSubview(netRateLabel.value)
+        detailNetworkRateLabel = netRateLabel.value
+
+        contentView.addSubview(card)
+        selectedVMDetailCard = card
+
+        // Populate with whatever the table currently has selected (if anything)
+        updateSelectedVMDetailCard()
+    }
+
+    /// Build a small `[CAPTION / value]` pair stacked vertically.
+    private func makeMetricLabel(caption: String, x: CGFloat, y: CGFloat, width: CGFloat)
+        -> (caption: NSTextField, value: NSTextField)
+    {
+        let captionLabel = NSTextField(labelWithString: caption.uppercased())
+        captionLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .medium)
+        captionLabel.textColor = AppColors.textSubtle
+        captionLabel.frame = NSRect(x: x, y: y + 22, width: width, height: 12)
+
+        let valueLabel = NSTextField(labelWithString: "—")
+        valueLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+        valueLabel.textColor = AppColors.textLight
+        valueLabel.frame = NSRect(x: x, y: y + 2, width: width, height: 18)
+        valueLabel.lineBreakMode = .byTruncatingTail
+
+        return (captionLabel, valueLabel)
+    }
+
+    /// Status pill: pill-shaped label with a leading dot, color-coded by
+    /// `selectedVM` state. Background tinted with the same hue at 15% alpha.
+    private func makeStatusPill() -> NSTextField {
+        let pill = NSTextField(labelWithString: "—")
+        pill.alignment = .center
+        pill.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .semibold)
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 10
+        pill.layer?.borderWidth = LayoutConstants.borderHairline
+        pill.drawsBackground = false
+        return pill
+    }
+
+    /// Refresh the detail card from `tableView`'s current selection. Called
+    /// whenever the selection changes or a VM's status changes.
+    private func updateSelectedVMDetailCard() {
+        guard selectedVMDetailCard != nil else { return }
+
+        let selectedRow = tableView?.selectedRow ?? -1
+        let allVMs = vmManager.virtualMachines
+
+        guard selectedRow >= 0, selectedRow < allVMs.count else {
+            // Empty state — no VM picked
+            detailNameLabel?.stringValue = "No VM selected"
+            detailNameLabel?.textColor = AppColors.textMuted
+            detailStatusPill?.stringValue = ""
+            detailStatusPill?.layer?.backgroundColor = NSColor.clear.cgColor
+            detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
+            detailOSLabel?.stringValue = "—"
+            detailResourcesLabel?.stringValue = "—"
+            detailDiskLabel?.stringValue = "—"
+            detailNetworkModeLabel?.stringValue = "—"
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+            return
+        }
+
+        let vm = allVMs[selectedRow]
+
+        detailNameLabel?.stringValue = vm.name
+        detailNameLabel?.textColor = AppColors.textPrimary
+
+        // Status pill (uses VMStatus from VMConfiguration)
+        let (pillText, pillColor): (String, NSColor) = {
+            switch vm.status {
+            case .running:  return ("● RUNNING",  AppColors.statusRunning)
+            case .starting: return ("◐ STARTING", AppColors.statusPaused)
+            case .stopping: return ("◐ STOPPING", AppColors.statusPaused)
+            case .stopped:  return ("○ STOPPED",  AppColors.statusStopped)
+            }
+        }()
+        detailStatusPill?.stringValue = pillText
+        detailStatusPill?.textColor = pillColor
+        detailStatusPill?.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
+        detailStatusPill?.layer?.borderColor = pillColor.withAlphaComponent(0.45).cgColor
+
+        // OS / distro — Linux VMs show "Kali 2024.1" style, macOS shows "macOS 15"
+        if vm.osType == "Linux", let distro = vm.linuxDistribution {
+            if let version = vm.linuxVersion, !version.isEmpty {
+                detailOSLabel?.stringValue = "\(distro) \(version)"
+            } else {
+                detailOSLabel?.stringValue = distro
+            }
+        } else {
+            detailOSLabel?.stringValue = vm.osType
+        }
+
+        // CPU · RAM (memorySize is bytes; convert to GB)
+        let ramGB = Double(vm.memorySize) / 1_073_741_824.0
+        detailResourcesLabel?.stringValue = String(format: "%d · %.1f GB", vm.cpuCount, ramGB)
+
+        // Disk — just configured capacity for now. Live "used" requires a
+        // bundle-size measurement off the main thread; deferred to a follow-up.
+        let diskGB = Double(vm.diskSize) / 1_073_741_824.0
+        detailDiskLabel?.stringValue = String(format: "%.0f GB", diskGB)
+
+        // Network mode (color-coded by safety)
+        switch vm.networkConfig.mode {
+        case .nat:
+            detailNetworkModeLabel?.stringValue = "NAT"
+            detailNetworkModeLabel?.textColor = AppColors.networkNAT
+        case .virtual:
+            detailNetworkModeLabel?.stringValue = vm.networkConfig.isRouter ? "ROUTER" : "VIRTUAL"
+            detailNetworkModeLabel?.textColor = AppColors.networkIsolated
+        }
+
+        // Live rate — placeholder until per-VM byte counters are surfaced
+        // from PacketCaptureManager. When the VM is running show the
+        // capture-pipeline aggregate so something useful appears here.
+        if vm.status == .running {
+            let bytes = Int64(PacketCaptureManager.shared.totalBytes)
+            let str = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
+            detailNetworkRateLabel?.stringValue = "\(str) seen"
+            detailNetworkRateLabel?.textColor = AppColors.accentOrangeHot
+        } else {
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
         }
     }
 
@@ -1546,6 +1786,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
             // Update status bar with current running VMs
             self.refreshStatusBar()
+
+            // Selected VM's pill + live rate also depend on status
+            self.updateSelectedVMDetailCard()
         }
     }
 
@@ -1762,6 +2005,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         updateButtonStates()
+        updateSelectedVMDetailCard()
     }
 
     // MARK: - Actions
