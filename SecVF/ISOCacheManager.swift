@@ -1004,19 +1004,29 @@ private class ISODownloadDelegate: NSObject, URLSessionDownloadDelegate {
         // — bytesHashed/totalBytes — mapped into the [0.4, 0.95] band so the
         // download phase keeps owning [0.0, 0.4]. The previous fake 1%/sec
         // timer hit 95% before hashing finished and looked broken.
+        //
+        // BUG FIX: The dispatches back to main MUST go through
+        // RunLoop.main.perform(inModes: [.common]), NOT DispatchQueue.main.async.
+        // The download UI shows a runModal() NSAlert, which runs the main
+        // run loop in `.modalPanel` mode. GCD's main queue is only serviced
+        // in `.default` mode → `DispatchQueue.main.async` blocks NEVER fire
+        // while the modal is up. Symptom: download bar hits 100%, then UI
+        // freezes during validation/verification until the modal somehow
+        // exits. The download phase already uses RunLoop.main.perform; the
+        // validation phase needs the same treatment.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let isValid = isoManager.verifySHA256(
                 file: destinationURL,
                 expectedHash: expectedHash,
                 progress: { [weak self] fraction in
                     let mapped = 0.4 + (0.55 * fraction)
-                    DispatchQueue.main.async {
+                    RunLoop.main.perform(inModes: [.common]) {
                         self?.progressHandler?(mapped, "Verifying checksum (\(checksumSource))...")
                     }
                 }
             )
 
-            DispatchQueue.main.async {
+            RunLoop.main.perform(inModes: [.common]) {
 
                 if !isValid {
                     let error = NSError(domain: "ISOCacheManager", code: 102, userInfo: [
