@@ -583,8 +583,8 @@ class VMLibraryWindowController: NSWindowController,
         hexPath.close()
         hexPath.lineWidth = 2.5
 
-        // Neon cyan stroke
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0).setStroke()
+        // OD glow stroke (was neon cyan)
+        AppColors.accentODGlow.setStroke()
         hexPath.stroke()
 
         // Digital lock icon in center
@@ -595,7 +595,7 @@ class VMLibraryWindowController: NSWindowController,
 
         // Lock body
         let lockBody = NSBezierPath(roundedRect: NSRect(x: lockX, y: lockY, width: lockWidth, height: lockHeight * 0.6), xRadius: 2, yRadius: 2)
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.8).setFill()
+        AppColors.accentODGlow.withAlphaComponent(0.8).setFill()
         lockBody.fill()
 
         // Lock shackle (top arc)
@@ -608,7 +608,7 @@ class VMLibraryWindowController: NSWindowController,
             clockwise: false
         )
         shacklePath.lineWidth = 3.0
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0).setStroke()
+        AppColors.accentODGlow.setStroke()
         shacklePath.stroke()
 
         // Keyhole
@@ -618,8 +618,11 @@ class VMLibraryWindowController: NSWindowController,
         keyholePath.fill()
         keyholeSlot.fill()
 
-        // Circuit board pattern in corners (hacker aesthetic)
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.4).setStroke()
+        // Circuit-board pattern in corners. Now uses safety orange — adds
+        // a second-accent hit that ties the logo to the rest of the
+        // tactical palette (status bar pulse, sparkline spikes, section
+        // ticks all use the same orange).
+        AppColors.accentOrange.withAlphaComponent(0.4).setStroke()
 
         // Top-left circuit
         let circuit1 = NSBezierPath()
@@ -630,7 +633,7 @@ class VMLibraryWindowController: NSWindowController,
         circuit1.stroke()
 
         // Draw nodes
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.8).setFill()
+        AppColors.accentOrangeHot.withAlphaComponent(0.85).setFill()
         NSBezierPath(ovalIn: NSRect(x: 23, y: 83, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 43, y: 83, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 43, y: 73, width: 4, height: 4)).fill()
@@ -641,10 +644,10 @@ class VMLibraryWindowController: NSWindowController,
         circuit2.line(to: CGPoint(x: 125, y: 35))
         circuit2.line(to: CGPoint(x: 125, y: 45))
         circuit2.lineWidth = 1.2
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.4).setStroke()
+        AppColors.accentOrange.withAlphaComponent(0.4).setStroke()
         circuit2.stroke()
 
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.8).setFill()
+        AppColors.accentOrangeHot.withAlphaComponent(0.85).setFill()
         NSBezierPath(ovalIn: NSRect(x: 143, y: 33, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 123, y: 33, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 123, y: 43, width: 4, height: 4)).fill()
@@ -1550,13 +1553,31 @@ class VMLibraryWindowController: NSWindowController,
             : "Switch · idle"
         statusBarSwitchLabel?.textColor = switchOn ? AppColors.textOD : AppColors.textMuted
 
-        // Capture state
-        let capturing = PacketCaptureManager.shared.isCapturing
-        let totalPackets = PacketCaptureManager.shared.totalPacketCount
-        statusBarCaptureLabel?.stringValue = capturing
-            ? "Capture · \(formatCount(totalPackets)) pkts"
-            : "Capture · idle"
-        statusBarCaptureLabel?.textColor = capturing ? AppColors.accentOrangeHot : AppColors.textMuted
+        // Capture / install state — the capture cell triple-roles:
+        //   1. While an AI Sandbox install is in flight (build / provision /
+        //      seal), show the phase + magenta tint so the user knows
+        //      something significant is happening.
+        //   2. Else if packet capture is running, show packet count in
+        //      hot-orange.
+        //   3. Else show "Capture · idle" in muted text.
+        let installPhase = AISandboxInstallTracker.shared.phase
+        let installInProgress: Bool = {
+            switch installPhase {
+            case .installing, .provisioning, .sealing: return true
+            default: return false
+            }
+        }()
+        if installInProgress {
+            statusBarCaptureLabel?.stringValue = "AI Sandbox · \(installPhase.humanLabel)"
+            statusBarCaptureLabel?.textColor = AppColors.accentMagenta
+        } else {
+            let capturing = PacketCaptureManager.shared.isCapturing
+            let totalPackets = PacketCaptureManager.shared.totalPacketCount
+            statusBarCaptureLabel?.stringValue = capturing
+                ? "Capture · \(formatCount(totalPackets)) pkts"
+                : "Capture · idle"
+            statusBarCaptureLabel?.textColor = capturing ? AppColors.accentOrangeHot : AppColors.textMuted
+        }
 
         // Disk free + version
         var diskStr = "—"
@@ -2318,24 +2339,25 @@ class VMLibraryWindowController: NSWindowController,
         containerView.widthAnchor.constraint(equalToConstant: cardWidth).isActive = true
         containerView.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
 
-        // State color and icon
+        // State color and icon — all five states read from semantic tokens
+        // so they stay in sync with the status pills + sparkline tinting.
         let stateColor: NSColor
         let stateIcon: String
         switch state.lowercased() {
         case "running":
-            stateColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)  // Neon green
+            stateColor = AppColors.statusRunning   // OD green
             stateIcon = "▶"
         case "starting":
-            stateColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0)  // Cyan
+            stateColor = AppColors.accentODGlow    // light OD — transitioning toward running
             stateIcon = "◐"
         case "paused":
-            stateColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)  // Yellow
+            stateColor = AppColors.statusPaused    // amber
             stateIcon = "⏸"
         case "stopping":
-            stateColor = NSColor(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0)  // Orange
+            stateColor = AppColors.accentOrange    // safety orange — attention
             stateIcon = "◑"
         default:
-            stateColor = NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0)  // Grey
+            stateColor = AppColors.statusStopped   // slate
             stateIcon = "●"
         }
 
