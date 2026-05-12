@@ -76,15 +76,18 @@ let auditLogger = MCPAuditLogger(sink: auditSink)
 
 // MARK: - Bridges
 //
-// VMBridge: production = FileBackedVMBridge reading from ~/.avf.
-// Read paths (list / status) work without the GUI app. Mutating paths
-// (start / stop) surface host_app_required because VZ lifecycle has to
-// happen in-process inside SecVF.app; an MCP-side DistributedNotification-
-// Center bridge for those is tracked in docs/POST-AUDIT-TODO.md.
+// VMBridge: production = DNCVMBridge.
+//   - Reads (list / status) come from ~/.avf metadata files — works
+//     whether or not SecVF.app is running.
+//   - Writes (start / stop / force-stop) post DistributedNotification-
+//     Center notifications matching the existing com.secvf.cli.<action>
+//     contract SecVF.app's AppDelegate listens for. Fire-and-forget;
+//     agents poll secvf_vm_status to confirm the action.
 //
-// Switch + Capture bridges: still stubs for now — these talk to in-process
-// state inside SecVF.app, same DNC-bridge limitation. Discovery returns
-// "not running" so tools/call rounds-trip cleanly.
+// Switch + Capture bridges: still stubs — these talk to in-process state
+// inside SecVF.app. The packet capture pipeline doesn't have a DNC-based
+// drive surface yet (would require new notification names in AppDelegate);
+// for now those tools return host_app_required.
 
 let avfRoot = ProcessInfo.processInfo.environment["SECVF_HOME"]
     ?? (NSHomeDirectory() + "/.avf")
@@ -121,7 +124,7 @@ actor StubCaptureBridge: CaptureBridge {
     }
 }
 
-let vmBridge: any VMBridge = FileBackedVMBridge(avfRoot: avfRoot)
+let vmBridge: any VMBridge = DNCVMBridge(avfRoot: avfRoot)
 let switchBridge = StubSwitchBridge()
 let captureBridge = StubCaptureBridge()
 let runStore = RunStore()
