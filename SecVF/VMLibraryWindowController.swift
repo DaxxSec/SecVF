@@ -72,6 +72,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Ensure window stays in front
         window?.level = .normal
         window?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window?.minSize = NSSize(width: LayoutConstants.minWindowWidth,
+                                 height: LayoutConstants.minWindowHeight)
 
         // Apply dark theme, add sidebar, and add status bar
         applyDarkTheme()
@@ -140,7 +142,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Style table view with dark theme - darker grey
         tableView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
         tableView?.enclosingScrollView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
-        tableView?.gridColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan grid
+        tableView?.gridColor = AppColors.borderCyan
 
         // Style toolbar buttons to match session panel
         styleToolbarButtons()
@@ -150,18 +152,61 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let buttons: [NSButton?] = [newButton, startButton, deleteButton, renameButton, cloneButton, importButton, configureButton]
 
         for button in buttons.compactMap({ $0 }) {
-            let title = button.title
             button.isBordered = false
             button.wantsLayer = true
-            button.layer?.backgroundColor = AppColors.backgroundButton.cgColor
-            button.layer?.borderColor = AppColors.accentCyan.withAlphaComponent(0.5).cgColor
-            button.layer?.borderWidth = 1.0
-            button.layer?.cornerRadius = 5
-            button.attributedTitle = NSAttributedString(string: title, attributes: [
-                .foregroundColor: AppColors.accentCyan,
-                .font: NSFont.systemFont(ofSize: 11, weight: .medium)
-            ])
+            button.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+            button.layer?.borderWidth = LayoutConstants.borderHairline
+            applyButtonStyle(button)
         }
+
+        // Primary (Start) gets a brighter border + filled background.
+        // Destructive (Delete) gets a red border so it stands out.
+        startButton?.layer?.borderColor = AppColors.accentNeonCyan.withAlphaComponent(0.8).cgColor
+        startButton?.layer?.borderWidth = LayoutConstants.borderEmphasis
+        deleteButton?.layer?.borderColor = AppColors.accentRed.withAlphaComponent(0.6).cgColor
+
+        // Keyboard shortcuts. The XIB sets Start's keyEquivalent to Return
+        // (no modifier) so it acts as the table's default action. Here we
+        // add the Cmd-modified shortcuts for the other operations so they
+        // don't capture bare keypresses.
+        newButton?.keyEquivalent = "n"
+        newButton?.keyEquivalentModifierMask = .command
+        importButton?.keyEquivalent = "i"
+        importButton?.keyEquivalentModifierMask = [.command, .shift]
+        deleteButton?.keyEquivalent = String(Character(UnicodeScalar(NSDeleteCharacter)!))
+        deleteButton?.keyEquivalentModifierMask = .command
+    }
+
+    /// Apply the cybersecurity-themed button styling. Buttons use a custom
+    /// layer instead of the system bezel, so we must visually depress when
+    /// disabled — otherwise `isEnabled = false` reads as "active but
+    /// unresponsive."
+    private func applyButtonStyle(_ button: NSButton) {
+        let isPrimary = (button === startButton)
+        let isDestructive = (button === deleteButton)
+        let enabled = button.isEnabled
+
+        let baseBg: NSColor = isPrimary ? AppColors.accentCyan.withAlphaComponent(0.18)
+                                        : AppColors.backgroundButton
+        let baseBorder: NSColor
+        if isDestructive {
+            baseBorder = AppColors.accentRed.withAlphaComponent(0.6)
+        } else if isPrimary {
+            baseBorder = AppColors.accentNeonCyan.withAlphaComponent(0.8)
+        } else {
+            baseBorder = AppColors.accentCyan.withAlphaComponent(0.5)
+        }
+        let textColor: NSColor = isDestructive ? AppColors.accentRed : AppColors.accentCyan
+
+        button.layer?.backgroundColor = baseBg.withAlphaComponent(enabled ? 1.0 : 0.35).cgColor
+        button.layer?.borderColor = baseBorder.withAlphaComponent(enabled ? 1.0 : 0.25).cgColor
+
+        let fontWeight: NSFont.Weight = isPrimary ? .semibold : .medium
+        button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+            .foregroundColor: textColor.withAlphaComponent(enabled ? 1.0 : 0.4),
+            .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: fontWeight)
+        ])
+        button.alphaValue = enabled ? 1.0 : 0.7
     }
 
     private func addSidebar() {
@@ -178,8 +223,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let gradientLayer = CAGradientLayer()
         gradientLayer.frame = sidebar.bounds
         gradientLayer.colors = [
-            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 1.0).cgColor,  // Deep black
-            NSColor(red: 0.06, green: 0.08, blue: 0.12, alpha: 1.0).cgColor   // Charcoal with blue tint
+            AppColors.gradientTop.cgColor,
+            AppColors.gradientBottom.cgColor
         ]
         gradientLayer.startPoint = CGPoint(x: 0, y: 1)
         gradientLayer.endPoint = CGPoint(x: 1, y: 0)
@@ -294,16 +339,17 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         titleLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0)
         legendView.addSubview(titleLabel)
 
-        // Protocol colors - matching the packet log colors
+        // Protocol colors — sourced from AppColors.proto* so the legend
+        // stays in lock-step with the per-packet row tinting.
         let protocols: [(String, NSColor)] = [
-            ("TCP", NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0)),     // Cyan
-            ("UDP", NSColor(red: 0.6, green: 1.0, blue: 0.6, alpha: 1.0)),     // Green
-            ("DNS", NSColor(red: 1.0, green: 0.9, blue: 0.4, alpha: 1.0)),     // Yellow
-            ("HTTP", NSColor(red: 1.0, green: 0.6, blue: 0.3, alpha: 1.0)),    // Orange
-            ("ARP", NSColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1.0)),     // Gray
-            ("ICMP", NSColor(red: 1.0, green: 0.5, blue: 0.5, alpha: 1.0)),    // Red/Pink
-            ("IPv6", NSColor(red: 0.8, green: 0.6, blue: 1.0, alpha: 1.0)),    // Purple
-            ("TLS", NSColor(red: 0.3, green: 1.0, blue: 0.8, alpha: 1.0))      // Teal
+            ("TCP",  AppColors.protoTCP),
+            ("UDP",  AppColors.protoUDP),
+            ("DNS",  AppColors.protoDNS),
+            ("HTTP", AppColors.protoHTTP),
+            ("ARP",  AppColors.protoARP),
+            ("ICMP", AppColors.protoICMP),
+            ("IPv6", AppColors.protoIPv6),
+            ("TLS",  AppColors.protoTLS)
         ]
 
         let colWidth = (width - 16) / 2
@@ -438,7 +484,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func createSeparator(y: CGFloat, width: CGFloat) -> NSBox {
         let separator = NSBox(frame: NSRect(x: 20, y: y, width: width - 40, height: 1))
         separator.boxType = .separator
-        separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan glow
+        separator.fillColor = AppColors.borderCyan
         return separator
     }
 
@@ -497,8 +543,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             scrollView.autoresizingMask = [.width, .height]
             scrollView.wantsLayer = true
             scrollView.layer?.borderWidth = 1
-            scrollView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
-            scrollView.layer?.cornerRadius = 6
+            scrollView.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
+            scrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
         }
 
         // Position buttons at the bottom, centered in the table area
@@ -540,10 +586,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         runningVMsPanel.autoresizingMask = [.minXMargin, .height]
 
         // Dark background with cyan border
-        runningVMsPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
-        runningVMsPanel.layer?.cornerRadius = 8
-        runningVMsPanel.layer?.borderWidth = 1
-        runningVMsPanel.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
+        runningVMsPanel.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
+        runningVMsPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        runningVMsPanel.layer?.borderWidth = LayoutConstants.borderHairline
+        runningVMsPanel.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
 
         // Panel title
         let titleLabel = NSTextField(labelWithString: "● ACTIVE VMs")
@@ -784,10 +830,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         legendPanel.autoresizingMask = [.minXMargin]
 
         // Dark background with cyan border (matching Active VMs panel)
-        legendPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
-        legendPanel.layer?.cornerRadius = 8
-        legendPanel.layer?.borderWidth = 1
-        legendPanel.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
+        legendPanel.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
+        legendPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        legendPanel.layer?.borderWidth = LayoutConstants.borderHairline
+        legendPanel.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
 
         // Add the protocol legend centered in the panel
         let legendHeight: CGFloat = 95
@@ -2205,11 +2251,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     private func updateButtonStates() {
         let hasSelection = tableView?.selectedRow ?? -1 >= 0
-        startButton?.isEnabled = hasSelection
-        deleteButton?.isEnabled = hasSelection
-        renameButton?.isEnabled = hasSelection
-        cloneButton?.isEnabled = hasSelection
-        configureButton?.isEnabled = hasSelection
+        // Selection-dependent buttons. New + Import work without a selection.
+        let selectionScoped: [NSButton?] = [startButton, deleteButton, renameButton, cloneButton, configureButton]
+        for button in selectionScoped.compactMap({ $0 }) {
+            button.isEnabled = hasSelection
+            applyButtonStyle(button)
+        }
+        // Always-enabled buttons still need their styling refreshed (e.g., on
+        // first call before styleToolbarButtons has run).
+        [newButton, importButton].compactMap({ $0 }).forEach(applyButtonStyle)
     }
 
     private func showAlert(message: String) {

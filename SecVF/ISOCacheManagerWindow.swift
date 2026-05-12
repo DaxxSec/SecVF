@@ -174,21 +174,25 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         let toolbarView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 50))
         toolbarView.wantsLayer = true
 
-        var xOffset: CGFloat = 20
+        var xOffset: CGFloat = LayoutConstants.spacingLG
 
         // Refresh button
         refreshButton = createStyledButton(title: "Refresh", x: xOffset, action: #selector(refreshCache))
+        refreshButton.toolTip = "Re-scan the on-disk cache and refresh the list"
         toolbarView.addSubview(refreshButton)
         xOffset += 110
 
-        // Check All for Updates button
+        // "Check All Updates" is constructed for callsite compatibility but
+        // kept hidden — the underlying upstream-version check isn't implemented
+        // yet. Surface it once `checkAllForUpdates()` does real work.
         checkAllButton = createStyledButton(title: "Check All Updates", x: xOffset, action: #selector(checkAllForUpdates))
+        checkAllButton.isHidden = true
         toolbarView.addSubview(checkAllButton)
-        xOffset += 160
 
-        // Clear All button
+        // Clear All button — destructive, tinted red
         clearAllButton = createStyledButton(title: "Clear All", x: xOffset, action: #selector(clearAllCache))
-        clearAllButton.bezelColor = NSColor(red: 0.8, green: 0.3, blue: 0.3, alpha: 1.0) // Red tint
+        clearAllButton.bezelColor = AppColors.accentRed
+        clearAllButton.toolTip = "Delete every cached ISO from disk (cannot be undone)"
         toolbarView.addSubview(clearAllButton)
 
         // Separator line
@@ -497,10 +501,13 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
             // Remove existing buttons if any
             cellView?.subviews.forEach { $0.removeFromSuperview() }
 
-            let buttonContainer = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 28))
+            // Two-button layout (Verify / Delete). "Check Update" was hidden
+            // until the upstream-version check is implemented — surfacing a
+            // permanently-disabled button is confusing UX.
+            let buttonContainer = NSView(frame: NSRect(x: 0, y: 0, width: 150, height: 28))
 
             // Verify button
-            let verifyButton = NSButton(frame: NSRect(x: 0, y: 4, width: 65, height: 20))
+            let verifyButton = NSButton(frame: NSRect(x: 0, y: 4, width: 70, height: 20))
             verifyButton.title = "Verify"
             verifyButton.bezelStyle = .roundRect
             verifyButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
@@ -509,22 +516,13 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
             verifyButton.action = #selector(verifyChecksum(_:))
             verifyButton.tag = row
             verifyButton.isEnabled = entry.sha256Status != .placeholder
+            verifyButton.toolTip = verifyButton.isEnabled
+                ? "Re-hash the cached ISO and compare against the recorded SHA-256"
+                : "No SHA-256 recorded for this image yet"
             buttonContainer.addSubview(verifyButton)
 
-            // Check Update button (disabled for now - feature for future)
-            let updateButton = NSButton(frame: NSRect(x: 70, y: 4, width: 75, height: 20))
-            updateButton.title = "Check Update"
-            updateButton.bezelStyle = .roundRect
-            updateButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
-            updateButton.controlSize = .small
-            updateButton.target = self
-            updateButton.action = #selector(checkForUpdate(_:))
-            updateButton.tag = row
-            updateButton.isEnabled = false // Disabled for now
-            buttonContainer.addSubview(updateButton)
-
             // Delete button
-            let deleteButton = NSButton(frame: NSRect(x: 150, y: 4, width: 60, height: 20))
+            let deleteButton = NSButton(frame: NSRect(x: 80, y: 4, width: 70, height: 20))
             deleteButton.title = "Delete"
             deleteButton.bezelStyle = .roundRect
             deleteButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
@@ -532,6 +530,7 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
             deleteButton.target = self
             deleteButton.action = #selector(deleteImage(_:))
             deleteButton.tag = row
+            deleteButton.toolTip = "Remove this ISO from the on-disk cache"
             buttonContainer.addSubview(deleteButton)
 
             cellView?.addSubview(buttonContainer)
@@ -561,9 +560,13 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
     }
 
     @objc private func checkAllForUpdates() {
+        // Upstream-version checks are not implemented yet. The toolbar entry
+        // is hidden in setupToolbar() so this stub should never fire in the
+        // shipping build — kept here only as the IBAction target for any
+        // dormant references.
         let alert = NSAlert()
-        alert.messageText = "Check All for Updates"
-        alert.informativeText = "This feature will check if newer versions of cached distributions are available.\n\nNote: This feature is currently under development."
+        alert.messageText = "Update Check Not Available"
+        alert.informativeText = "Automatic upstream-version checking isn't implemented yet. Re-run the distro picker to download the latest version manually."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
