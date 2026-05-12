@@ -589,19 +589,22 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         guard let window = window, let contentView = window.contentView else { return }
 
         let activePanelWidth: CGFloat = 220
-        let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
-        let packetPanelHeight: CGFloat = 180  // Horizontal packet panel below table
+        let buttonHeight: CGFloat = 32
+        let toolbarGap: CGFloat = 8                  // gap below the toolbar row
+        let libraryTabsHeight: CGFloat = 26
+        let libraryTabsGap: CGFloat = 8              // gap below the library-tabs row
+        let packetPanelHeight: CGFloat = 180
 
         // Set window to proper size
         let minWidth: CGFloat = sidebarWidth + 680 + activePanelWidth + padding * 3
-        let minHeight: CGFloat = 600  // Increased to accommodate packet panel
+        let minHeight: CGFloat = 620
         window.minSize = NSSize(width: minWidth, height: minHeight)
 
         // Set default window size on launch
         var windowFrame = window.frame
         let defaultWidth: CGFloat = 1150
-        let defaultHeight: CGFloat = 650  // Taller default
+        let defaultHeight: CGFloat = 720
         if windowFrame.size.width < defaultWidth || windowFrame.size.height < defaultHeight {
             windowFrame.size.width = defaultWidth
             windowFrame.size.height = defaultHeight
@@ -615,28 +618,37 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Calculate areas (bottom-up):
-        //   y=0:                 bottom of content view
-        //   buttons row:         padding → padding + 32
-        //   packet panel:        buttonRow + padding → packetPanel top
-        //   detail card:         packetPanel top + padding → detailCard top
-        //   table:               detailCard top + padding → top of content
-        let detailCardHeight: CGFloat = 70
-        let detailCardX = sidebarWidth + padding
-        let detailCardWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let detailCardY = buttonRowHeight + padding + packetPanelHeight + padding
+        // ── Vertical layout (top-down) ───────────────────────────────────
+        //   contentHeight                                  ← top of content
+        //     toolbar row    (h=32)   y = top - padding - 32
+        //     gap            (8)
+        //     library tabs   (h=26)
+        //     gap            (8)
+        //     table          (flex, fills middle)
+        //     detail card    (h=70)
+        //     packet panel   (h=180)
+        //     gap            (padding)
+        //     y=0                                          ← bottom of content
+        //
+        // The bottom button row was here historically. Moving it to the top
+        // matches macOS NSToolbar convention and the design mockup at
+        // docs/ui-redesign-mockup.html. We're not using NSToolbar itself
+        // (the existing IBOutlet buttons still drive every action), just
+        // re-anchoring them to the top of the content view.
+
+        let toolbarY = contentHeight - padding - buttonHeight
+
+        let libraryTabsY = toolbarY - toolbarGap - libraryTabsHeight
 
         let tableX = sidebarWidth + padding
-        let tableWidth = detailCardWidth
-        let tableY = detailCardY + detailCardHeight + padding
+        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
 
-        // Library-tab header: [Standard VMs] [AI Sandbox] segmented control
-        // sits at the top of the table region; recovery checkbox to its right
-        // is visible only in the AI Sandbox tab. Table height shrinks by the
-        // header height + gap so the toolbar doesn't push it off-screen.
-        let libraryTabsHeight: CGFloat = 26
-        let libraryTabsGap: CGFloat = 8
-        let libraryTabsY = contentHeight - padding - libraryTabsHeight
+        let detailCardHeight: CGFloat = 70
+        let detailCardX = sidebarWidth + padding
+        let detailCardWidth = tableWidth
+        let detailCardY = padding + packetPanelHeight + padding   // 15 + 180 + 15 = 210
+
+        let tableY = detailCardY + detailCardHeight + padding     // 210 + 70 + 15 = 295
         let tableHeight = libraryTabsY - libraryTabsGap - tableY
 
         addLibraryTabsHeader(in: contentView,
@@ -660,17 +672,24 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                                               width: detailCardWidth,
                                               height: detailCardHeight))
 
-        // Position buttons at the bottom, centered in the table area
-        let buttons: [NSButton?] = [newButton, deleteButton, renameButton, cloneButton, importButton, configureButton, startButton]
+        // Top toolbar — buttons aligned LEFT (not centered) so the primary
+        // action (Start) anchors visually at the left edge of the table,
+        // matching the mockup. Logical reading order: Start → New → Import
+        // → Configure → Clone → Rename → Delete. Delete is rightmost so the
+        // destructive button is visually distant from Start.
+        let buttons: [NSButton?] = [startButton, newButton, importButton,
+                                    configureButton, cloneButton,
+                                    renameButton, deleteButton]
         let buttonWidth: CGFloat = 80
-        let buttonSpacing: CGFloat = 10
-        let visibleButtons = buttons.compactMap { $0 }
-        let totalButtonsWidth = CGFloat(visibleButtons.count) * buttonWidth + CGFloat(visibleButtons.count - 1) * buttonSpacing
-        var buttonX = tableX + (tableWidth - totalButtonsWidth) / 2
-
-        for button in visibleButtons {
-            button.frame = NSRect(x: buttonX, y: padding, width: buttonWidth, height: 32)
-            button.autoresizingMask = [.minYMargin, .minXMargin, .maxXMargin]
+        let buttonSpacing: CGFloat = 8
+        var buttonX = tableX
+        for button in buttons.compactMap({ $0 }) {
+            button.frame = NSRect(x: buttonX, y: toolbarY,
+                                  width: buttonWidth, height: buttonHeight)
+            // .minYMargin keeps the bottom margin flexible so the toolbar
+            // floats with the content-view top edge on resize. .maxXMargin
+            // keeps the toolbar left-anchored so the group doesn't drift.
+            button.autoresizingMask = [.minYMargin, .maxXMargin]
             buttonX += buttonWidth + buttonSpacing
         }
     }
@@ -1185,9 +1204,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         let sidebarWidth: CGFloat = 220
         let activePanelWidth: CGFloat = 220
-        let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
         let packetPanelHeight: CGFloat = 180
+        // Toolbar moved to top of content view — these constants mirror
+        // adjustContentForSidebar()'s layout math so the right-side Active
+        // VMs panel and the packet panel stay aligned with the table.
+        let buttonHeight: CGFloat = 32
+        let toolbarGap: CGFloat = 8
+        let libraryTabsHeight: CGFloat = 26
+        let libraryTabsGap: CGFloat = 8
 
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
@@ -1196,8 +1221,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // ACTIVE VMs PANEL (Right side - same height as VM table)
         // ═══════════════════════════════════════════════════════════════
         let activePanelX = contentWidth - activePanelWidth - padding
-        let activePanelY = buttonRowHeight + padding + packetPanelHeight + padding  // Same as table Y
-        let activePanelHeight = contentHeight - activePanelY - padding
+        // Bottom edge aligns with packet panel top (y = padding + packetPanelHeight + padding).
+        // Top edge aligns with library tabs bottom (y = contentHeight - padding - buttonHeight - toolbarGap - libraryTabsHeight - libraryTabsGap).
+        let activePanelY = padding + packetPanelHeight + padding
+        let activePanelTop = contentHeight - padding - buttonHeight - toolbarGap - libraryTabsHeight - libraryTabsGap
+        let activePanelHeight = activePanelTop - activePanelY
 
         let runningVMsPanel = NSView(frame: NSRect(x: activePanelX, y: activePanelY, width: activePanelWidth, height: activePanelHeight))
         runningVMsPanel.wantsLayer = true
@@ -1320,10 +1348,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         statusBar = runningVMsPanel
 
         // ═══════════════════════════════════════════════════════════════
-        // PACKET LOG PANEL (Horizontal - below VM Table, extends to Active VMs)
+        // PACKET LOG PANEL (Horizontal - below VM Table, above the bottom)
         // ═══════════════════════════════════════════════════════════════
+        // With the toolbar moved to the top of the content view, the packet
+        // panel sits flush at the bottom (just a single padding gap to the
+        // window edge).
         let packetPanelX = sidebarWidth + padding
-        let packetPanelY = buttonRowHeight + padding
+        let packetPanelY = padding
         let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5  // Reduced gap
 
         let packetPanel = NSView(frame: NSRect(x: packetPanelX, y: packetPanelY, width: packetPanelWidth, height: packetPanelHeight))
@@ -1459,7 +1490,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // PROTOCOL LEGEND PANEL (Right side - below Active VMs, same level as packet panel)
         // ═══════════════════════════════════════════════════════════════
         let legendPanelX = activePanelX
-        let legendPanelY = buttonRowHeight + padding
+        let legendPanelY = padding
         let legendPanelWidth = activePanelWidth
         let legendPanelHeight = packetPanelHeight
 
