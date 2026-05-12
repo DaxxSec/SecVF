@@ -309,6 +309,19 @@ class VMLibraryWindowController: NSWindowController,
         deleteButton?.keyEquivalentModifierMask = .command
     }
 
+    /// Tactical-themed `NSSegmentedControl`. Uses `.roundRect` (cleaner than
+    /// the heavy `.texturedSquare`) and tints the selected segment with the
+    /// OD-green primary accent so it reads as part of the SecVF palette
+    /// instead of a stock blue Mac control. Falls back gracefully on older
+    /// macOS where `selectedSegmentBezelColor` is unavailable.
+    static func applyTacticalStyle(to control: NSSegmentedControl) {
+        control.segmentStyle = .roundRect
+        control.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        if #available(macOS 10.12.2, *) {
+            control.selectedSegmentBezelColor = AppColors.accentOD
+        }
+    }
+
     /// Apply the tactical-theme button styling. Buttons use a custom layer
     /// instead of the system bezel, so we must visually depress when
     /// disabled — otherwise `isEnabled = false` reads as "active but
@@ -1209,7 +1222,7 @@ class VMLibraryWindowController: NSWindowController,
         tabs.frame = NSRect(x: frame.origin.x, y: frame.origin.y,
                             width: 240, height: frame.height)
         tabs.selectedSegment = currentLibraryTab.rawValue
-        tabs.segmentStyle = .texturedSquare
+        Self.applyTacticalStyle(to: tabs)
         tabs.autoresizingMask = [.minYMargin]  // stick to top of content view
         contentView.addSubview(tabs)
         libraryTabControl = tabs
@@ -1600,35 +1613,38 @@ class VMLibraryWindowController: NSWindowController,
         // Tab control (Packets / Protocols) — shifted right to clear the
         // wider "▸ LIVE TRAFFIC" title.
         let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 160, y: packetPanelHeight - 30, width: 130, height: 24)
+        tabControl.frame = NSRect(x: 160, y: packetPanelHeight - 30, width: 140, height: 24)
         tabControl.selectedSegment = 0
-        tabControl.segmentStyle = .texturedSquare
+        Self.applyTacticalStyle(to: tabControl)
         packetPanel.addSubview(tabControl)
         packetLogTabControl = tabControl
 
-        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols
+        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols.
+        // Widened "macOS" segment from 45 → 60 so the full label fits at 11pt
+        // (the previous 45pt clipped to "ma..." on Aqua's roundRect style).
         let vmFilterControl = NSSegmentedControl(labels: ["macOS", "Kali", "All"], trackingMode: .selectOne, target: self, action: #selector(vmFilterChanged(_:)))
-        vmFilterControl.frame = NSRect(x: 298, y: packetPanelHeight - 30, width: 140, height: 24)
+        vmFilterControl.frame = NSRect(x: 310, y: packetPanelHeight - 30, width: 160, height: 24)
         vmFilterControl.selectedSegment = 0  // Default to macOS
-        vmFilterControl.segmentStyle = .texturedSquare
-        vmFilterControl.setWidth(45, forSegment: 0)  // macOS
-        vmFilterControl.setWidth(45, forSegment: 1)  // Kali
-        vmFilterControl.setWidth(40, forSegment: 2)  // All
+        Self.applyTacticalStyle(to: vmFilterControl)
+        vmFilterControl.setWidth(60, forSegment: 0)  // macOS — was 45 (truncated)
+        vmFilterControl.setWidth(50, forSegment: 1)  // Kali
+        vmFilterControl.setWidth(45, forSegment: 2)  // All
         packetPanel.addSubview(vmFilterControl)
         packetVMFilterControl = vmFilterControl
 
-        // Filter ARP checkbox (checked by default)
+        // Filter ARP checkbox (checked by default) — moved right to clear
+        // the widened macOS/Kali/All segmented control.
         let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
-        arpCheckbox.frame = NSRect(x: 440, y: packetPanelHeight - 30, width: 80, height: 24)
+        arpCheckbox.frame = NSRect(x: 480, y: packetPanelHeight - 30, width: 90, height: 24)
         arpCheckbox.state = .on  // Checked by default
-        arpCheckbox.font = NSFont.systemFont(ofSize: 10)
+        arpCheckbox.font = NSFont.systemFont(ofSize: 11)
         arpCheckbox.contentTintColor = NSColor.white
         packetPanel.addSubview(arpCheckbox)
 
         // ARP filtered count label — uses the amber token instead of an
         // inline hex literal so the legend stays consistent.
         let arpCountLabel = NSTextField(labelWithString: "(0)")
-        arpCountLabel.frame = NSRect(x: 518, y: packetPanelHeight - 28, width: 45, height: 18)
+        arpCountLabel.frame = NSRect(x: 568, y: packetPanelHeight - 28, width: 45, height: 18)
         arpCountLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
         arpCountLabel.textColor = AppColors.accentYellow
         arpCountLabel.alignment = .left
@@ -1693,27 +1709,34 @@ class VMLibraryWindowController: NSWindowController,
         packetLogPanel = packetPanel
 
         // ═══════════════════════════════════════════════════════════════
-        // PROTOCOL LEGEND PANEL (Right side - below Active VMs, same level as packet panel)
+        // PROTOCOL LEGEND PANEL (Right side - below Active VMs)
         // ═══════════════════════════════════════════════════════════════
+        // Previously the panel was sized to match the packet panel (180pt
+        // tall), leaving a big empty band below the 95pt-tall legend
+        // content. Shrunk to fit content + 12pt vertical padding so the
+        // panel reads as a tight reference card, not a half-empty box.
+        let legendHeight: CGFloat = 95
+        let legendVerticalPad: CGFloat = 12
+        let legendPanelHeight = legendHeight + legendVerticalPad * 2  // 119pt
         let legendPanelX = activePanelX
         let legendPanelY = padding
         let legendPanelWidth = activePanelWidth
-        let legendPanelHeight = packetPanelHeight
 
         let legendPanel = NSView(frame: NSRect(x: legendPanelX, y: legendPanelY, width: legendPanelWidth, height: legendPanelHeight))
         legendPanel.wantsLayer = true
         legendPanel.autoresizingMask = [.minXMargin]
 
-        // Dark background with cyan border (matching Active VMs panel)
+        // Dark background with OD border (matching Active VMs panel)
         legendPanel.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
         legendPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
         legendPanel.layer?.borderWidth = LayoutConstants.borderHairline
         legendPanel.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
 
-        // Add the protocol legend centered in the panel
-        let legendHeight: CGFloat = 95
+        // Legend content fills the panel minus a uniform vertical pad.
         let legendView = createProtocolLegend(width: legendPanelWidth - 16, height: legendHeight)
-        legendView.frame = NSRect(x: 8, y: (legendPanelHeight - legendHeight) / 2, width: legendPanelWidth - 16, height: legendHeight)
+        legendView.frame = NSRect(x: 8, y: legendVerticalPad,
+                                  width: legendPanelWidth - 16,
+                                  height: legendHeight)
         legendPanel.addSubview(legendView)
 
         contentView.addSubview(legendPanel)
@@ -2783,7 +2806,13 @@ class VMLibraryWindowController: NSWindowController,
 
         switch colId {
         case "NameColumn":
-            cell?.textField?.stringValue = bundle.displayName + (bundle.isBase ? " (base)" : "")
+            // Sessions get a "↳" arrow prefix so the parent-child link reads
+            // visually even when the disclosure triangle is collapsed. Base
+            // bundle gets a "◆" diamond marker to distinguish it as the
+            // template.
+            let prefix = bundle.isBase ? "◆  " : "↳  "
+            let suffix = bundle.isBase ? "  (base)" : ""
+            cell?.textField?.stringValue = prefix + bundle.displayName + suffix
             cell?.textField?.font = bundle.isBase
                 ? NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
                 : NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
