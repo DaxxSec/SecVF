@@ -46,6 +46,57 @@ extension ToolCategory {
     }
 }
 
+// MARK: - Typed input schema
+//
+// Each tool advertises its parameters in JSON Schema form so MCP clients
+// can give the agent a typed tool catalog. The previous `additionalProperties:
+// true` shape forced the agent to guess; this lets it call correctly the
+// first time.
+
+public struct InputSchemaProperty: Sendable {
+    public let type: String        // "string" | "integer" | "boolean" | "object" | "array"
+    public let description: String
+
+    public init(type: String, description: String) {
+        self.type = type
+        self.description = description
+    }
+}
+
+public struct InputSchema: Sendable {
+    public let type: String = "object"
+    public let properties: [String: InputSchemaProperty]
+    public let required: [String]
+
+    public init(
+        properties: [String: InputSchemaProperty] = [:],
+        required: [String] = []
+    ) {
+        self.properties = properties
+        self.required = required
+    }
+
+    /// Empty schema — for tools that take no parameters.
+    public static let empty = InputSchema(properties: [:], required: [])
+
+    /// Serialize to the JSON object that MCP `tools/list` expects.
+    public func toJSON() -> [String: Any] {
+        var props: [String: Any] = [:]
+        for (key, prop) in properties {
+            props[key] = [
+                "type": prop.type,
+                "description": prop.description,
+            ]
+        }
+        return [
+            "type": type,
+            "properties": props,
+            "required": required,
+            "additionalProperties": false,
+        ]
+    }
+}
+
 /// Describes a single MCP tool. The dispatch closure is intentionally
 /// async-throws — every tool can be slow or fail; the server takes care of
 /// turning errors into MCP error responses.
@@ -54,17 +105,20 @@ public struct ToolDescriptor: Sendable {
     public let category: ToolCategory
     public let direction: ToolDirection
     public let description: String
+    public let inputSchema: InputSchema?
 
     public init(
         name: String,
         category: ToolCategory,
         direction: ToolDirection,
-        description: String
+        description: String,
+        inputSchema: InputSchema? = nil
     ) {
         self.name = name
         self.category = category
         self.direction = direction
         self.description = description
+        self.inputSchema = inputSchema
     }
 
     /// Whether this tool is exposed at the given capability tier.

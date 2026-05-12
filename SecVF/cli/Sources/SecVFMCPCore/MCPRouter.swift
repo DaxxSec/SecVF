@@ -34,7 +34,9 @@ public final class MCPRouter: @unchecked Sendable {
         tier: CapabilityTier,
         handlers: [String: ToolHandler],
         auditLogger: MCPAuditLogger,
-        clientPid: Int
+        clientPid: Int,
+        matcher: CommandPatternMatcher? = nil,
+        hook: ConfirmationHook? = nil
     ) {
         self.tier = tier
         self.registry = ToolRegistry(tier: tier)
@@ -43,7 +45,9 @@ public final class MCPRouter: @unchecked Sendable {
             handlers: handlers,
             auditLogger: auditLogger,
             clientPid: clientPid,
-            registry: registry
+            registry: registry,
+            matcher: matcher,
+            hook: hook
         )
     }
 
@@ -110,17 +114,15 @@ public final class MCPRouter: @unchecked Sendable {
 
     private func handleToolsList(id: JSONRPCID) -> JSONRPCResponse {
         let tools: [[String: Any]] = registry.descriptors.map { desc in
-            [
+            // Each descriptor carries a typed InputSchema so the agent
+            // sees real parameter types + required-fields constraints
+            // when it discovers the tool catalog. Descriptors without
+            // a schema fall back to "no params" (.empty equivalent).
+            let schemaJSON = (desc.inputSchema ?? .empty).toJSON()
+            return [
                 "name": desc.name,
                 "description": desc.description,
-                "inputSchema": [
-                    // Minimal schema for now — agents can call tools with
-                    // arbitrary kwargs. Each handler validates its required
-                    // params explicitly. Full per-tool input schemas land in
-                    // a later TDD slice.
-                    "type": "object",
-                    "additionalProperties": true,
-                ] as [String: Any],
+                "inputSchema": schemaJSON,
             ]
         }
         return JSONRPCResponse.success(id: id, result: ["tools": tools])

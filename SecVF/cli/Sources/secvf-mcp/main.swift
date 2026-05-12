@@ -74,28 +74,20 @@ let logsDir = ProcessInfo.processInfo.environment["SECVF_MCP_LOGS_DIR"]
 let auditSink = FileAuditSink(directory: logsDir)
 let auditLogger = MCPAuditLogger(sink: auditSink)
 
-// MARK: - Stub bridges (placeholder until production bridges are wired)
+// MARK: - Bridges
 //
-// These are intentionally minimal — they let `tools/list` and basic
-// `tools/call` round-trip work for protocol-conformance testing without
-// requiring the SecVF app to be running. Production bridges land in a
-// follow-up iteration.
+// VMBridge: production = FileBackedVMBridge reading from ~/.avf.
+// Read paths (list / status) work without the GUI app. Mutating paths
+// (start / stop) surface host_app_required because VZ lifecycle has to
+// happen in-process inside SecVF.app; an MCP-side DistributedNotification-
+// Center bridge for those is tracked in docs/POST-AUDIT-TODO.md.
+//
+// Switch + Capture bridges: still stubs for now — these talk to in-process
+// state inside SecVF.app, same DNC-bridge limitation. Discovery returns
+// "not running" so tools/call rounds-trip cleanly.
 
-actor StubVMBridge: VMBridge {
-    func listVMs() async -> [VMRecord] {
-        // In production this reads from ~/.avf/Linux/*.bundle and ~/.avf/MacOS/*.bundle.
-        return []
-    }
-    func status(forVM name: String) async -> VMRecord? { nil }
-    func start(vmNamed name: String) async -> BridgeOutcome {
-        BridgeOutcome(success: false, errorCode: "not_implemented",
-                      errorMessage: "Production VM bridge not yet wired. See docs/POST-AUDIT-TODO.md.")
-    }
-    func stop(vmNamed name: String) async -> BridgeOutcome {
-        BridgeOutcome(success: false, errorCode: "not_implemented",
-                      errorMessage: "Production VM bridge not yet wired. See docs/POST-AUDIT-TODO.md.")
-    }
-}
+let avfRoot = ProcessInfo.processInfo.environment["SECVF_HOME"]
+    ?? (NSHomeDirectory() + "/.avf")
 
 actor StubSwitchBridge: SwitchBridge {
     func status() async -> SwitchStatusRecord {
@@ -120,19 +112,49 @@ actor StubCaptureBridge: CaptureBridge {
         )
     }
     func start(vm: String?, bpfFilter: String?, pcapPath: String?) async -> BridgeOutcome {
-        BridgeOutcome(success: false, errorCode: "not_implemented",
-                      errorMessage: "Production capture bridge not yet wired.")
+        BridgeOutcome(success: false, errorCode: "host_app_required",
+                      errorMessage: "Packet capture is driven by SecVF.app's in-process tshark pipeline. Launch SecVF.app first.")
     }
     func stop() async -> BridgeOutcome {
-        BridgeOutcome(success: false, errorCode: "not_implemented",
-                      errorMessage: "Production capture bridge not yet wired.")
+        BridgeOutcome(success: false, errorCode: "host_app_required",
+                      errorMessage: "Packet capture is driven by SecVF.app's in-process tshark pipeline.")
     }
 }
 
-let vmBridge = StubVMBridge()
+let vmBridge: any VMBridge = FileBackedVMBridge(avfRoot: avfRoot)
 let switchBridge = StubSwitchBridge()
 let captureBridge = StubCaptureBridge()
 let runStore = RunStore()
+
+// VMWorkflowRunner — drives detonation runs through booting → capturing →
+// analyzing → done. In production this kicks off when secvf_detonate_start
+// queues a run. The bridges it talks to are the same ones the rest of the
+// server uses, so it inherits the host-app limitation: real detonations
+// require SecVF.app. For now, the runner is wired but the binary doesn't
+// kick it off — the user opts in by approving a confirmation hook on the
+// next iteration.
+let workflowRunner = VMWorkflowRunner(
+    runs: runStore,
+    vmBridge: vmBridge,
+    captureBridge: captureBridge
+)
+
+// Confirmation hook + pattern matcher.
+// User configures via env vars:
+//   SECVF_MCP_CONFIRM_HOOK = /path/to/script  → ScriptHook
+//   SECVF_MCP_NO_CONFIRM = 1                  → AlwaysAllowHook
+// Default: AlwaysDenyHook — pattern matches always require explicit policy.
+let matcher = CommandPatternMatcher.defaultMatcher()
+let confirmationHook: ConfirmationHook = {
+    let env = ProcessInfo.processInfo.environment
+    if env["SECVF_MCP_NO_CONFIRM"] == "1" {
+        return AlwaysAllowHook()
+    }
+    if let path = env["SECVF_MCP_CONFIRM_HOOK"], !path.isEmpty {
+        return ScriptHook(scriptPath: path)
+    }
+    return AlwaysDenyHook()
+}()
 
 // MARK: - Handler registry
 
@@ -147,8 +169,8 @@ let handlers: [String: ToolHandler] = [
     "secvf_vm_stop":         VMStopHandler(bridge: vmBridge),
     "secvf_capture_start":   CaptureStartHandler(bridge: captureBridge),
     "secvf_capture_stop":    CaptureStopHandler(bridge: captureBridge),
-    // Composite workflow (safe-mutate)
-    "secvf_detonate_start":  DetonateStartHandler(runs: runStore),
+    // Composite workflow (safe-mutate) — DetonateStart kicks off the runner
+    "secvf_detonate_start":  DetonateStartHandler(runs: runStore, runner: workflowRunner),
     "secvf_run_status":      RunStatusHandler(runs: runStore),
     "secvf_run_result":      RunResultHandler(runs: runStore),
 ]
@@ -157,7 +179,9 @@ let router = MCPRouter(
     tier: tier,
     handlers: handlers,
     auditLogger: auditLogger,
-    clientPid: Int(ProcessInfo.processInfo.processIdentifier)
+    clientPid: Int(ProcessInfo.processInfo.processIdentifier),
+    matcher: matcher,
+    hook: confirmationHook
 )
 
 // MARK: - stdio loop

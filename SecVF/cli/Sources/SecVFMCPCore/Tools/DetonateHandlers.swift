@@ -93,6 +93,7 @@ public actor RunStore {
             state: r.state,
             templateVM: r.templateVM,
             samplePath: r.samplePath,
+            timeoutSeconds: r.timeoutSeconds,
             startedAt: r.startedAt,
             report: r.report,
             error: r.error
@@ -105,6 +106,7 @@ public struct RunSnapshot: Sendable {
     public let state: RunState
     public let templateVM: String
     public let samplePath: String
+    public let timeoutSeconds: Int
     public let startedAt: Date
     // [String: Any] kept loose; agents see structured content via dispatcher.
     private let _report: [String: Any]?
@@ -112,12 +114,13 @@ public struct RunSnapshot: Sendable {
     public let error: String?
 
     public init(id: String, state: RunState, templateVM: String,
-                samplePath: String, startedAt: Date,
+                samplePath: String, timeoutSeconds: Int, startedAt: Date,
                 report: [String: Any]?, error: String?) {
         self.id = id
         self.state = state
         self.templateVM = templateVM
         self.samplePath = samplePath
+        self.timeoutSeconds = timeoutSeconds
         self.startedAt = startedAt
         self._report = report
         self.error = error
@@ -128,8 +131,15 @@ public struct RunSnapshot: Sendable {
 
 public final class DetonateStartHandler: ToolHandler {
     private let runs: RunStore
-    public init(runs: RunStore) {
+    private let runner: VMWorkflowRunner?
+
+    /// Initializer with optional runner. When `runner` is non-nil, the
+    /// handler kicks it off in a detached Task so the agent gets an
+    /// immediate `run_id` back. When nil (test mode), the run sits at
+    /// .queued until the test manually drives it.
+    public init(runs: RunStore, runner: VMWorkflowRunner? = nil) {
         self.runs = runs
+        self.runner = runner
     }
 
     public func invoke(params: [String: Any]) async -> ToolHandlerResult {
@@ -153,14 +163,20 @@ public final class DetonateStartHandler: ToolHandler {
             timeoutSeconds: timeout
         )
 
-        // In production: kick off the actual workflow asynchronously via a
-        // VMWorkflowRunner that drives the bridges through boot → capture →
-        // snapshot → analyze. For the PoC, the run sits at .queued until a
-        // test (or production runner) calls runs.markDone.
+        // If a runner is wired (production), kick it off in a detached
+        // Task. The agent gets the run_id back immediately and polls
+        // secvf_run_status. Without a runner (test mode), the run sits
+        // at .queued for the caller to drive.
+        if let runner = runner {
+            Task.detached {
+                await runner.run(runId: runId)
+            }
+        }
+
         return .success([
             "run_id": runId,
             "state": RunState.queued.rawValue,
-            "estimated_duration_seconds": timeout + 30,  // boot + capture + analyze overhead
+            "estimated_duration_seconds": timeout + 5,  // boot wait + analyze overhead
             "poll_with": "secvf_run_status",
             "fetch_result_with": "secvf_run_result",
         ])
