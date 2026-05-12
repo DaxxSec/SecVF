@@ -41,11 +41,11 @@ struct CachedImageEntry {
 
         var color: NSColor {
             switch self {
-            case .verified: return NSColor(red: 0.0, green: 0.8, blue: 0.2, alpha: 1.0) // Green
-            case .notVerified: return NSColor(red: 0.9, green: 0.7, blue: 0.0, alpha: 1.0) // Yellow
-            case .placeholder: return NSColor.systemGray
-            case .verifying: return NSColor.systemBlue
-            case .failed: return NSColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1.0) // Red
+            case .verified:    return AppColors.statusRunning    // OD green — passed checksum
+            case .notVerified: return AppColors.accentYellow     // amber — needs verification
+            case .placeholder: return AppColors.statusStopped    // slate — no checksum recorded
+            case .verifying:   return AppColors.accentODGlow     // OD highlight — in flight
+            case .failed:      return AppColors.accentRed        // red — mismatch
             }
         }
     }
@@ -101,9 +101,9 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         // Set window appearance to dark
         window.appearance = NSAppearance(named: .darkAqua)
 
-        // Cybersecurity dark background - deep black
+        // Tactical dark background
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
+        contentView.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
     }
 
     // MARK: - UI Setup
@@ -142,14 +142,14 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         let titleLabel = NSTextField(labelWithString: "ISO/IPSW Cache")
         titleLabel.frame = NSRect(x: 20, y: 40, width: 300, height: 30)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 24, weight: .heavy)
-        titleLabel.textColor = NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0) // Neon cyan
+        titleLabel.textColor = AppColors.accentODGlow
         headerView.addSubview(titleLabel)
 
         // Subtitle
         let subtitleLabel = NSTextField(labelWithString: "Manage downloaded VM installation images")
         subtitleLabel.frame = NSRect(x: 20, y: 20, width: 400, height: 18)
-        subtitleLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        subtitleLabel.textColor = NSColor(red: 0.5, green: 0.75, blue: 0.8, alpha: 1.0) // Light cyan
+        subtitleLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .regular)
+        subtitleLabel.textColor = AppColors.textOD
         headerView.addSubview(subtitleLabel)
 
         // Search field
@@ -162,8 +162,9 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
 
         // Separator line
         let separator = NSBox(frame: NSRect(x: 20, y: 0, width: width - 40, height: 1))
-        separator.boxType = .separator
-        separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3) // Subtle cyan glow
+        separator.boxType = .custom
+        separator.borderWidth = 0
+        separator.fillColor = AppColors.borderOD
         separator.autoresizingMask = [.width]
         headerView.addSubview(separator)
 
@@ -197,8 +198,9 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
 
         // Separator line
         let separator = NSBox(frame: NSRect(x: 20, y: 0, width: width - 40, height: 1))
-        separator.boxType = .separator
-        separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)
+        separator.boxType = .custom
+        separator.borderWidth = 0
+        separator.fillColor = AppColors.borderOD
         separator.autoresizingMask = [.width]
         toolbarView.addSubview(separator)
 
@@ -225,13 +227,13 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.borderType = .noBorder
-        scrollView.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
+        scrollView.backgroundColor = AppColors.backgroundSecondary
 
         // Create table view
         tableView = NSTableView(frame: scrollView.bounds)
         tableView.style = .plain
-        tableView.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
-        tableView.gridColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3) // Subtle cyan grid
+        tableView.backgroundColor = AppColors.backgroundSecondary
+        tableView.gridColor = AppColors.borderOD
         tableView.gridStyleMask = [.solidHorizontalGridLineMask]
         tableView.rowSizeStyle = .medium
         tableView.usesAlternatingRowBackgroundColors = false
@@ -293,24 +295,25 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         let gradientLayer = CAGradientLayer()
         gradientLayer.frame = footerView.bounds
         gradientLayer.colors = [
-            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 0.95).cgColor,
-            NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 0.95).cgColor
+            AppColors.gradientTop.withAlphaComponent(0.95).cgColor,
+            AppColors.gradientBottom.withAlphaComponent(0.95).cgColor
         ]
         gradientLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         footerView.layer?.addSublayer(gradientLayer)
 
         // Top border
         let borderView = NSBox(frame: NSRect(x: 0, y: 49, width: width, height: 1))
-        borderView.boxType = .separator
-        borderView.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.5)
+        borderView.boxType = .custom
+        borderView.borderWidth = 0
+        borderView.fillColor = AppColors.borderODEmphasis
         borderView.autoresizingMask = [.width]
         footerView.addSubview(borderView)
 
         // Total cache size label
         totalSizeLabel = NSTextField(labelWithString: "Total Cache Size: Calculating...")
         totalSizeLabel.frame = NSRect(x: 20, y: 15, width: 400, height: 20)
-        totalSizeLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-        totalSizeLabel.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0) // Neon green
+        totalSizeLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .semibold)
+        totalSizeLabel.textColor = AppColors.statusRunning
         totalSizeLabel.isEditable = false
         totalSizeLabel.isBordered = false
         totalSizeLabel.drawsBackground = false
@@ -320,8 +323,8 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         let cacheLocationLabel = NSTextField(labelWithString: "Cache Location: ~/.avf/VMImages/")
         cacheLocationLabel.frame = NSRect(x: width - 320, y: 15, width: 300, height: 20)
         cacheLocationLabel.alignment = .right
-        cacheLocationLabel.font = NSFont.systemFont(ofSize: 11, weight: .regular)
-        cacheLocationLabel.textColor = NSColor(red: 0.5, green: 0.75, blue: 0.8, alpha: 1.0)
+        cacheLocationLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+        cacheLocationLabel.textColor = AppColors.textOD
         cacheLocationLabel.isEditable = false
         cacheLocationLabel.isBordered = false
         cacheLocationLabel.drawsBackground = false
@@ -463,7 +466,7 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         switch identifier.rawValue {
         case "name":
             cellView?.textField?.stringValue = entry.name
-            cellView?.textField?.textColor = NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0) // Neon cyan
+            cellView?.textField?.textColor = AppColors.accentODGlow
             cellView?.textField?.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
 
         case "os":

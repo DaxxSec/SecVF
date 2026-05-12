@@ -310,8 +310,8 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
         let detailLabel = NSTextField(labelWithString: "Packet Details:")
         detailLabel.frame = NSRect(x: 15, y: tableY - 25, width: 150, height: 20)
-        detailLabel.textColor = NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0)
-        detailLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        detailLabel.textColor = AppColors.accentODGlow
+        detailLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
         detailLabel.autoresizingMask = [.minYMargin]
         contentView.addSubview(detailLabel)
 
@@ -322,9 +322,9 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
         detailTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: width - 20, height: detailHeight))
         detailTextView.isEditable = false
-        detailTextView.backgroundColor = NSColor(red: 0.04, green: 0.04, blue: 0.08, alpha: 1.0)
-        detailTextView.textColor = NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
-        detailTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        detailTextView.backgroundColor = AppColors.backgroundPanel
+        detailTextView.textColor = AppColors.textOD
+        detailTextView.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
         detailTextView.autoresizingMask = [.width, .height]
 
         detailScrollView.documentView = detailTextView
@@ -335,13 +335,13 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         // ═══════════════════════════════════════════════════════════════
         let statusBar = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 30))
         statusBar.wantsLayer = true
-        statusBar.layer?.backgroundColor = NSColor(red: 0.06, green: 0.06, blue: 0.10, alpha: 1.0).cgColor
+        statusBar.layer?.backgroundColor = AppColors.backgroundTertiary.cgColor
         statusBar.autoresizingMask = [.width]
 
         statusLabel = NSTextField(labelWithString: "Ready - tshark: \(PacketCaptureManager.shared.isTsharkAvailable ? "Available" : "Not Found")")
         statusLabel.frame = NSRect(x: 15, y: 5, width: width - 30, height: 20)
-        statusLabel.textColor = NSColor(red: 0.6, green: 0.8, blue: 0.6, alpha: 1.0)
-        statusLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        statusLabel.textColor = AppColors.statusRunning
+        statusLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSmall, weight: .regular)
         statusLabel.autoresizingMask = [.width]
         statusBar.addSubview(statusLabel)
 
