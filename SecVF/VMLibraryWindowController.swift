@@ -122,6 +122,11 @@ class VMLibraryWindowController: NSWindowController,
     /// `aiSandboxBundles` is re-scanned.
     private var aiSandboxRootNode: AISandboxNode?
 
+    // Empty-state overlay labels — one per tab, shown over the table /
+    // outline view when there are no rows to display.
+    private var standardEmptyStateLabel: NSTextField?
+    private var aiSandboxEmptyStateLabel: NSTextField?
+
     // Bottom status bar — slim global-state strip pinned to the bottom of
     // the content view, under the packet panel.
     private var bottomStatusBar: NSView?
@@ -221,6 +226,7 @@ class VMLibraryWindowController: NSWindowController,
             guard let self = self else { return }
             self.tableView?.reloadData()
             self.refreshStatusBar()
+            self.refreshEmptyStateOverlays()
         }
 
         // Force the table to use view-based mode
@@ -761,6 +767,36 @@ class VMLibraryWindowController: NSWindowController,
             scrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
         }
 
+        // Empty-state overlays — one per tab. Hidden when their respective
+        // data source has rows. Centered over the table region.
+        if standardEmptyStateLabel == nil {
+            let label = makeEmptyStateLabel(
+                title: "No virtual machines yet",
+                hint: "Click ⊕ New to create your first VM,\nor Import to bring in an existing bundle.")
+            label.frame = NSRect(x: tableX, y: tableY,
+                                 width: tableWidth, height: tableHeight)
+            label.autoresizingMask = [.width, .height]
+            contentView.addSubview(label)
+            standardEmptyStateLabel = label
+        } else {
+            standardEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
+                                                   width: tableWidth, height: tableHeight)
+        }
+        if aiSandboxEmptyStateLabel == nil {
+            let label = makeEmptyStateLabel(
+                title: "No AI Sandbox VM",
+                hint: "Use Tools → Create AI Sandbox VM…\nto build the base bundle (30–60 min).")
+            label.frame = NSRect(x: tableX, y: tableY,
+                                 width: tableWidth, height: tableHeight)
+            label.autoresizingMask = [.width, .height]
+            label.isHidden = true   // Standard tab is default
+            contentView.addSubview(label)
+            aiSandboxEmptyStateLabel = label
+        } else {
+            aiSandboxEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
+                                                    width: tableWidth, height: tableHeight)
+        }
+
         // AI Sandbox outline view — same frame as the table scroll view but
         // hidden until the AI Sandbox tab is selected. Created once; later
         // tab switches just toggle .isHidden.
@@ -1226,6 +1262,56 @@ class VMLibraryWindowController: NSWindowController,
         }
     }
 
+    /// Build a centered "empty state" label with a title + hint line.
+    /// Title is mono-medium textPrimary; hint is system-light textMuted.
+    /// Used for the Standard / AI Sandbox tabs when the underlying data
+    /// source is empty.
+    private func makeEmptyStateLabel(title: String, hint: String) -> NSTextField {
+        let label = NSTextField()
+        label.isBordered = false
+        label.isEditable = false
+        label.drawsBackground = false
+        label.alignment = .center
+        label.usesSingleLineMode = false
+        label.maximumNumberOfLines = 4
+        label.lineBreakMode = .byWordWrapping
+
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineSpacing = 4
+
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: title, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle,
+                                               weight: .semibold),
+            .foregroundColor: AppColors.textPrimary,
+            .paragraphStyle: para
+        ]))
+        attr.append(NSAttributedString(string: "\n\n" + hint, attributes: [
+            .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular),
+            .foregroundColor: AppColors.textMuted,
+            .paragraphStyle: para
+        ]))
+        label.attributedStringValue = attr
+        return label
+    }
+
+    /// Refresh empty-state overlay visibility from the current data sources.
+    /// Called whenever rows are added / removed / on tab switch.
+    private func refreshEmptyStateOverlays() {
+        let isStandard = (currentLibraryTab == .standard)
+
+        // Standard tab: visible only when standard tab is active AND there
+        // are no VMs at all.
+        let showStandard = isStandard && vmManager.virtualMachines.isEmpty
+        standardEmptyStateLabel?.isHidden = !showStandard
+
+        // AI Sandbox tab: visible only when the AI tab is active AND there's
+        // no base bundle (sessions can't exist without a base).
+        let showSandbox = !isStandard && (aiSandboxRootNode == nil)
+        aiSandboxEmptyStateLabel?.isHidden = !showSandbox
+    }
+
     // MARK: - Library Tabs (Standard / AI Sandbox)
 
     /// Build the [Standard VMs] / [AI Sandbox] segmented header plus the
@@ -1286,6 +1372,7 @@ class VMLibraryWindowController: NSWindowController,
         tableView?.reloadData()
         updateButtonStates()
         updateSelectedVMDetailCard()
+        refreshEmptyStateOverlays()
     }
 
     @objc private func recoveryModeToggled(_ sender: NSButton) {
@@ -2671,11 +2758,13 @@ class VMLibraryWindowController: NSWindowController,
             }
             // If the user is currently viewing the AI Sandbox tab, re-scan
             // so a newly-installed base / new session appears without
-            // requiring a tab toggle.
+            // requiring a tab toggle. The empty-state overlay flips off
+            // automatically when the base appears.
             if self.currentLibraryTab == .aiSandbox {
                 self.aiSandboxBundles = self.scanAISandboxBundles()
-                self.tableView?.reloadData()
+                self.rebuildAISandboxNodeTree()
                 self.updateSelectedVMDetailCard()
+                self.refreshEmptyStateOverlays()
             }
         }
     }
@@ -3620,6 +3709,7 @@ class VMLibraryWindowController: NSWindowController,
             guard let self else { return }
             self.tableView?.reloadData()
             self.updateButtonStates()
+            self.refreshEmptyStateOverlays()
         }
     }
 
