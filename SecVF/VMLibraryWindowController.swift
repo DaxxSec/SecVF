@@ -1028,22 +1028,40 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         packetPanel.wantsLayer = true
         packetPanel.autoresizingMask = [.width]
 
-        // Dark background with yellow/orange border
-        packetPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
-        packetPanel.layer?.cornerRadius = 8
-        packetPanel.layer?.borderWidth = 1
-        packetPanel.layer?.borderColor = NSColor(red: 0.8, green: 0.6, blue: 0.0, alpha: 0.4).cgColor
+        // Tactical-styled panel: OD border, panel background. Drops the
+        // yellow/amber border that read as "warning"; the panel is just
+        // ambient live data now.
+        packetPanel.layer?.backgroundColor = AppColors.backgroundPanel.cgColor
+        packetPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        packetPanel.layer?.borderWidth = LayoutConstants.borderHairline
+        packetPanel.layer?.borderColor = AppColors.borderOD.cgColor
 
-        // Panel title
-        let packetTitle = NSTextField(labelWithString: "⚡ PACKET LOG")
-        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 110, height: 20)
-        packetTitle.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        packetTitle.textColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
+        // Panel title — "▸ LIVE TRAFFIC" with an orange tick prefix matches
+        // the sidebar section-label treatment in the mockup. The orange
+        // arrow signals "data flow / attention"; the title itself stays in
+        // muted mono so it reads as a section header, not a button.
+        let packetTitle = NSTextField(labelWithString: "")
+        packetTitle.attributedStringValue = {
+            let tick = NSAttributedString(string: "▸ ", attributes: [
+                .foregroundColor: AppColors.accentOrange,
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+            ])
+            let title = NSAttributedString(string: "LIVE TRAFFIC", attributes: [
+                .foregroundColor: AppColors.textPrimary,
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+            ])
+            let combined = NSMutableAttributedString()
+            combined.append(tick)
+            combined.append(title)
+            return combined
+        }()
+        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 140, height: 20)
         packetPanel.addSubview(packetTitle)
 
-        // Tab control (Packets / Protocols) - next to title
+        // Tab control (Packets / Protocols) — shifted right to clear the
+        // wider "▸ LIVE TRAFFIC" title.
         let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 120, y: packetPanelHeight - 30, width: 130, height: 24)
+        tabControl.frame = NSRect(x: 160, y: packetPanelHeight - 30, width: 130, height: 24)
         tabControl.selectedSegment = 0
         tabControl.segmentStyle = .texturedSquare
         packetPanel.addSubview(tabControl)
@@ -1051,7 +1069,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols
         let vmFilterControl = NSSegmentedControl(labels: ["macOS", "Kali", "All"], trackingMode: .selectOne, target: self, action: #selector(vmFilterChanged(_:)))
-        vmFilterControl.frame = NSRect(x: 258, y: packetPanelHeight - 30, width: 140, height: 24)
+        vmFilterControl.frame = NSRect(x: 298, y: packetPanelHeight - 30, width: 140, height: 24)
         vmFilterControl.selectedSegment = 0  // Default to macOS
         vmFilterControl.segmentStyle = .texturedSquare
         vmFilterControl.setWidth(45, forSegment: 0)  // macOS
@@ -1062,17 +1080,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Filter ARP checkbox (checked by default)
         let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
-        arpCheckbox.frame = NSRect(x: 400, y: packetPanelHeight - 30, width: 80, height: 24)
+        arpCheckbox.frame = NSRect(x: 440, y: packetPanelHeight - 30, width: 80, height: 24)
         arpCheckbox.state = .on  // Checked by default
         arpCheckbox.font = NSFont.systemFont(ofSize: 10)
         arpCheckbox.contentTintColor = NSColor.white
         packetPanel.addSubview(arpCheckbox)
 
-        // ARP filtered count label (yellow, compact format)
+        // ARP filtered count label — uses the amber token instead of an
+        // inline hex literal so the legend stays consistent.
         let arpCountLabel = NSTextField(labelWithString: "(0)")
-        arpCountLabel.frame = NSRect(x: 478, y: packetPanelHeight - 28, width: 45, height: 18)
+        arpCountLabel.frame = NSRect(x: 518, y: packetPanelHeight - 28, width: 45, height: 18)
         arpCountLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        arpCountLabel.textColor = NSColor(red: 1.0, green: 0.85, blue: 0.0, alpha: 1.0)  // Yellow
+        arpCountLabel.textColor = AppColors.accentYellow
         arpCountLabel.alignment = .left
         packetPanel.addSubview(arpCountLabel)
         arpFilterCountLabel = arpCountLabel
@@ -1095,10 +1114,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         openButton.autoresizingMask = [.minXMargin]
         packetPanel.addSubview(openButton)
 
-        // Separator below header
+        // Separator below header — OD hairline, matches the panel border.
         let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 45, width: packetPanelWidth - 20, height: 1))
-        packetSeparator.boxType = .separator
-        packetSeparator.fillColor = NSColor(red: 0.8, green: 0.6, blue: 0.0, alpha: 0.3)
+        packetSeparator.boxType = .custom
+        packetSeparator.borderWidth = 0
+        packetSeparator.fillColor = AppColors.borderOD
         packetSeparator.autoresizingMask = [.width]
         packetPanel.addSubview(packetSeparator)
 

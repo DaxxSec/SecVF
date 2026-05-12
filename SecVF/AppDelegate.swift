@@ -1556,11 +1556,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // Boot AI Sandbox (clone base → session, boot, show window)
         let bootSandboxItem = NSMenuItem(
             title: "Boot AI Sandbox",
-            action: #selector(bootAISandboxSession),
+            action: #selector(AppDelegate.bootAISandboxSession as (AppDelegate) -> () -> Void),
             keyEquivalent: ""
         )
         bootSandboxItem.target = self
         toolsMenu.addItem(bootSandboxItem)
+
+        // Boot AI Sandbox into macOS Recovery — useful when the base image
+        // is wedged and needs disk repair / firmware reset.
+        let bootRecoveryItem = NSMenuItem(
+            title: "Boot AI Sandbox in Recovery…",
+            action: #selector(bootAISandboxSessionInRecovery),
+            keyEquivalent: ""
+        )
+        bootRecoveryItem.target = self
+        bootRecoveryItem.toolTip = "Boots the AI Sandbox session VM into macOS Recovery instead of normal startup. Useful for disk repair or reinstalling macOS inside the sandbox."
+        toolsMenu.addItem(bootRecoveryItem)
 
         // Create top-level menu item
         let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
@@ -2500,7 +2511,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
     /// Tools → Boot AI Sandbox. Clones the base bundle (APFS CoW), boots
     /// the session VM, and shows it in a new window.
+    /// `@objc` entry point used by the existing "Tools → Boot AI Sandbox"
+    /// menu item. Boots in normal mode.
     @objc private func bootAISandboxSession() {
+        bootAISandboxSession(inRecoveryMode: false)
+    }
+
+    /// `@objc` entry point used by the new "Tools → Boot AI Sandbox in
+    /// Recovery…" menu item and by the recovery-mode toggle in the main
+    /// window's AI Sandbox tab.
+    @objc private func bootAISandboxSessionInRecovery() {
+        bootAISandboxSession(inRecoveryMode: true)
+    }
+
+    private func bootAISandboxSession(inRecoveryMode: Bool) {
         let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
         guard baseBundle.exists else {
             showAlert(
@@ -2595,8 +2619,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                     try? updated.write(to: manifestURL)
                 }
 
-                NSLog("[AISandbox] Starting session VM (id=%@)…", sandboxVMId.uuidString)
-                try await machine.start()
+                NSLog("[AISandbox] Starting session VM (id=%@, recovery=%@)…",
+                      sandboxVMId.uuidString,
+                      inRecoveryMode ? "YES" : "no")
+                if inRecoveryMode {
+                    // macOS Recovery boot — useful when the sandbox base image
+                    // is wedged and needs disk repair / reinstall / firmware
+                    // reset without re-baking from scratch. Apple's flag lives
+                    // on VZMacOSVirtualMachineStartOptions; we only build the
+                    // options object when recovery is requested so normal
+                    // boots keep the default path.
+                    let opts = VZMacOSVirtualMachineStartOptions()
+                    opts.startUpFromMacOSRecovery = true
+                    try await machine.start(options: opts)
+                } else {
+                    try await machine.start()
+                }
                 NSLog("[AISandbox] Session VM running")
 
                 // Start the vsock exec bridge so `secvf-cli vm exec` can reach this VM
@@ -2849,28 +2887,33 @@ extension AppDelegate {
             libraryWindowController = VMLibraryWindowController()
         }
 
-        // Grab focus aggressively. Without `activate(ignoringOtherApps:)`
-        // first, makeKeyAndOrderFront() can leave the window behind the IDE
-        // or terminal that launched the app (race with the splash screen
-        // fade-out + dock activation). Bouncing the dock icon makes the
-        // window unmissable when SecVF was background-launched.
-        NSApp.activate(ignoringOtherApps: true)
+        let win = libraryWindowController?.window
+        let wasActive = NSApp.isActive
+
+        // Request a dock-icon bounce when SecVF launched into the background
+        // (e.g., `open` from a terminal in another app). `.criticalRequest`
+        // bounces until the user clicks, which is unmissable. When the app
+        // is already foreground we use the gentler `.informationalRequest`
+        // (single bounce) — it's a no-op on the frontmost app anyway, but
+        // costs nothing to ask.
+        if wasActive {
+            NSApp.requestUserAttention(.informationalRequest)
+        } else {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+
         libraryWindowController?.showWindow(nil)
-        libraryWindowController?.window?.makeKeyAndOrderFront(nil)
-        libraryWindowController?.window?.orderFrontRegardless()
+        win?.orderFrontRegardless()
+        win?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
 
         // A short deferred re-activate handles the case where another app
         // grabs focus between `activate` and the splash-screen tear-down.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             NSApp.activate(ignoringOtherApps: true)
+            self?.libraryWindowController?.window?.orderFrontRegardless()
             self?.libraryWindowController?.window?.makeKeyAndOrderFront(nil)
         }
-
-        // Dock icon bounces once so the user can spot SecVF even if its
-        // window opened behind a fullscreen IDE. Uses `.informationalRequest`
-        // (one bounce) rather than `.criticalRequest` (continuous) so it's
-        // not annoying.
-        NSApp.requestUserAttention(.informationalRequest)
 
         // Refresh the table view (will trigger async load if needed)
         DispatchQueue.main.async {
