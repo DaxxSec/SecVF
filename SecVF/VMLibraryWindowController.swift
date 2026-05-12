@@ -122,6 +122,16 @@ class VMLibraryWindowController: NSWindowController,
     /// `aiSandboxBundles` is re-scanned.
     private var aiSandboxRootNode: AISandboxNode?
 
+    // Bottom status bar — slim global-state strip pinned to the bottom of
+    // the content view, under the packet panel.
+    private var bottomStatusBar: NSView?
+    private var statusBarRunningLabel: NSTextField?
+    private var statusBarSwitchLabel: NSTextField?
+    private var statusBarCaptureLabel: NSTextField?
+    private var statusBarDiskLabel: NSTextField?
+    private var statusBarPulseDot: CAShapeLayer?
+    private var statusBarRefreshTimer: Timer?
+
     // Selected VM detail card (horizontal strip between table and packet panel)
     private var selectedVMDetailCard: NSView?
     private var detailNameLabel: NSTextField?
@@ -154,6 +164,7 @@ class VMLibraryWindowController: NSWindowController,
         // Clean up timers and notification observers to prevent memory leaks
         statsUpdateTimer?.invalidate()
         liveRateTimer?.invalidate()
+        statusBarRefreshTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -181,6 +192,7 @@ class VMLibraryWindowController: NSWindowController,
         applyDarkTheme()
         addSidebar()
         addStatusBar()
+        addBottomStatusBar()
 
         // Configure table view
         tableView?.dataSource = self
@@ -671,6 +683,7 @@ class VMLibraryWindowController: NSWindowController,
         let libraryTabsHeight: CGFloat = 26
         let libraryTabsGap: CGFloat = 8              // gap below the library-tabs row
         let packetPanelHeight: CGFloat = 180
+        let bottomStatusBarHeight: CGFloat = 24      // slim global status strip
 
         // Set window to proper size
         let minWidth: CGFloat = sidebarWidth + 680 + activePanelWidth + padding * 3
@@ -722,7 +735,11 @@ class VMLibraryWindowController: NSWindowController,
         let detailCardHeight: CGFloat = 70
         let detailCardX = sidebarWidth + padding
         let detailCardWidth = tableWidth
-        let detailCardY = padding + packetPanelHeight + padding   // 15 + 180 + 15 = 210
+        // Vertical stack from bottom (after the new bottom status bar):
+        //   y=0: status bar (h=24)
+        //   y=24+padding=39: packet panel top
+        //   y=39+180+padding=234: detail card top
+        let detailCardY = bottomStatusBarHeight + padding + packetPanelHeight + padding
 
         let tableY = detailCardY + detailCardHeight + padding     // 210 + 70 + 15 = 295
         let tableHeight = libraryTabsY - libraryTabsGap - tableY
@@ -1418,6 +1435,149 @@ class VMLibraryWindowController: NSWindowController,
                                   createdAt: createdAt, diskBytes: diskBytes)
     }
 
+    // MARK: - Bottom status bar
+
+    /// Slim 24pt status strip pinned to the bottom of the content view.
+    /// Shows: pulse-dot + running VM count · switch state · capture state ·
+    /// disk free · build. Updated on a 1s timer.
+    private func addBottomStatusBar() {
+        guard let contentView = window?.contentView else { return }
+
+        let padding: CGFloat = 15
+        let height: CGFloat = 24
+        let width = contentView.bounds.width
+
+        let bar = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = AppColors.backgroundTertiary.cgColor
+        bar.autoresizingMask = [.width, .maxYMargin]
+        bottomStatusBar = bar
+
+        // Hairline OD divider along the top edge — signals "bar is part of
+        // the chrome, not floating".
+        let topDivider = CALayer()
+        topDivider.frame = CGRect(x: 0, y: height - 1, width: width, height: 1)
+        topDivider.backgroundColor = AppColors.borderOD.cgColor
+        topDivider.autoresizingMask = [.layerWidthSizable]
+        bar.layer?.addSublayer(topDivider)
+
+        // Live pulse dot — same idiom as the mockup's status bar
+        let dot = CAShapeLayer()
+        let dotSize: CGFloat = 8
+        dot.path = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: dotSize, height: dotSize), transform: nil)
+        dot.fillColor = AppColors.statusRunning.cgColor
+        dot.shadowColor = AppColors.statusRunning.cgColor
+        dot.shadowOpacity = 0.8
+        dot.shadowRadius = 4
+        dot.shadowOffset = .zero
+        dot.frame = CGRect(x: padding, y: (height - dotSize) / 2, width: dotSize, height: dotSize)
+        bar.layer?.addSublayer(dot)
+        statusBarPulseDot = dot
+        // Subtle pulse animation so the dot reads as "live"
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1.0
+        pulse.toValue = 0.45
+        pulse.duration = 1.4
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        dot.add(pulse, forKey: "pulse")
+
+        // Three label segments left-to-right + a right-anchored disk/version
+        var x = padding + dotSize + LayoutConstants.spacingSM
+
+        statusBarRunningLabel = makeStatusBarLabel(text: "—", x: x, width: 140, height: height, alignment: .left)
+        bar.addSubview(statusBarRunningLabel!)
+        x += 140 + LayoutConstants.spacingLG
+
+        statusBarSwitchLabel = makeStatusBarLabel(text: "—", x: x, width: 200, height: height, alignment: .left)
+        bar.addSubview(statusBarSwitchLabel!)
+        x += 200 + LayoutConstants.spacingLG
+
+        statusBarCaptureLabel = makeStatusBarLabel(text: "—", x: x, width: 160, height: height, alignment: .left)
+        bar.addSubview(statusBarCaptureLabel!)
+
+        // Right-anchored: disk free + build. Single label, autoresizes off
+        // the right edge of the bar.
+        let rightW: CGFloat = 280
+        statusBarDiskLabel = makeStatusBarLabel(text: "—",
+                                                x: width - rightW - padding,
+                                                width: rightW, height: height,
+                                                alignment: .right)
+        statusBarDiskLabel?.autoresizingMask = [.minXMargin]
+        bar.addSubview(statusBarDiskLabel!)
+
+        contentView.addSubview(bar)
+
+        // Initial fill + 1s refresh
+        refreshBottomStatusBar()
+        statusBarRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshBottomStatusBar() }
+        }
+    }
+
+    private func makeStatusBarLabel(text: String, x: CGFloat, width: CGFloat,
+                                    height: CGFloat, alignment: NSTextAlignment) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.frame = NSRect(x: x, y: (height - 14) / 2, width: width, height: 14)
+        label.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSmall, weight: .regular)
+        label.textColor = AppColors.textMuted
+        label.alignment = alignment
+        label.isBordered = false
+        label.drawsBackground = false
+        label.isEditable = false
+        return label
+    }
+
+    /// Pull current state from the singletons and repaint the labels.
+    /// Cheap — just string interpolation + a single ByteCountFormatter call.
+    private func refreshBottomStatusBar() {
+        guard bottomStatusBar != nil else { return }
+
+        // Running / total VMs
+        let runningCount = vmManager.getRunningVMsCount()
+        let totalCount = vmManager.virtualMachines.count
+        statusBarRunningLabel?.stringValue = "\(runningCount) of \(totalCount) running"
+        statusBarPulseDot?.fillColor = (runningCount > 0
+            ? AppColors.statusRunning : AppColors.statusStopped).cgColor
+
+        // Switch state
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+        let switchOn = (stats["running"] as? Bool) ?? false
+        let ports = (stats["connectedPorts"] as? Int) ?? 0
+        let fwd = (stats["packetsForwarded"] as? UInt64).map { Int($0) } ?? 0
+        statusBarSwitchLabel?.stringValue = switchOn
+            ? "Switch · \(ports) ports · \(formatCount(fwd)) pkts"
+            : "Switch · idle"
+        statusBarSwitchLabel?.textColor = switchOn ? AppColors.textOD : AppColors.textMuted
+
+        // Capture state
+        let capturing = PacketCaptureManager.shared.isCapturing
+        let totalPackets = PacketCaptureManager.shared.totalPacketCount
+        statusBarCaptureLabel?.stringValue = capturing
+            ? "Capture · \(formatCount(totalPackets)) pkts"
+            : "Capture · idle"
+        statusBarCaptureLabel?.textColor = capturing ? AppColors.accentOrangeHot : AppColors.textMuted
+
+        // Disk free + version
+        var diskStr = "—"
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser
+        if let values = try? homeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+           let bytes = values.volumeAvailableCapacityForImportantUsage {
+            diskStr = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
+        }
+        let version = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        statusBarDiskLabel?.stringValue = "~/.avf · \(diskStr) free  ·  v\(version) (\(build))"
+    }
+
+    private func formatCount(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        let formatter = NumberFormatter()
+        formatter.groupingSeparator = ","
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+
     private func addStatusBar() {
         guard let window = window, let contentView = window.contentView else { return }
 
@@ -1432,6 +1592,7 @@ class VMLibraryWindowController: NSWindowController,
         let toolbarGap: CGFloat = 8
         let libraryTabsHeight: CGFloat = 26
         let libraryTabsGap: CGFloat = 8
+        let bottomStatusBarHeight: CGFloat = 24
 
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
@@ -1440,9 +1601,9 @@ class VMLibraryWindowController: NSWindowController,
         // ACTIVE VMs PANEL (Right side - same height as VM table)
         // ═══════════════════════════════════════════════════════════════
         let activePanelX = contentWidth - activePanelWidth - padding
-        // Bottom edge aligns with packet panel top (y = padding + packetPanelHeight + padding).
-        // Top edge aligns with library tabs bottom (y = contentHeight - padding - buttonHeight - toolbarGap - libraryTabsHeight - libraryTabsGap).
-        let activePanelY = padding + packetPanelHeight + padding
+        // Bottom edge aligns with packet panel top (y = bottomStatusBar + padding + packetPanelHeight + padding).
+        // Top edge aligns with library tabs bottom.
+        let activePanelY = bottomStatusBarHeight + padding + packetPanelHeight + padding
         let activePanelTop = contentHeight - padding - buttonHeight - toolbarGap - libraryTabsHeight - libraryTabsGap
         let activePanelHeight = activePanelTop - activePanelY
 
@@ -1569,11 +1730,10 @@ class VMLibraryWindowController: NSWindowController,
         // ═══════════════════════════════════════════════════════════════
         // PACKET LOG PANEL (Horizontal - below VM Table, above the bottom)
         // ═══════════════════════════════════════════════════════════════
-        // With the toolbar moved to the top of the content view, the packet
-        // panel sits flush at the bottom (just a single padding gap to the
-        // window edge).
+        // Packet panel sits just above the new bottom status bar — single
+        // padding gap separates them.
         let packetPanelX = sidebarWidth + padding
-        let packetPanelY = padding
+        let packetPanelY = bottomStatusBarHeight + padding
         let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5  // Reduced gap
 
         let packetPanel = NSView(frame: NSRect(x: packetPanelX, y: packetPanelY, width: packetPanelWidth, height: packetPanelHeight))
@@ -1719,7 +1879,7 @@ class VMLibraryWindowController: NSWindowController,
         let legendVerticalPad: CGFloat = 12
         let legendPanelHeight = legendHeight + legendVerticalPad * 2  // 119pt
         let legendPanelX = activePanelX
-        let legendPanelY = padding
+        let legendPanelY = bottomStatusBarHeight + padding
         let legendPanelWidth = activePanelWidth
 
         let legendPanel = NSView(frame: NSRect(x: legendPanelX, y: legendPanelY, width: legendPanelWidth, height: legendPanelHeight))
@@ -2388,6 +2548,7 @@ class VMLibraryWindowController: NSWindowController,
         let libraryTabsGap: CGFloat = 8
         let detailCardHeight: CGFloat = 70
         let packetPanelHeight: CGFloat = 180
+        let bottomStatusBarHeight: CGFloat = 24
 
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
@@ -2398,7 +2559,7 @@ class VMLibraryWindowController: NSWindowController,
 
         let tableX = sidebarWidth + padding
         let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let detailCardY = padding + packetPanelHeight + padding
+        let detailCardY = bottomStatusBarHeight + padding + packetPanelHeight + padding
         let tableY = detailCardY + detailCardHeight + padding
         let tableHeight = libraryTabsY - libraryTabsGap - tableY
 
@@ -2424,23 +2585,29 @@ class VMLibraryWindowController: NSWindowController,
         // Detail card stays at fixed Y (autoresize handles its width).
         selectedVMDetailCard?.frame.origin.y = detailCardY
 
-        // Active VMs panel — bottom anchored at packet-panel top, top edge
-        // moves with the library tabs.
+        // Active VMs panel — bottom anchored above bottom status bar +
+        // packet panel; top edge moves with the library tabs.
         if let panel = statusBar {
             let panelX = contentWidth - activePanelWidth - padding
-            let panelY = padding + packetPanelHeight + padding
+            let panelY = bottomStatusBarHeight + padding + packetPanelHeight + padding
             let panelTop = libraryTabsY - libraryTabsGap
             let panelHeight = panelTop - panelY
             panel.frame = NSRect(x: panelX, y: panelY,
                                  width: activePanelWidth, height: panelHeight)
         }
 
-        // Packet panel + legend stay flush at the bottom of the content view.
+        // Packet panel + legend sit just above the bottom status bar.
         if let packetPanel = packetLogPanel {
             let packetWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5
-            packetPanel.frame = NSRect(x: sidebarWidth + padding, y: padding,
+            packetPanel.frame = NSRect(x: sidebarWidth + padding,
+                                       y: bottomStatusBarHeight + padding,
                                        width: packetWidth, height: packetPanelHeight)
         }
+
+        // Bottom status bar stretches the full width along y=0.
+        bottomStatusBar?.frame = NSRect(x: 0, y: 0,
+                                        width: contentWidth,
+                                        height: bottomStatusBarHeight)
     }
 
     @objc private func handleVMStatusChanged(_ notification: Notification) {
