@@ -2,6 +2,18 @@
 
 ## Recent Changes
 
+- 2026-05-12: feat(ui): full tactical UI redesign (20 commits on feat/ui-tactical-redesign)
+  - Tactical OD-green + safety-orange palette replaces cyan-heavy theme
+  - Action toolbar moves from bottom to top of content view (NSToolbar-style)
+  - New: tabbed library [Standard VMs / AI Sandbox] with NSOutlineView tree
+  - New: "Start on AI Sandbox base" boots the latest session in place
+  - New: selected-VM detail card with live disk-usage + per-VM bytes/sec
+  - New: Traffic sparkline column in the library table
+  - New: bottom global status bar (running / switch / capture / disk / build)
+  - New: AI Sandbox recovery-mode boot path + UI toggle
+  - Design tokens: expanded LayoutConstants + AppColors + protocol token set
+  - Window focus fixes: dock bounce + off-screen-frame auto-recover
+  - Mockup at docs/ui-redesign-mockup.html (Tactical / Cyber theme switcher)
 - 2025-12-10: Add @MainActor annotations to UI classes for thread safety
 - 2025-12-10: Update code-review.md with implementation status
 - 2025-12-10: Phase 1: Dynamic SHA256 checksum fetching from official distro sources
