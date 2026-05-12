@@ -55,7 +55,32 @@ struct SecurityEvent {
     var logMessage: String {
         let severityStr = String(describing: severity).uppercased()
         let typeStr = String(describing: type)
-        return "[\(severityStr)] \(typeStr) - \(vmName): \(message)"
+        // Sanitize attacker-controlled fields so a VM name like
+        //   "foo\n[CRITICAL] vmStateChange - root: pwned"
+        // can't forge a second log line.
+        let safeVMName = Self.sanitizeForLog(vmName)
+        let safeMessage = Self.sanitizeForLog(message)
+        return "[\(severityStr)] \(typeStr) - \(safeVMName): \(safeMessage)"
+    }
+
+    /// Strip control characters (CR/LF/tab/etc.) from a field destined for the
+    /// plain-text audit log so callers can't inject forged log entries via
+    /// VM names or messages they control.
+    static func sanitizeForLog(_ s: String) -> String {
+        var out = ""
+        out.reserveCapacity(s.count)
+        for scalar in s.unicodeScalars {
+            // Allow printable ASCII + UTF-8; replace any C0/C1 control with \xNN
+            // so the value is still readable but cannot break the line format.
+            if scalar.properties.isDefaultIgnorableCodePoint
+                || scalar.value < 0x20
+                || (scalar.value >= 0x7f && scalar.value < 0xa0) {
+                out += String(format: "\\x%02x", scalar.value)
+            } else {
+                out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
     }
 }
 
@@ -364,29 +389,22 @@ class VMSecurityMonitor {
     }
 
     private func writeToSecurityLog(_ event: SecurityEvent) {
-        let logDir = NSHomeDirectory() + "/.avf/logs/"
-        try? FileManager.default.createDirectory(atPath: logDir, withIntermediateDirectories: true)
+        // Routed through AVFAuditLog so concurrent producers (this method
+        // can be invoked from any thread that calls logSecurityEvent) stay
+        // line-coherent in the security log. AVFAuditLog opens with O_APPEND
+        // + mode 0o600 — handles permission tightening on first create too.
+        AVFPaths.ensureDirectoriesExist()
 
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let logFileName = "security-\(dateFormatter.string(from: Date())).log"
-        let logPath = logDir + logFileName
-
         dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let timestamp = dateFormatter.string(from: event.timestamp)
-        let logLine = "[\(timestamp)] \(event.logMessage)\n"
+        // Replace the user's home prefix with `~/` so logs shared with vendors /
+        // incident-response partners don't leak the operator's identity via
+        // paths like `/Users/jane.doe/.avf/...`.
+        let line = "[\(timestamp)] \(event.logMessage)\n"
+            .replacingOccurrences(of: NSHomeDirectory(), with: "~")
 
-        if let logData = logLine.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let fileHandle = FileHandle(forWritingAtPath: logPath) {
-                    fileHandle.seekToEndOfFile()
-                    fileHandle.write(logData)
-                    fileHandle.closeFile()
-                }
-            } else {
-                try? logData.write(to: URL(fileURLWithPath: logPath))
-            }
-        }
+        AVFAuditLog.append(line, to: AVFPaths.securityLog(for: event.timestamp))
     }
 
     // MARK: - Security Recommendations

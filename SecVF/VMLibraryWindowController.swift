@@ -45,7 +45,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var packetVMFilterControl: NSSegmentedControl?
     private var packetListContainer: NSScrollView?
     private var protocolStatsContainer: NSView?
-    private var packetAnalysisWindowController: PacketAnalysisWindowController?
+    // Note: the PacketAnalysisWindowController is owned by AppDelegate (single
+    // owner). This controller posts .openPacketAnalysis to surface that window
+    // — see openPacketAnalysisWindow(_:) below.
     private var currentVMFilter: String = "macOS"  // Default to macOS packets
     private var filterARPEnabled: Bool = true  // Filter ARP by default
     private var arpFilteredCount: Int = 0
@@ -899,10 +901,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @objc private func openPacketAnalysisWindow(_ sender: Any) {
-        if packetAnalysisWindowController == nil {
-            packetAnalysisWindowController = PacketAnalysisWindowController()
-        }
-        packetAnalysisWindowController?.window?.makeKeyAndOrderFront(nil)
+        // Defer to AppDelegate's singleton — avoids two analysis windows
+        // rendering the same packet stream independently.
+        NotificationCenter.default.post(name: .openPacketAnalysis, object: nil)
     }
 
     @objc private func handlePacketCaptured(_ notification: Notification) {

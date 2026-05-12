@@ -1,0 +1,121 @@
+%YAML 1.1
+---
+# SecVF Suricata config — offline analysis only.
+# We run against captured PCAPs in /pcaps; we do NOT touch live interfaces.
+
+vars:
+  address-groups:
+    HOME_NET: "[10.0.100.0/24,192.168.0.0/16,172.16.0.0/12]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SMTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+
+default-log-dir: /var/log/suricata/
+
+stats:
+  enabled: false   # We don't need the periodic stats line in eve.json
+
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert:
+            payload: yes
+            payload-buffer-size: 4kb
+            payload-printable: yes
+            packet: yes
+            metadata: yes
+            http-body: yes
+            http-body-printable: yes
+            tagged-packets: yes
+        - http:
+            extended: yes
+        - dns
+        - tls:
+            extended: yes
+        - files:
+            force-magic: no
+        - smtp
+        - ssh
+        - flow
+        - anomaly:
+            enabled: yes
+            types:
+              decode: yes
+              stream: yes
+              applayer: yes
+
+  - alert-syslog:
+      enabled: no
+
+logging:
+  default-log-level: warning
+  outputs:
+    - console:
+        enabled: yes
+
+af-packet:
+  - interface: default
+    cluster-id: 99
+    cluster-type: cluster_flow
+
+pcap:
+  - interface: default
+
+# Where to find rules. Mounted from ./suricata/rules in compose.
+default-rule-path: /var/lib/suricata/rules
+rule-files:
+  - secvf-custom.rules
+  - et-open-malware-c2.rules
+  - et-open-trojan.rules
+  - et-open-exploit-kit.rules
+
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+threshold-file: /etc/suricata/threshold.config
+
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    http:
+      enabled: yes
+    dns:
+      tcp: { enabled: yes, detection-ports: { dp: 53 } }
+      udp: { enabled: yes, detection-ports: { dp: 53 } }
+    smtp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    ftp:
+      enabled: yes
+
+# Performance — we're analyzing single-host PCAPs, not running a network sensor.
+threading:
+  set-cpu-affinity: no
+  detect-thread-ratio: 1.0
+
+# Reassembly tuning for offline analysis (less aggressive than live).
+stream:
+  memcap: 64mb
+  checksum-validation: no       # PCAPs from VM switch lack proper checksums
+  inline: no
+  reassembly:
+    memcap: 256mb
+    depth: 1mb

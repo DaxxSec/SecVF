@@ -36,6 +36,13 @@ enum AVFPaths {
         return logsDir + "/security-\(f.string(from: date)).log"
     }
 
+    static func networkLog(for date: Date = Date()) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return logsDir + "/network-\(f.string(from: date)).log"
+    }
+
     /// Create the directory tree we expect to exist before any logging or
     /// caching happens. Idempotent. Permissions on logs/config are tightened
     /// so audit content stays user-private even on a multi-user box.
@@ -63,18 +70,29 @@ enum AVFAuditLog {
     private static let queue = DispatchQueue(label: "com.secvf.avf.auditlog")
 
     /// Append one already-formatted line to a path. Synchronous so callers
-    /// don't need to think about whether the line landed before they crash.
+    /// invoking from a crash path get their event handed to the kernel before
+    /// the process exits. Use `appendAsync` for high-volume callers (e.g. the
+    /// per-packet logger on the virtual switch) where blocking is undesirable.
     static func append(_ line: String, to path: String) {
-        queue.sync {
-            guard let data = line.data(using: .utf8) else { return }
-            // Use O_APPEND so concurrent process-level writers (CLI + app) also
-            // serialize at the kernel for writes ≤ PIPE_BUF.
-            let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
-            guard fd >= 0 else { return }
-            defer { close(fd) }
-            _ = data.withUnsafeBytes { buf in
-                write(fd, buf.baseAddress, buf.count)
-            }
+        queue.sync { Self._append(line, to: path) }
+    }
+
+    /// Same as `append` but does not block the caller. Ordering is preserved
+    /// across all callers (same serial queue), so two appendAsync calls from
+    /// different threads still land in the file in submission order.
+    static func appendAsync(_ line: String, to path: String) {
+        queue.async { Self._append(line, to: path) }
+    }
+
+    private static func _append(_ line: String, to path: String) {
+        guard let data = line.data(using: .utf8) else { return }
+        // Use O_APPEND so concurrent process-level writers (CLI + app) also
+        // serialize at the kernel for writes ≤ PIPE_BUF.
+        let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o600)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        _ = data.withUnsafeBytes { buf in
+            write(fd, buf.baseAddress, buf.count)
         }
     }
 }

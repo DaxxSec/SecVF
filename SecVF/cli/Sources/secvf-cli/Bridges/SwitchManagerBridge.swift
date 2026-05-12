@@ -104,12 +104,20 @@ class SwitchManagerBridge {
     }
 
     private func generateMACFromName(_ name: String) -> String {
-        // Generate a deterministic MAC from VM name
-        let hash = abs(name.hashValue)
+        // Generate a deterministic MAC from VM name.
+        // `String.hashValue` is randomized per Swift process — the result
+        // changes every CLI invocation, which is the opposite of "deterministic"
+        // and means the same VM gets different MACs on every `secvf switch macs`
+        // call. Use a fixed-seed hash (FNV-1a 64-bit) instead.
+        var h: UInt64 = 0xcbf29ce484222325
+        for byte in name.utf8 {
+            h ^= UInt64(byte)
+            h &*= 0x00000100000001B3
+        }
         return String(format: "52:54:00:%02X:%02X:%02X",
-                     (hash >> 16) & 0xFF,
-                     (hash >> 8) & 0xFF,
-                     hash & 0xFF)
+                     UInt8((h >> 16) & 0xFF),
+                     UInt8((h >> 8) & 0xFF),
+                     UInt8(h & 0xFF))
     }
 
     // MARK: - Get MAC Address Table

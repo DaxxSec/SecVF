@@ -194,8 +194,8 @@ class VMManager {
             // Ensure bundle path is updated
             vmConfig.bundlePath = newBundlePath
 
-            // Save metadata
-            saveVMMetadata(vmConfig)
+            // Save metadata — propagate to outer do/catch on failure.
+            try saveVMMetadata(vmConfig)
 
             // Don't add to virtualMachines here - it will be loaded by loadVMsFromDirectory
             // This avoids race conditions with the main thread
@@ -242,16 +242,19 @@ class VMManager {
         }
     }
 
-    private func saveVMMetadata(_ vmConfig: VMConfiguration) {
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .prettyPrinted
-            let data = try encoder.encode(vmConfig)
-            try data.write(to: URL(fileURLWithPath: vmConfig.metadataPath))
-            print("Saved VM metadata for: \(vmConfig.name)")
-        } catch {
-            print("Failed to save VM metadata: \(error)")
-        }
+    /// Persist a VM's metadata.json. THROWS so callers can detect disk-full
+    /// or read-only-volume failures and roll back the rest of the operation.
+    ///
+    /// Before this was `throws`, a failed write silently left the VM in the
+    /// in-memory `virtualMachines` array with no metadata on disk — next
+    /// launch couldn't see it. Migration/rename/update paths that genuinely
+    /// can't fail loudly should use `try?` and log the error.
+    private func saveVMMetadata(_ vmConfig: VMConfiguration) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        let data = try encoder.encode(vmConfig)
+        try data.write(to: URL(fileURLWithPath: vmConfig.metadataPath))
+        print("Saved VM metadata for: \(vmConfig.name)")
     }
 
     /// Public method to save VM configuration (for updating network settings, etc.)
@@ -317,17 +320,21 @@ class VMManager {
             osType: osType
         )
 
-        // Create disk image
-        try createDiskImage(at: vmConfig.diskImagePath, size: diskSize)
-
-        // Create EFI variable store
-        try createEFIVariableStore(at: vmConfig.nvramPath)
-
-        // Create machine identifier
-        try createMachineIdentifier(at: vmConfig.machineIdentifierPath)
-
-        // Save metadata
-        saveVMMetadata(vmConfig)
+        // From here on, ANY failure must roll back the partial bundle
+        // directory — otherwise the next `createVM(name:)` with the same
+        // name hits a `bundleExists` error against stale junk from a
+        // previous half-finished attempt, with no UI hint that it's stale.
+        do {
+            try createDiskImage(at: vmConfig.diskImagePath, size: diskSize)
+            try createEFIVariableStore(at: vmConfig.nvramPath)
+            try createMachineIdentifier(at: vmConfig.machineIdentifierPath)
+            try saveVMMetadata(vmConfig)
+        } catch {
+            // Rollback: remove the partial bundle and re-throw so the
+            // caller (UI alert / CLI) sees the real underlying error.
+            try? FileManager.default.removeItem(atPath: bundlePath)
+            throw error
+        }
 
         // Add to list
         virtualMachines.append(vmConfig)
@@ -407,8 +414,12 @@ class VMManager {
             virtualMachines[index].name = newName
             virtualMachines[index].bundlePath = newBundlePath
 
-            // Save updated metadata
-            saveVMMetadata(virtualMachines[index])
+            // Save updated metadata — propagate failures (function is throws).
+            // If this fails after the directory move succeeded, the bundle is
+            // already at the new path; we surface the error so the user can
+            // re-attempt the save rather than silently end up with a VM whose
+            // on-disk metadata still has the old name.
+            try saveVMMetadata(virtualMachines[index])
         }
 
         print("Renamed VM from '\(vmConfig.name)' to '\(newName)'")
@@ -452,11 +463,16 @@ class VMManager {
             osType: vmConfig.osType
         )
 
-        // Generate new machine identifier
-        try createMachineIdentifier(at: newConfig.machineIdentifierPath)
-
-        // Save metadata
-        saveVMMetadata(newConfig)
+        // From here on, ANY failure must roll back the copied bundle —
+        // see same rationale as createVM (avoid stale-junk collisions on
+        // the next attempt).
+        do {
+            try createMachineIdentifier(at: newConfig.machineIdentifierPath)
+            try saveVMMetadata(newConfig)
+        } catch {
+            try? FileManager.default.removeItem(atPath: newBundlePath)
+            throw error
+        }
 
         // Add to list
         virtualMachines.append(newConfig)
@@ -510,8 +526,14 @@ class VMManager {
         vmConfig.bundlePath = newBundlePath
         vmConfig.osType = osType
 
-        // Save metadata
-        saveVMMetadata(vmConfig)
+        // Roll back the copied bundle if save fails — same rationale as
+        // createVM and cloneVM (avoid stale-junk collisions on next attempt).
+        do {
+            try saveVMMetadata(vmConfig)
+        } catch {
+            try? FileManager.default.removeItem(atPath: newBundlePath)
+            throw error
+        }
 
         // Add to list
         virtualMachines.append(vmConfig)
@@ -524,7 +546,13 @@ class VMManager {
     func updateLastUsedDate(_ vmConfig: VMConfiguration) {
         if let index = virtualMachines.firstIndex(where: { $0.id == vmConfig.id }) {
             virtualMachines[index].lastUsedDate = Date()
-            saveVMMetadata(virtualMachines[index])
+            // Fire-and-forget — losing the last-used timestamp on disk-full
+            // doesn't justify breaking the UI flow. Log and move on.
+            do {
+                try saveVMMetadata(virtualMachines[index])
+            } catch {
+                print("Warning: failed to persist last-used date for \(vmConfig.name): \(error)")
+            }
         }
     }
 

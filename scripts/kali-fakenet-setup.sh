@@ -21,6 +21,15 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Logging helpers — define BEFORE any code that calls them. The original
+# layout defined `error()` further down (after the router-conf load),
+# so a missing /etc/secvf-router.conf aborted with `error: command not
+# found` instead of the intended "Run kali-router-setup.sh first" message.
+log()   { echo -e "${GREEN}[+]${NC} $1"; }
+info()  { echo -e "${BLUE}[*]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
 # Load interface config from router setup (REQUIRED)
 if [ -f /etc/secvf-router.conf ]; then
     source /etc/secvf-router.conf
@@ -62,11 +71,6 @@ banner() {
     echo "╚═══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
-
-log() { echo -e "${GREEN}[+]${NC} $1"; }
-info() { echo -e "${BLUE}[*]${NC} $1"; }
-warn() { echo -e "${YELLOW}[!]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -220,8 +224,15 @@ configure_fake_dns() {
     systemctl stop systemd-resolved 2>/dev/null || true
     systemctl disable systemd-resolved 2>/dev/null || true
 
-    # Backup original dnsmasq config
-    [[ -f /etc/dnsmasq.conf ]] && cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup
+    # Backup original dnsmasq config — but ONLY if no backup exists yet.
+    # Without this guard, a second `start` (without an intervening successful
+    # `stop` that restored the original) overwrites the legitimate backup
+    # with the previous-run's FakeNet config, losing the user's real
+    # /etc/dnsmasq.conf forever.
+    if [[ -f /etc/dnsmasq.conf && ! -f /etc/dnsmasq.conf.backup ]]; then
+        cp /etc/dnsmasq.conf /etc/dnsmasq.conf.backup
+        log "Backed up original /etc/dnsmasq.conf → /etc/dnsmasq.conf.backup"
+    fi
 
     cat > /etc/dnsmasq.conf << EOF
 # SecVF FakeNet DNS Configuration
@@ -454,6 +465,17 @@ stop_fakenet() {
 
     systemctl stop dnsmasq 2>/dev/null || true
     systemctl stop nginx 2>/dev/null || true
+
+    # Restore the user's original /etc/dnsmasq.conf so a subsequent
+    # `systemctl start dnsmasq` (or anything else that reads the file)
+    # sees the pre-FakeNet config — not the sinkhole one we wrote.
+    # Previously this step was missing; the file silently kept the
+    # sinkhole rule indefinitely. The backup guard at config_fake_dns
+    # ensures we don't overwrite this backup on the next `start`.
+    if [[ -f /etc/dnsmasq.conf.backup ]]; then
+        cp /etc/dnsmasq.conf.backup /etc/dnsmasq.conf
+        log "Restored original /etc/dnsmasq.conf from backup"
+    fi
 
     # Restore systemd-resolved
     systemctl enable systemd-resolved 2>/dev/null || true

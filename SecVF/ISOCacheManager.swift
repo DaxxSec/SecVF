@@ -404,8 +404,22 @@ class ISOCacheManager {
         return images
     }
 
-    /// Delete cached image to free space
+    /// Delete cached image to free space.
+    ///
+    /// Path-boundary check: refuse paths outside the cache roots. Without
+    /// this guard, any UI / CLI caller that constructs the path argument
+    /// could be tricked into deleting arbitrary files (e.g. by feeding
+    /// `~/Documents/important.txt` as if it were a cache entry). The
+    /// method is reached by both the UI cache panel and the CLI today, so
+    /// the validation lives here rather than at the call site.
     func deleteCachedImage(at path: String) throws {
+        let macOSRoot = NSHomeDirectory() + "/.avf/MacOS/"
+        guard path.hasPrefix(cacheRoot) || path.hasPrefix(macOSRoot) else {
+            print("[Cache] Refusing to delete path outside cache roots: \(path)")
+            throw NSError(domain: "ISOCacheManager", code: 400, userInfo: [
+                NSLocalizedDescriptionKey: "Delete refused: path is not inside a SecVF cache directory."
+            ])
+        }
         try FileManager.default.removeItem(atPath: path)
         print("[Cache] Deleted cached image: \(path)")
     }

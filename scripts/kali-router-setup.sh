@@ -206,30 +206,47 @@ iptables -t nat -F
 iptables -t mangle -F
 iptables -X
 
-# Default policies
+# Default policies.
+#
+# FORWARD defaults to DROP so any rule that's later added in error (or
+# any new interface that appears, e.g. a bridge added by the analyst)
+# fails closed rather than open. This is a host-OpSec defense-in-depth
+# choice — even though the analyst workflow (lab guests reaching the
+# internet via this router) is explicitly allowed below, a "no explicit
+# rule" path doesn't accidentally route somewhere we didn't intend.
 iptables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
+iptables -P FORWARD DROP
 iptables -P OUTPUT ACCEPT
 
 # Allow loopback
 iptables -A INPUT -i lo -j ACCEPT
 
-# Allow established connections
+# Allow established connections (INPUT)
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Allow return traffic for forwarded streams the lab initiated.
+# (Without this, ACK / response packets get dropped by the new default.)
 iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Allow traffic from internal network
+# Allow router-management traffic from inside the lab to the router itself
+# (SSH, DHCP, DNS replies, etc.). FORWARD intentionally NOT blanket-allowed.
 iptables -A INPUT -s ${ROUTER_NETWORK} -j ACCEPT
-iptables -A FORWARD -s ${ROUTER_NETWORK} -j ACCEPT
 
-# NAT masquerading for outbound traffic (dual-NIC only)
+# NAT masquerading for outbound traffic (dual-NIC only).
+# The analyst workflow: lab guest sends C2 traffic → router forwards → NAT
+# rewrites src → Apple framework NAT routes onward. The router is the
+# instrumentation point; the iptables FORWARD chain is the policy point.
 if [ -n "$NAT_IFACE" ]; then
     log "Enabling NAT masquerading: ${VSWITCH_IFACE} -> ${NAT_IFACE}"
     iptables -t nat -A POSTROUTING -s ${ROUTER_NETWORK} -o ${NAT_IFACE} -j MASQUERADE
+    # Explicit egress: lab → outside. The ONLY initiator direction allowed.
     iptables -A FORWARD -i ${VSWITCH_IFACE} -o ${NAT_IFACE} -j ACCEPT
+    # Return traffic is already handled by the ESTABLISHED,RELATED rule
+    # above (kept as a redundant explicit rule for clarity / audit).
     iptables -A FORWARD -i ${NAT_IFACE} -o ${VSWITCH_IFACE} -m state --state ESTABLISHED,RELATED -j ACCEPT
 else
     info "Single-NIC mode — NAT masquerading not enabled (no internet passthrough)"
+    info "FORWARD policy is DROP; lab guests cannot reach anything outside the switch."
 fi
 
 # Log dropped packets (for security monitoring)
@@ -489,13 +506,15 @@ if [ -n "$NAT_IFACE" ] && [ "$NAT_IFACE" != "" ]; then
     ip link set ${NAT_IFACE} up
     dhclient -1 ${NAT_IFACE} 2>/dev/null || true
 
-    # Flush and re-apply NAT rules
+    # Flush and re-apply NAT + FORWARD rules. Policy stays DROP (NOT ACCEPT)
+    # to fail closed if any rule below errors out. Same rationale as the
+    # first-boot setup script (lab → host-LAN pivot prevention).
     iptables -t nat -F
     iptables -F FORWARD
-    iptables -P FORWARD ACCEPT
+    iptables -P FORWARD DROP
     iptables -A FORWARD -m state --state ESTABLISHED,RELATED -j ACCEPT
-    iptables -A FORWARD -s ${ROUTER_NETWORK} -j ACCEPT
     iptables -t nat -A POSTROUTING -s ${ROUTER_NETWORK} -o ${NAT_IFACE} -j MASQUERADE
+    # Explicit egress: lab → outside. The ONLY initiator direction allowed.
     iptables -A FORWARD -i ${VSWITCH_IFACE} -o ${NAT_IFACE} -j ACCEPT
     iptables -A FORWARD -i ${NAT_IFACE} -o ${VSWITCH_IFACE} -m state --state ESTABLISHED,RELATED -j ACCEPT
 fi

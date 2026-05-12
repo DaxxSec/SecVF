@@ -6,6 +6,7 @@
 //
 
 import Cocoa
+import UniformTypeIdentifiers
 
 @MainActor
 class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate {
@@ -413,8 +414,17 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     @objc private func openPCAP(_ sender: Any) {
+        // `UTType(filenameExtension:)` returns `nil` on systems with stripped
+        // UTI registration (locked-down corporate Macs, some MDM profiles).
+        // Force-unwrapping there crashes the whole UI. Guard + actionable error.
+        guard let pcapType  = UTType(filenameExtension: "pcap"),
+              let pcapngType = UTType(filenameExtension: "pcapng") else {
+            showAlert(title: "Cannot Open PCAP",
+                      message: "This Mac doesn't have the pcap/pcapng file types registered. Install Wireshark or run `defaults write ...` to register them, then try again.")
+            return
+        }
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "pcap")!, .init(filenameExtension: "pcapng")!]
+        panel.allowedContentTypes = [pcapType, pcapngType]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.message = "Select a PCAP file to analyze"
@@ -433,8 +443,14 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     @objc private func savePCAP(_ sender: Any) {
+        // Same guard as openPCAP — pcap UTI may be unregistered.
+        guard let pcapType = UTType(filenameExtension: "pcap") else {
+            showAlert(title: "Cannot Save PCAP",
+                      message: "This Mac doesn't have the pcap file type registered. Install Wireshark or register the type, then try again.")
+            return
+        }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.init(filenameExtension: "pcap")!]
+        panel.allowedContentTypes = [pcapType]
         panel.nameFieldStringValue = "capture.pcap"
         panel.message = "Save captured packets to PCAP file"
 

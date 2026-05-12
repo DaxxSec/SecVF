@@ -1,0 +1,41 @@
+title: SecVF — Outbound traffic from Virtual-mode VM
+id: 4f8c7a9b-3d2e-4f8a-91d3-7b6a5c4d3e2f
+status: experimental
+description: |
+  A VM in Virtual Network mode should have NO uplink to the outside
+  world. If the switch observes outbound traffic from a virtual-mode
+  port, either:
+    1. The mode was misconfigured (most likely — check the VM's network
+       setting in the Library)
+    2. The switch is misrouting (bug — file an issue)
+    3. The VM has bridged itself off the switch through some other
+       interface (containment indicator)
+references:
+  - https://secvf.daxxsec.tech/wiki/Network-Modes#virtual
+  - https://secvf.daxxsec.tech/wiki/Containment-Breakout#network
+author: DaxxSec
+date: 2026-05-10
+logsource:
+  product: secvf
+  service: security-events
+detection:
+  selection:
+    stream: security
+    subsystem: network
+    event: virtual-mode.unexpected-egress
+  condition: selection
+level: critical
+falsepositives:
+  - VM was reconfigured to Router-mode mid-session (network stack still says virtual)
+fields:
+  - vm
+  - data.src_port
+  - data.dst_ip
+  - data.dst_port
+tags:
+  - secvf
+  - containment
+  - network
+
+# LogQL:
+# {stream="security", subsystem="network", event="virtual-mode.unexpected-egress"}

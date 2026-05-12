@@ -1,0 +1,8 @@
+# ET Open trojan rules placeholder — same notes as et-open-malware-c2.rules.
+# Pull live ruleset for current coverage; this file is intentionally minimal
+# so the SIEM starts cleanly without external network access.
+#
+# To populate from upstream:
+#   wget https://rules.emergingthreats.net/open/suricata-7.0.7/emerging-trojan.rules
+#   mv emerging-trojan.rules siem/suricata/rules/et-open-trojan.rules
+#   docker compose restart suricata

@@ -1,5 +1,8 @@
 import ArgumentParser
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 @main
 struct SecVF: AsyncParsableCommand {
@@ -16,6 +19,28 @@ struct SecVF: AsyncParsableCommand {
         ],
         defaultSubcommand: nil
     )
+
+    static func main() async {
+        // Ignore SIGPIPE so commands like `secvf capture live | head` don't
+        // get killed by the OS when the consumer closes the read end of the
+        // pipe — we want the write to return EPIPE so we can drain cleanly.
+        #if canImport(Darwin)
+        signal(SIGPIPE, SIG_IGN)
+        #endif
+
+        // Mirror the default AsyncParsableCommand main(): parse the root
+        // command, run async if it conforms, fall back to sync run otherwise.
+        do {
+            var command = try parseAsRoot()
+            if var asyncCommand = command as? AsyncParsableCommand {
+                try await asyncCommand.run()
+            } else {
+                try command.run()
+            }
+        } catch {
+            exit(withError: error)
+        }
+    }
 }
 
 // MARK: - Common Options

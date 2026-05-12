@@ -1,0 +1,148 @@
+{
+  "uid": "secvf-containment",
+  "title": "SecVF · Containment & boundary violations",
+  "description": "Indicators that SecVF's isolation boundaries (hypervisor, network, filesystem, IPC) may have been crossed. See https://secvf.daxxsec.tech/wiki/Containment-Breakout for response procedures.",
+  "tags": ["secvf", "containment", "security"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Hypervisor anomalies",
+      "description": "Unexpected SecVF child processes, VZ crashes, kernel panics in guest. 0 is normal.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"security\", subsystem=\"vm-lifecycle\", severity=~\"CRITICAL|EMERGENCY\"}[24h]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Network boundary violations",
+      "description": "Switch drops, malformed frames, outbound traffic from VMs in Virtual mode (should be zero).",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"security\", subsystem=\"network\", severity=~\"CRITICAL|EMERGENCY\"}[24h]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Filesystem boundary",
+      "description": "Foreign file appearance in bundles, NVRAM mutation outside boot, FSEvents anomalies.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"security\", subsystem=\"fsevents\", severity=~\"CRITICAL|EMERGENCY\"}[24h]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "IPC anomalies",
+      "description": "vsock protocol violations, oversized messages, VirtioFS symlink escapes.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({stream=\"security\", subsystem=~\"ai-sandbox|vsock|virtiofs\", severity=~\"CRITICAL|EMERGENCY\"}[24h]))",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Boundary events over time (by layer)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({stream=\"security\", subsystem=\"vm-lifecycle\", severity=~\"CRITICAL|EMERGENCY\"}[5m]))",
+          "refId": "A", "legendFormat": "hypervisor"
+        },
+        {
+          "expr": "sum(count_over_time({stream=\"security\", subsystem=\"network\", severity=~\"CRITICAL|EMERGENCY\"}[5m]))",
+          "refId": "B", "legendFormat": "network"
+        },
+        {
+          "expr": "sum(count_over_time({stream=\"security\", subsystem=\"fsevents\", severity=~\"CRITICAL|EMERGENCY\"}[5m]))",
+          "refId": "C", "legendFormat": "filesystem"
+        },
+        {
+          "expr": "sum(count_over_time({stream=\"security\", subsystem=~\"ai-sandbox|vsock|virtiofs\", severity=~\"CRITICAL|EMERGENCY\"}[5m]))",
+          "refId": "D", "legendFormat": "ipc"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" }, "fillOpacity": 70 } }
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 6 }
+    },
+    {
+      "id": 20,
+      "type": "logs",
+      "title": "All boundary-relevant events (24h, live)",
+      "description": "Anything CRITICAL or EMERGENCY across the four boundary subsystems. Treat each line as something to investigate.",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "{stream=\"security\", subsystem=~\"vm-lifecycle|network|fsevents|ai-sandbox|vsock|virtiofs\", severity=~\"CRITICAL|EMERGENCY\"}",
+        "refId": "A"
+      }],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 14 }
+    },
+    {
+      "id": 30,
+      "type": "text",
+      "title": "Response procedure",
+      "options": {
+        "mode": "markdown",
+        "content": "**Any red number above ≥ 1?**\n\n1. **Pause the suspect VM immediately** — VM Library → right-click → Pause. Don't stop, pause; you want the state intact.\n2. **Snapshot the bundle** — `secvf vm snapshot &lt;vm&gt; --as &lt;vm&gt;-incident-$(date +%s)`.\n3. **Export logs** — `cp -r ~/.avf/logs/ ~/incident-bundle-$(date +%F)/`.\n4. **Read** the [Containment Breakout wiki](https://secvf.daxxsec.tech/wiki/Containment-Breakout) for the full per-layer response procedure.\n5. **If the host itself may be compromised:** disconnect from network, full system audit.\n\nDon't delete anything. Don't restart SecVF. Don't `rm -rf` the suspect bundle until forensics is done."
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 28 }
+    }
+  ]
+}

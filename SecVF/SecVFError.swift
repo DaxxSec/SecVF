@@ -205,28 +205,19 @@ extension SecVFError {
     /// Log error to security audit log
     func logToAudit() {
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let logEntry = "[\(timestamp)] ERROR: \(self.localizedDescription)\n"
+        // Tokenize the home prefix so logs shared with vendors / IR partners
+        // don't leak the operator's identity via `/Users/<name>/...` paths.
+        let safeDesc = self.localizedDescription
+            .replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        let logEntry = "[\(timestamp)] ERROR: \(safeDesc)\n"
 
-        let logsDir = NSHomeDirectory() + "/.avf/logs/"
-        let logPath = logsDir + "error-audit.log"
-
-        // Ensure directory exists
-        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
-                                                attributes: [.posixPermissions: 0o700])
-
-        if let data = logEntry.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: logPath) {
-                if let handle = FileHandle(forWritingAtPath: logPath) {
-                    handle.seekToEndOfFile()
-                    handle.write(data)
-                    handle.closeFile()
-                }
-            } else {
-                try? data.write(to: URL(fileURLWithPath: logPath))
-            }
-        }
+        // Route through AVFAuditLog so concurrent producers stay line-coherent
+        // in error-audit.log. AVFAuditLog opens with O_APPEND + mode 0o600
+        // (the file gets the right perms on first create automatically).
+        AVFPaths.ensureDirectoriesExist()
+        AVFAuditLog.append(logEntry, to: AVFPaths.errorAuditLog)
 
         // Also log to system console
-        NSLog("[SecVF ERROR] %@", self.localizedDescription)
+        NSLog("[SecVF ERROR] %@", safeDesc)
     }
 }

@@ -1,0 +1,168 @@
+{
+  "uid": "secvf-severity",
+  "title": "SecVF · Severity overview",
+  "tags": ["secvf", "overview"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "EMERGENCY events (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({job=\"secvf\", stream=\"security\", severity=\"EMERGENCY\"}[24h]))",
+        "queryType": "instant",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "red" }
+          ]},
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "CRITICAL events (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({job=\"secvf\", stream=\"security\", severity=\"CRITICAL\"}[24h]))",
+        "queryType": "instant",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "green" },
+            { "value": 1, "color": "orange" },
+            { "value": 10, "color": "red" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "WARNING events (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({job=\"secvf\", stream=\"security\", severity=\"WARNING\"}[24h]))",
+        "queryType": "instant",
+        "refId": "A"
+      }],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "value": null, "color": "yellow" }
+          ]}
+        }
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "INFO events (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "sum(count_over_time({job=\"secvf\", stream=\"security\", severity=\"INFO\"}[24h]))",
+        "queryType": "instant",
+        "refId": "A"
+      }],
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Events by severity (5m bins)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "sum by (severity) (count_over_time({job=\"secvf\", stream=\"security\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{severity}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": { "mode": "normal" },
+            "fillOpacity": 60
+          },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "EMERGENCY" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "magenta" } }] },
+          { "matcher": { "id": "byName", "options": "CRITICAL" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "WARNING" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "INFO" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Top subsystems (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "topk(10, sum by (subsystem) (count_over_time({job=\"secvf\", stream=\"security\"}[24h])))",
+        "queryType": "instant",
+        "refId": "A",
+        "instant": true
+      }],
+      "transformations": [{
+        "id": "reduce",
+        "options": { "reducers": ["last"] }
+      }],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Top VMs by event volume (24h)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "topk(10, sum by (vm) (count_over_time({job=\"secvf\", stream=\"security\", vm!=\"\"}[24h])))",
+        "queryType": "instant",
+        "refId": "A",
+        "instant": true
+      }],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 }
+    },
+    {
+      "id": 30,
+      "type": "logs",
+      "title": "Recent CRITICAL & EMERGENCY (live)",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{
+        "expr": "{job=\"secvf\", stream=\"security\"} | json | severity=~\"CRITICAL|EMERGENCY\"",
+        "refId": "A"
+      }],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 20 }
+    }
+  ]
+}

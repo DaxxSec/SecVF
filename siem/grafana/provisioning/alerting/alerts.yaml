@@ -1,0 +1,156 @@
+apiVersion: 1
+
+# Alert rules for SecVF events. These provision into Grafana's unified alerting.
+# Each rule queries Loki, fires when a threshold is crossed, and ends up in
+# Grafana's alert state. Notification routing (email, slack, etc.) is left
+# unconfigured by default — set up a contact point in Grafana UI first.
+
+groups:
+  - orgId: 1
+    name: SecVF — Containment & Critical Events
+    folder: SecVF
+    interval: 1m
+    rules:
+
+      # ─── EMERGENCY (any) ─────────────────────────────────────────────
+      - uid: secvf-emergency-any
+        title: SecVF — EMERGENCY event detected
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="security", severity="EMERGENCY"}[5m]))
+              instant: true
+              refId: A
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "EMERGENCY-severity event recorded in SecVF security log"
+          description: "A security boundary may have been violated. See the Containment dashboard and the wiki: https://secvf.daxxsec.tech/wiki/Containment-Breakout"
+          runbook_url: "https://secvf.daxxsec.tech/wiki/Containment-Breakout"
+        labels:
+          severity: critical
+          source: secvf
+
+      # ─── ISO checksum mismatch ───────────────────────────────────────
+      - uid: secvf-iso-checksum-mismatch
+        title: SecVF — ISO checksum mismatch
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="security", subsystem="iso-cache", event="checksum.mismatch"}[10m]))
+              instant: true
+              refId: A
+        for: 0s
+        annotations:
+          summary: "ISO file failed SHA-256 verification"
+          description: "An ISO downloaded by SecVF did not match its expected hash. The file was deleted. Possible supply-chain anomaly or transit corruption."
+        labels:
+          severity: critical
+          source: secvf
+
+      # ─── Network boundary: switch drops sustained ────────────────────
+      - uid: secvf-switch-drops-sustained
+        title: SecVF — Sustained packet drops on virtual switch
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="security", subsystem="network", event="switch.drop"}[10m]))
+              instant: true
+              refId: A
+        for: 5m
+        annotations:
+          summary: "Virtual switch dropping packets for 5+ minutes"
+          description: "The capture queue is saturating or a malformed frame is being repeatedly rejected. Investigate packet rates and capture configuration."
+        labels:
+          severity: warning
+          source: secvf
+
+      # ─── Foreign file in VM bundle ───────────────────────────────────
+      - uid: secvf-foreign-file-in-bundle
+        title: SecVF — Unexpected file in VM bundle directory
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="security", subsystem="fsevents", event="file.unexpected"}[10m]))
+              instant: true
+              refId: A
+        for: 0s
+        annotations:
+          summary: "File appeared in ~/.avf/<vm>/.bundle that SecVF did not write"
+          description: "Filesystem boundary indicator. Likely causes: human edit, external process, or boundary violation. Investigate per Containment Breakout."
+        labels:
+          severity: critical
+          source: secvf
+
+      # ─── Suricata C2 / trojan alerts ─────────────────────────────────
+      - uid: secvf-suricata-c2-alert
+        title: SecVF — Suricata flagged C2 / trojan traffic
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="suricata", event_type="alert", category=~".*[Cc]2.*|.*[Tt]rojan.*|.*[Mm]alware.*"}[10m]))
+              instant: true
+              refId: A
+        for: 0s
+        annotations:
+          summary: "Suricata fired on C2/trojan/malware traffic"
+          description: "Captured PCAP traffic matched a malware C2 or trojan-activity signature. See Detection dashboard for the signature, source/dest IPs, and packet details."
+        labels:
+          severity: warning
+          source: secvf
+
+      # ─── YARA match — any (rare in a clean lab) ──────────────────────
+      - uid: secvf-yara-match
+        title: SecVF — YARA rule matched a quarantined file
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="yara"} | json | event="scan.match" [10m]))
+              instant: true
+              refId: A
+        for: 0s
+        annotations:
+          summary: "A file in ~/.avf/Quarantine matched a YARA rule"
+          description: "Inspect the matched rule + file in the Detection dashboard. If you didn't place the file there yourself, treat as a containment indicator."
+        labels:
+          severity: warning
+          source: secvf
+
+      # ─── AI sandbox session orphan ───────────────────────────────────
+      - uid: secvf-ai-sandbox-orphan
+        title: SecVF — AI sandbox session orphaned
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: loki
+            model:
+              expr: sum(count_over_time({stream="ai_sandbox", event="session.orphaned"}[10m]))
+              instant: true
+              refId: A
+        for: 0s
+        annotations:
+          summary: "An AI sandbox session bundle exists with no running process"
+          description: "Either SecVF crashed mid-session, or a session was destroyed but its bundle remains. Run `secvf vm list --json` and clean up if needed."
+        labels:
+          severity: warning
+          source: secvf
