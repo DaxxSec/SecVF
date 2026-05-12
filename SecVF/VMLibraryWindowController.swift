@@ -48,6 +48,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var liveRateBps: [String: (down: Double, up: Double)] = [:]
     private var liveRateTimer: Timer?
 
+    /// Rolling per-VM buffer of (down + up) bytes/sec samples. Drives the
+    /// Traffic column sparkline. `maxTrafficSamples` × the timer cadence
+    /// (1.5s) defines the visible time window — 30 samples = ~45 s.
+    private var trafficSamples: [String: [Double]] = [:]
+    private static let maxTrafficSamples = 30
+
     // Right panel tabs (VMs / Tasks)
     private var rightPanelTabControl: NSSegmentedControl?
     private var vmsTabContent: NSView?
@@ -140,6 +146,22 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         tableView?.delegate = self
         tableView?.target = self
         tableView?.doubleAction = #selector(startVM(_:))
+
+        // Programmatically append a Traffic column at the end of whatever
+        // the XIB defined. Done in code (not the XIB) so the column can
+        // host a custom NSView (SparklineView) rather than the default
+        // NSTextField cell. The column is non-resizable and ~80pt wide —
+        // enough for a glanceable line, not so wide it eats other columns.
+        if let tableView = tableView,
+           !tableView.tableColumns.contains(where: { $0.identifier.rawValue == "TrafficColumn" }) {
+            let trafficCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TrafficColumn"))
+            trafficCol.title = "Traffic"
+            trafficCol.width = 80
+            trafficCol.minWidth = 60
+            trafficCol.maxWidth = 120
+            trafficCol.headerCell.alignment = .center
+            tableView.addTableColumn(trafficCol)
+        }
 
         // Load VMs asynchronously to avoid blocking main thread
         vmManager.initializeAsync { [weak self] in
@@ -1013,7 +1035,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 // (e.g., port re-attached and reset), drop the sample.
                 let dRx = rx >= prev.bytesRx ? Double(rx - prev.bytesRx) : 0
                 let dTx = tx >= prev.bytesTx ? Double(tx - prev.bytesTx) : 0
-                liveRateBps[name] = (down: dRx / dt, up: dTx / dt)
+                let down = dRx / dt
+                let up = dTx / dt
+                liveRateBps[name] = (down: down, up: up)
+                appendTrafficSample(down + up, for: name)
             }
             lastNetSample[name] = NetSample(bytesRx: rx, bytesTx: tx, ts: now)
         }
@@ -1023,6 +1048,40 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // hasn't changed.
         if currentLibraryTab == .standard {
             updateSelectedVMDetailCard()
+            // Update only the Traffic column to keep the sparklines fresh
+            // without re-rendering every cell on every tick.
+            refreshTrafficColumn()
+        }
+    }
+
+    /// Append a (down + up) bytes/sec sample to the rolling buffer for `vmName`,
+    /// trimming to `maxTrafficSamples` length.
+    private func appendTrafficSample(_ value: Double, for vmName: String) {
+        var buffer = trafficSamples[vmName] ?? []
+        buffer.append(value)
+        let cap = Self.maxTrafficSamples
+        if buffer.count > cap {
+            buffer.removeFirst(buffer.count - cap)
+        }
+        trafficSamples[vmName] = buffer
+    }
+
+    /// Repaint the Traffic column for every row. Cheap — each cell already
+    /// holds a SparklineView, we just push fresh samples into it.
+    private func refreshTrafficColumn() {
+        guard let tableView = tableView else { return }
+        guard let colIdx = tableView.tableColumns.firstIndex(where: {
+            $0.identifier.rawValue == "TrafficColumn"
+        }) else { return }
+        let rowRange = 0..<tableView.numberOfRows
+        for row in rowRange {
+            guard let cell = tableView.view(atColumn: colIdx, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let spark = cell.subviews.first(where: { $0 is SparklineView }) as? SparklineView else {
+                continue
+            }
+            let vmName = vmManager.virtualMachines.indices.contains(row)
+                ? vmManager.virtualMachines[row].name : ""
+            spark.samples = trafficSamples[vmName] ?? []
         }
     }
 
@@ -2380,7 +2439,43 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     // MARK: - NSTableViewDelegate
 
+    /// Dequeue (or build) the cell for the Traffic column. The cell hosts a
+    /// `SparklineView` configured from the per-VM rolling buffer in
+    /// `trafficSamples`. AI Sandbox tab gets an empty sparkline because we
+    /// don't sample those bundles through the virtual switch.
+    private func trafficColumnCell(tableView: NSTableView, row: Int) -> NSView? {
+        let id = NSUserInterfaceItemIdentifier("TrafficColumn")
+        var cell = tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView
+        var spark: SparklineView!
+        if cell == nil {
+            cell = NSTableCellView()
+            cell?.identifier = id
+            spark = SparklineView(frame: NSRect(x: 6, y: 2, width: 68, height: 16))
+            spark.autoresizingMask = [.width, .height]
+            cell?.addSubview(spark)
+        } else {
+            spark = cell?.subviews.first(where: { $0 is SparklineView }) as? SparklineView
+        }
+
+        let vmName: String? = {
+            if currentLibraryTab == .standard,
+               vmManager.virtualMachines.indices.contains(row) {
+                return vmManager.virtualMachines[row].name
+            }
+            return nil
+        }()
+        spark.samples = vmName.flatMap { trafficSamples[$0] } ?? []
+        return cell
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        // Traffic column gets a custom SparklineView cell instead of the
+        // shared NSTextField cell used by every other column. We intercept
+        // here before the text-cell construction below.
+        if tableColumn?.identifier.rawValue == "TrafficColumn" {
+            return trafficColumnCell(tableView: tableView, row: row)
+        }
+
         // Try to get existing cell, or create new one programmatically
         var cell = tableView.makeView(withIdentifier: tableColumn!.identifier, owner: self) as? NSTableCellView
 
