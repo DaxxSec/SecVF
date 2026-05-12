@@ -38,6 +38,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var networkVisualizationView: NetworkTrafficView?
     private var statsUpdateTimer: Timer?
 
+    // Live network rates per VM, computed from VirtualNetworkSwitch port
+    // byte counters polled every ~1.5s. `lastNetSample` stores the previous
+    // counter + timestamp; `liveRateBps` is the latest rate the detail card
+    // reads from. Only the virtual-switch path is sampled — NAT-mode VMs
+    // don't show a per-VM rate (the host network stack doesn't expose one).
+    private struct NetSample { let bytesRx: UInt64; let bytesTx: UInt64; let ts: Date }
+    private var lastNetSample: [String: NetSample] = [:]
+    private var liveRateBps: [String: (down: Double, up: Double)] = [:]
+    private var liveRateTimer: Timer?
+
     // Right panel tabs (VMs / Tasks)
     private var rightPanelTabControl: NSSegmentedControl?
     private var vmsTabContent: NSView?
@@ -94,8 +104,9 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     deinit {
-        // Clean up timer and notification observers to prevent memory leaks
+        // Clean up timers and notification observers to prevent memory leaks
         statsUpdateTimer?.invalidate()
+        liveRateTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -163,6 +174,20 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             name: .ipswDownloadTrackerChanged,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleVMBundleSizeUpdated(_:)),
+            name: .vmBundleSizeUpdated,
+            object: nil
+        )
+
+        // Start the live network-rate timer (1.5s cadence). Samples the
+        // VirtualNetworkSwitch per-port byte counters and computes a moving
+        // bytes/sec for each VM. Detail card reads from `liveRateBps`.
+        liveRateTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.sampleLiveNetworkRates() }
+        }
 
         // Update button states
         updateButtonStates()
@@ -894,10 +919,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let ramGB = Double(vm.memorySize) / 1_073_741_824.0
         detailResourcesLabel?.stringValue = String(format: "%d · %.1f GB", vm.cpuCount, ramGB)
 
-        // Disk — just configured capacity for now. Live "used" requires a
-        // bundle-size measurement off the main thread; deferred to a follow-up.
+        // Disk — show "used / total". `onDiskBundleSize` returns the cached
+        // value immediately and kicks a background re-scan if stale; the
+        // detail card refreshes via `.vmBundleSizeUpdated` notification when
+        // a fresh measurement lands. Until first measurement returns, fall
+        // back to "— / total".
         let diskGB = Double(vm.diskSize) / 1_073_741_824.0
-        detailDiskLabel?.stringValue = String(format: "%.0f GB", diskGB)
+        if let usedBytes = vmManager.onDiskBundleSize(for: vm) {
+            let usedGB = Double(usedBytes) / 1_073_741_824.0
+            detailDiskLabel?.stringValue = String(format: "%.1f / %.0f GB", usedGB, diskGB)
+        } else {
+            detailDiskLabel?.stringValue = String(format: "— / %.0f GB", diskGB)
+        }
 
         // Network mode (color-coded by safety)
         switch vm.networkConfig.mode {
@@ -909,17 +942,68 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             detailNetworkModeLabel?.textColor = AppColors.networkIsolated
         }
 
-        // Live rate — placeholder until per-VM byte counters are surfaced
-        // from PacketCaptureManager. When the VM is running show the
-        // capture-pipeline aggregate so something useful appears here.
+        // Live rate ↓/↑ — sampled from VirtualNetworkSwitch per-port byte
+        // counters on a 1.5s cadence. Only VMs connected to the virtual
+        // switch (Virtual / Router modes) get a real rate; NAT-mode VMs
+        // can't be sampled per-VM through this path. When the VM is
+        // running but no rate sample exists yet, show "0 B/s · 0 B/s"
+        // instead of "—" so the user knows the wiring is live.
         if vm.status == .running {
-            let bytes = Int64(PacketCaptureManager.shared.totalBytes)
-            let str = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
-            detailNetworkRateLabel?.stringValue = "\(str) seen"
-            detailNetworkRateLabel?.textColor = AppColors.accentOrangeHot
+            let rate = liveRateBps[vm.name]
+            let down = rate?.down ?? 0
+            let up = rate?.up ?? 0
+            let downStr = ByteCountFormatter.string(fromByteCount: Int64(down), countStyle: .binary)
+            let upStr = ByteCountFormatter.string(fromByteCount: Int64(up), countStyle: .binary)
+            detailNetworkRateLabel?.stringValue = "\(downStr)/s ↓  \(upStr)/s ↑"
+            // Tint hot only when there's actual traffic — keeps the cell
+            // visually quiet for idle VMs.
+            let hot = (down + up) > 1024  // anything above ~1 KiB/s reads as live
+            detailNetworkRateLabel?.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
         } else {
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
+        }
+    }
+
+    /// Poll the VirtualNetworkSwitch port stats and turn cumulative byte
+    /// counters into a moving bytes/sec rate per VM. Called on a 1.5s timer
+    /// from `windowDidLoad`. Skips entirely when the switch isn't running.
+    private func sampleLiveNetworkRates() {
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+        guard let isRunning = stats["running"] as? Bool, isRunning,
+              let portStats = stats["ports"] as? [[String: Any]] else {
+            // Decay all live rates when the switch isn't running so stale
+            // numbers don't linger.
+            if !liveRateBps.isEmpty { liveRateBps.removeAll() }
+            return
+        }
+
+        let now = Date()
+        for port in portStats {
+            guard let name = port["vmName"] as? String,
+                  let rxAny = port["bytesRx"], let txAny = port["bytesTx"] else { continue }
+            // Counters can come back as Int / UInt64 / NSNumber depending on
+            // how the dict was serialised — normalize through NSNumber.
+            let rx = (rxAny as? NSNumber)?.uint64Value ?? 0
+            let tx = (txAny as? NSNumber)?.uint64Value ?? 0
+
+            if let prev = lastNetSample[name] {
+                let dt = now.timeIntervalSince(prev.ts)
+                guard dt > 0.001 else { continue }  // avoid div-by-zero on rapid ticks
+                // Defend against UInt64 wraparound — if counters went backwards
+                // (e.g., port re-attached and reset), drop the sample.
+                let dRx = rx >= prev.bytesRx ? Double(rx - prev.bytesRx) : 0
+                let dTx = tx >= prev.bytesTx ? Double(tx - prev.bytesTx) : 0
+                liveRateBps[name] = (down: dRx / dt, up: dTx / dt)
+            }
+            lastNetSample[name] = NetSample(bytesRx: rx, bytesTx: tx, ts: now)
+        }
+
+        // Refresh the detail card if the selected VM has a live rate.
+        // Cheap to call — most cells short-circuit when the selection
+        // hasn't changed.
+        if currentLibraryTab == .standard {
+            updateSelectedVMDetailCard()
         }
     }
 
@@ -2088,6 +2172,22 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
             // Selected VM's pill + live rate also depend on status
             self.updateSelectedVMDetailCard()
+        }
+    }
+
+    @objc private func handleVMBundleSizeUpdated(_ notification: Notification) {
+        // Bundle-size scan is per-VM. If the updated VM matches the currently
+        // selected row, refresh the detail card so the Disk cell jumps from
+        // "—" to the real measurement (or updates from a stale value).
+        guard let updatedId = notification.object as? UUID else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let selectedRow = self.tableView?.selectedRow ?? -1
+            guard selectedRow >= 0,
+                  selectedRow < self.vmManager.virtualMachines.count else { return }
+            if self.vmManager.virtualMachines[selectedRow].id == updatedId {
+                self.updateSelectedVMDetailCard()
+            }
         }
     }
 

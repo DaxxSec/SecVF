@@ -34,4 +34,10 @@ extension Notification.Name {
     /// reads `userInfo["inRecoveryMode"]: Bool` to decide which boot
     /// path to dispatch (normal vs. macOS Recovery).
     static let bootAISandbox = Notification.Name("bootAISandbox")
+
+    /// Background bundle-size measurement finished. `object` is the
+    /// VMConfiguration.id (UUID); `userInfo["bytes"]: Int64` is the
+    /// measured allocated-on-disk size. Used by the selected-VM detail
+    /// card to refresh the Disk cell once a background scan completes.
+    static let vmBundleSizeUpdated = Notification.Name("vmBundleSizeUpdated")
 }
