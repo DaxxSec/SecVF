@@ -835,6 +835,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         guard selectedVMDetailCard != nil else { return }
 
         let selectedRow = tableView?.selectedRow ?? -1
+
+        // AI Sandbox tab populates the card from the bundle row.
+        if currentLibraryTab == .aiSandbox {
+            updateDetailCardForAISandbox(selectedRow: selectedRow)
+            return
+        }
+
         let allVMs = vmManager.virtualMachines
 
         guard selectedRow >= 0, selectedRow < allVMs.count else {
@@ -910,6 +917,59 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             let str = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
             detailNetworkRateLabel?.stringValue = "\(str) seen"
             detailNetworkRateLabel?.textColor = AppColors.accentOrangeHot
+        } else {
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+        }
+    }
+
+    /// Repaint the detail card from the currently-selected AI Sandbox
+    /// bundle. AI Sandbox VMs have a fixed shape (macOS, isolated, 4 vCPU
+    /// / 8 GB RAM via AISandboxDefaults), so several cells are constant.
+    private func updateDetailCardForAISandbox(selectedRow: Int) {
+        guard selectedRow >= 0, selectedRow < aiSandboxBundles.count else {
+            detailNameLabel?.stringValue = aiSandboxBundles.isEmpty ?
+                "No AI Sandbox bundles" : "No bundle selected"
+            detailNameLabel?.textColor = AppColors.textMuted
+            detailStatusPill?.stringValue = ""
+            detailStatusPill?.layer?.backgroundColor = NSColor.clear.cgColor
+            detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
+            detailOSLabel?.stringValue = "—"
+            detailResourcesLabel?.stringValue = "—"
+            detailDiskLabel?.stringValue = "—"
+            detailNetworkModeLabel?.stringValue = "—"
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+            return
+        }
+
+        let bundle = aiSandboxBundles[selectedRow]
+
+        detailNameLabel?.stringValue = bundle.displayName
+        detailNameLabel?.textColor = AppColors.textPrimary
+
+        let (pillText, pillColor): (String, NSColor) = bundle.isBase
+            ? ("◆ TEMPLATE", AppColors.accentOrange)
+            : ("● SESSION",  AppColors.statusRunning)
+        detailStatusPill?.stringValue = pillText
+        detailStatusPill?.textColor = pillColor
+        detailStatusPill?.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
+        detailStatusPill?.layer?.borderColor = pillColor.withAlphaComponent(0.45).cgColor
+
+        detailOSLabel?.stringValue = "macOS"
+        detailResourcesLabel?.stringValue = "4 · 8 GB"
+        detailDiskLabel?.stringValue = ByteCountFormatter.string(
+            fromByteCount: bundle.diskBytes, countStyle: .binary)
+
+        detailNetworkModeLabel?.stringValue = "ISOLATED"
+        detailNetworkModeLabel?.textColor = AppColors.networkIsolated
+
+        if let created = bundle.createdAt {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            detailNetworkRateLabel?.stringValue = formatter.string(from: created)
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
         } else {
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
@@ -2039,6 +2099,14 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             if self.rightPanelTabControl?.selectedSegment == 1 {
                 self.refreshTasksTab()
             }
+            // If the user is currently viewing the AI Sandbox tab, re-scan
+            // so a newly-installed base / new session appears without
+            // requiring a tab toggle.
+            if self.currentLibraryTab == .aiSandbox {
+                self.aiSandboxBundles = self.scanAISandboxBundles()
+                self.tableView?.reloadData()
+                self.updateSelectedVMDetailCard()
+            }
         }
     }
 
@@ -2340,6 +2408,36 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to delete")
+            return
+        }
+
+        // AI Sandbox tab — delete the selected session bundle off disk.
+        // updateButtonStates() already disables the Delete button for the
+        // base bundle, but we double-check here to defend against keyboard
+        // shortcut paths.
+        if currentLibraryTab == .aiSandbox {
+            guard selectedRow < aiSandboxBundles.count else { return }
+            let bundle = aiSandboxBundles[selectedRow]
+            guard !bundle.isBase else {
+                showAlert(message: "The AI Sandbox base bundle cannot be deleted from here. Use Tools → Create AI Sandbox VM to rebuild it.")
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Delete AI Sandbox session?"
+            alert.informativeText = "Permanently remove the bundle at:\n\(bundle.url.path)\n\nThis action cannot be undone."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            do {
+                try FileManager.default.removeItem(at: bundle.url)
+                aiSandboxBundles = scanAISandboxBundles()
+                tableView.reloadData()
+                updateButtonStates()
+                updateSelectedVMDetailCard()
+            } catch {
+                showAlert(message: "Failed to delete bundle: \(error.localizedDescription)")
+            }
             return
         }
 
@@ -2802,15 +2900,34 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
     private func updateButtonStates() {
         let hasSelection = tableView?.selectedRow ?? -1 >= 0
-        // Selection-dependent buttons. New + Import work without a selection.
-        let selectionScoped: [NSButton?] = [startButton, deleteButton, renameButton, cloneButton, configureButton]
-        for button in selectionScoped.compactMap({ $0 }) {
-            button.isEnabled = hasSelection
-            applyButtonStyle(button)
+        let isAITab = (currentLibraryTab == .aiSandbox)
+
+        // AI Sandbox bundles have their own lifecycle (create via Tools menu,
+        // boot via Start, otherwise managed on disk). The standard Configure
+        // / Clone / Rename / Import / New flows don't apply, so we disable
+        // them in the AI Sandbox tab to avoid silent no-ops.
+        startButton?.isEnabled = hasSelection
+        deleteButton?.isEnabled = hasSelection && (!isAITab || isAITabSessionRowSelected())
+        configureButton?.isEnabled = hasSelection && !isAITab
+        cloneButton?.isEnabled     = hasSelection && !isAITab
+        renameButton?.isEnabled    = hasSelection && !isAITab
+        newButton?.isEnabled       = !isAITab
+        importButton?.isEnabled    = !isAITab
+
+        let allButtons: [NSButton?] = [startButton, deleteButton, renameButton,
+                                       cloneButton, configureButton, newButton, importButton]
+        allButtons.compactMap({ $0 }).forEach(applyButtonStyle)
+    }
+
+    /// True when the AI Sandbox tab is active AND the currently selected
+    /// row is a session (not the base bundle). The base bundle must not be
+    /// deletable from the library — that's a Tools-menu admin action only.
+    private func isAITabSessionRowSelected() -> Bool {
+        guard currentLibraryTab == .aiSandbox else { return false }
+        guard let row = tableView?.selectedRow, row >= 0, row < aiSandboxBundles.count else {
+            return false
         }
-        // Always-enabled buttons still need their styling refreshed (e.g., on
-        // first call before styleToolbarButtons has run).
-        [newButton, importButton].compactMap({ $0 }).forEach(applyButtonStyle)
+        return !aiSandboxBundles[row].isBase
     }
 
     private func showAlert(message: String) {
