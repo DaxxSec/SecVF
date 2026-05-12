@@ -228,11 +228,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Cybersecurity dark background - deep black
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
+        contentView.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
 
         // Style table view with dark theme - darker grey
-        tableView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
-        tableView?.enclosingScrollView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
+        tableView?.backgroundColor = AppColors.backgroundSecondary
+        tableView?.enclosingScrollView?.backgroundColor = AppColors.backgroundSecondary
         tableView?.gridColor = AppColors.borderCyan
 
         // Style toolbar buttons to match session panel
@@ -367,7 +367,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // "Sec" in light gray
         let secPart = NSAttributedString(string: "Sec", attributes: [
             .font: font,
-            .foregroundColor: NSColor(red: 0.85, green: 0.85, blue: 0.85, alpha: 1.0),
+            .foregroundColor: AppColors.textLight,
             .paragraphStyle: paragraphStyle
         ])
         attributedTitle.append(secPart)
@@ -375,7 +375,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // "VF" in medium gray
         let vfPart = NSAttributedString(string: "VF", attributes: [
             .font: font,
-            .foregroundColor: NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0),
+            .foregroundColor: AppColors.textMuted,
             .paragraphStyle: paragraphStyle
         ])
         attributedTitle.append(vfPart)
@@ -388,7 +388,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         subtitleLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 195, width: sidebarWidth, height: 20)
         subtitleLabel.alignment = .center
         subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        subtitleLabel.textColor = NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0)
+        subtitleLabel.textColor = AppColors.textMuted
         subtitleLabel.isBordered = false
         subtitleLabel.isEditable = false
         subtitleLabel.drawsBackground = false
@@ -405,7 +405,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         statsLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 310, width: sidebarWidth, height: 80)
         statsLabel.alignment = .center
         statsLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        statsLabel.textColor = NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 0.9)  // Medium gray
+        statsLabel.textColor = AppColors.textSubtle
         statsLabel.isBordered = false
         statsLabel.isEditable = false
         statsLabel.drawsBackground = false
@@ -421,7 +421,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let infoY: CGFloat = 115
         addInfoLabel(to: sidebar, text: "Built on", y: infoY, bold: false, width: sidebarWidth)
         addInfoLabel(to: sidebar, text: "Apple Virtualization Framework", y: infoY - 28, bold: true, width: sidebarWidth)
-        addInfoLabel(to: sidebar, text: "github.com/DaxxSec/SecVF", y: infoY - 58, bold: false, color: NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0), width: sidebarWidth)
+        addInfoLabel(to: sidebar, text: "github.com/DaxxSec/SecVF", y: infoY - 58, bold: false, color: AppColors.textSubtle, width: sidebarWidth)
 
         // Add sidebar to window
         contentView.addSubview(sidebar, positioned: .above, relativeTo: nil)
@@ -433,16 +433,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func createProtocolLegend(width: CGFloat, height: CGFloat) -> NSView {
         let legendView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         legendView.wantsLayer = true
-        legendView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor
+        legendView.layer?.backgroundColor = AppColors.backgroundSecondary.cgColor
         legendView.layer?.cornerRadius = 6
         legendView.layer?.borderWidth = 1
-        legendView.layer?.borderColor = NSColor(red: 0.0, green: 0.5, blue: 0.7, alpha: 0.3).cgColor
+        legendView.layer?.borderColor = AppColors.borderOD.cgColor
 
         // Legend title
         let titleLabel = NSTextField(labelWithString: "⚡ PROTOCOL COLORS")
         titleLabel.frame = NSRect(x: 8, y: height - 18, width: width - 16, height: 14)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
-        titleLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0)
+        titleLabel.textColor = AppColors.accentODGlow
         legendView.addSubview(titleLabel)
 
         // Protocol colors — sourced from AppColors.proto* so the legend
@@ -1300,7 +1300,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let titleLabel = NSTextField(labelWithString: "● ACTIVE VMs")
         titleLabel.frame = NSRect(x: 12, y: activePanelHeight - 28, width: activePanelWidth - 24, height: 20)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
-        titleLabel.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)
+        titleLabel.textColor = AppColors.statusRunning
         titleLabel.autoresizingMask = [.minYMargin]
         runningVMsPanel.addSubview(titleLabel)
         statusLabel = titleLabel
@@ -1526,7 +1526,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
         packetsTextView.isEditable = false
         packetsTextView.drawsBackground = false
-        packetsTextView.textColor = NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
+        packetsTextView.textColor = AppColors.textOD
         packetsTextView.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         packetsTextView.autoresizingMask = [.width]
         packetsScrollView.documentView = packetsTextView
@@ -1905,10 +1905,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
         containerView.wantsLayer = true
+        // Magenta-tinted card distinguishes the AI Sandbox install progress
+        // from the standard VM status cards (which use OD/cyan).
         containerView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.06, blue: 0.16, alpha: 1.0).cgColor
-        containerView.layer?.cornerRadius = 6
-        containerView.layer?.borderWidth = 1
-        containerView.layer?.borderColor = NSColor(red: 0.78, green: 0.30, blue: 0.95, alpha: 0.65).cgColor
+        containerView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        containerView.layer?.borderWidth = LayoutConstants.borderHairline
+        containerView.layer?.borderColor = AppColors.borderMagenta.cgColor
         containerView.translatesAutoresizingMaskIntoConstraints = false
         containerView.widthAnchor.constraint(equalToConstant: cardWidth).isActive = true
         containerView.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
@@ -1916,19 +1918,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let tracker = AISandboxInstallTracker.shared
 
         // Title — building / done / failed
-        let titleColor = NSColor(red: 0.86, green: 0.50, blue: 1.00, alpha: 1.0) // magenta
         let titleLabel = NSTextField(labelWithString: "⚙ AI Sandbox VM (building)")
         titleLabel.frame = NSRect(x: 8, y: cardHeight - 22, width: cardWidth - 16, height: 16)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = titleColor
+        titleLabel.textColor = AppColors.accentMagenta
         titleLabel.lineBreakMode = .byTruncatingTail
         containerView.addSubview(titleLabel)
 
         // Phase label
         let phaseLabel = NSTextField(labelWithString: tracker.phase.humanLabel)
         phaseLabel.frame = NSRect(x: 8, y: cardHeight - 38, width: cardWidth - 16, height: 14)
-        phaseLabel.font = NSFont.systemFont(ofSize: 9)
-        phaseLabel.textColor = NSColor(white: 0.7, alpha: 1.0)
+        phaseLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeCaption)
+        phaseLabel.textColor = AppColors.textMuted
         containerView.addSubview(phaseLabel)
 
         // Progress bar — determinate during install (we have a real fraction
@@ -1974,10 +1975,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
         containerView.wantsLayer = true
-        containerView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor
-        containerView.layer?.cornerRadius = 6
-        containerView.layer?.borderWidth = 1
-        containerView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.5).cgColor
+        containerView.layer?.backgroundColor = AppColors.backgroundSecondary.cgColor
+        containerView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        containerView.layer?.borderWidth = LayoutConstants.borderHairline
+        containerView.layer?.borderColor = AppColors.borderODEmphasis.cgColor
         containerView.translatesAutoresizingMaskIntoConstraints = false
 
         // Store VM ID in layer name for button lookups (safer than hash)
