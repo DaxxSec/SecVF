@@ -28,4 +28,10 @@ extension Notification.Name {
     /// menu items) post this notification instead of creating their own — two
     /// independent windows confused the operator and split packet rendering.
     static let openPacketAnalysis = Notification.Name("openPacketAnalysis")
+
+    /// Request booting the AI Sandbox session VM. Posted by the library
+    /// window's AI Sandbox tab when the user clicks Start; AppDelegate
+    /// reads `userInfo["inRecoveryMode"]: Bool` to decide which boot
+    /// path to dispatch (normal vs. macOS Recovery).
+    static let bootAISandbox = Notification.Name("bootAISandbox")
 }

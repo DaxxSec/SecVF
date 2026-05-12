@@ -88,6 +88,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             object: nil
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBootAISandbox(_:)),
+            name: .bootAISandbox,
+            object: nil
+        )
+
         // Open packet analysis — single owner is AppDelegate. Other UIs post
         // .openPacketAnalysis rather than instantiate a second controller.
         NotificationCenter.default.addObserver(
@@ -391,6 +398,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 NSLog("[AppDelegate] VM \(vm.name) stopped successfully")
             }
         }
+    }
+
+    /// Handle the `.bootAISandbox` notification posted by the library
+    /// window's AI Sandbox tab when the user clicks Start. The `userInfo`
+    /// carries the recovery-mode flag from the checkbox plus whether the
+    /// selected row was the base bundle (which can't boot directly — the
+    /// boot flow always clones base → session).
+    @objc private func handleBootAISandbox(_ notification: Notification) {
+        let info = notification.userInfo ?? [:]
+        let inRecovery = (info["inRecoveryMode"] as? Bool) ?? false
+        let isBase = (info["isBaseBundle"] as? Bool) ?? false
+
+        if isBase {
+            // Cloning a fresh session from the base IS the normal boot path,
+            // so this is fine — just call through. We surface a heads-up alert
+            // because users sometimes expect "Start the base bundle" to mean
+            // "boot the template in place" (it doesn't, and shouldn't —
+            // overwriting the template breaks future cloning).
+            NSLog("[AISandbox] Start clicked on base bundle — cloning to new session")
+        }
+        bootAISandboxSession(inRecoveryMode: inRecovery)
     }
 
     @objc private func handlePauseVM(_ notification: Notification) {

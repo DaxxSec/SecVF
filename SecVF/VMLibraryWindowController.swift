@@ -6,6 +6,18 @@
 import Cocoa
 import Virtualization
 
+/// A single row in the AI Sandbox tab of the library. Wraps either the
+/// shared base bundle or a per-session clone, with whatever metadata we
+/// can scrape from the bundle's `manifest.json` and disk.img mtime.
+struct AISandboxBundleRow {
+    let url: URL
+    let displayName: String
+    let isBase: Bool
+    let id: UUID?
+    let createdAt: Date?
+    let diskBytes: Int64
+}
+
 @MainActor
 class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
 
@@ -38,6 +50,20 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var tasksStatusLabel: NSTextField?
     private var tasksProgressBar: NSProgressIndicator?
     private var vmsPlaceholderLabel: NSTextField?
+
+    // Library tab — switches the table between the standard VM list and
+    // the AI Sandbox bundle list. Recovery toggle is visible only in the
+    // AI Sandbox tab.
+    private enum LibraryTab: Int {
+        case standard = 0
+        case aiSandbox = 1
+    }
+    private var currentLibraryTab: LibraryTab = .standard
+    private var libraryTabControl: NSSegmentedControl?
+    private var recoveryModeCheckbox: NSButton?
+    /// Cached scan of `~/.avf/AISandbox/` — base + each session bundle.
+    /// Refreshed each time the AI Sandbox tab is selected.
+    private var aiSandboxBundles: [AISandboxBundleRow] = []
 
     // Selected VM detail card (horizontal strip between table and packet panel)
     private var selectedVMDetailCard: NSView?
@@ -578,7 +604,19 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let tableX = sidebarWidth + padding
         let tableWidth = detailCardWidth
         let tableY = detailCardY + detailCardHeight + padding
-        let tableHeight = contentHeight - tableY - padding
+
+        // Library-tab header: [Standard VMs] [AI Sandbox] segmented control
+        // sits at the top of the table region; recovery checkbox to its right
+        // is visible only in the AI Sandbox tab. Table height shrinks by the
+        // header height + gap so the toolbar doesn't push it off-screen.
+        let libraryTabsHeight: CGFloat = 26
+        let libraryTabsGap: CGFloat = 8
+        let libraryTabsY = contentHeight - padding - libraryTabsHeight
+        let tableHeight = libraryTabsY - libraryTabsGap - tableY
+
+        addLibraryTabsHeader(in: contentView,
+                             frame: NSRect(x: tableX, y: libraryTabsY,
+                                           width: tableWidth, height: libraryTabsHeight))
 
         // Position the table scroll view
         if let scrollView = tableView?.enclosingScrollView {
@@ -876,6 +914,126 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
         }
+    }
+
+    // MARK: - Library Tabs (Standard / AI Sandbox)
+
+    /// Build the [Standard VMs] / [AI Sandbox] segmented header plus the
+    /// recovery-mode checkbox that's only visible when the AI Sandbox tab
+    /// is selected.
+    private func addLibraryTabsHeader(in contentView: NSView, frame: NSRect) {
+        libraryTabControl?.removeFromSuperview()
+        recoveryModeCheckbox?.removeFromSuperview()
+
+        let tabs = NSSegmentedControl(labels: ["Standard VMs", "AI Sandbox"],
+                                      trackingMode: .selectOne,
+                                      target: self,
+                                      action: #selector(libraryTabChanged(_:)))
+        tabs.frame = NSRect(x: frame.origin.x, y: frame.origin.y,
+                            width: 240, height: frame.height)
+        tabs.selectedSegment = currentLibraryTab.rawValue
+        tabs.segmentStyle = .texturedSquare
+        tabs.autoresizingMask = [.minYMargin]  // stick to top of content view
+        contentView.addSubview(tabs)
+        libraryTabControl = tabs
+
+        // Recovery-mode checkbox — toggling this changes the boot path for
+        // an AI Sandbox session VM. Hidden in the Standard tab so it never
+        // confuses users browsing their regular VMs.
+        let check = NSButton(checkboxWithTitle: "Boot in Recovery Mode",
+                             target: self,
+                             action: #selector(recoveryModeToggled(_:)))
+        check.frame = NSRect(x: frame.origin.x + 240 + LayoutConstants.spacingLG,
+                             y: frame.origin.y + (frame.height - 20) / 2,
+                             width: 200,
+                             height: 20)
+        check.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody)
+        check.toolTip = "When checked, AI Sandbox sessions boot into macOS Recovery instead of normal startup. Useful for disk repair or reinstalling macOS inside the sandbox."
+        check.state = .off
+        check.isHidden = (currentLibraryTab != .aiSandbox)
+        check.autoresizingMask = [.minYMargin]
+        contentView.addSubview(check)
+        recoveryModeCheckbox = check
+    }
+
+    @objc private func libraryTabChanged(_ sender: NSSegmentedControl) {
+        guard let newTab = LibraryTab(rawValue: sender.selectedSegment) else { return }
+        currentLibraryTab = newTab
+
+        // Toggle the recovery checkbox visibility
+        recoveryModeCheckbox?.isHidden = (newTab != .aiSandbox)
+
+        // Reload the table from whichever data source the tab points to
+        if newTab == .aiSandbox {
+            aiSandboxBundles = scanAISandboxBundles()
+        }
+        tableView?.reloadData()
+        updateButtonStates()
+        updateSelectedVMDetailCard()
+    }
+
+    @objc private func recoveryModeToggled(_ sender: NSButton) {
+        // State is read at Start-button click time; nothing to do here
+        // besides log so the user gets feedback the toggle took.
+        NSLog("[Library] Recovery mode toggle → %@", sender.state == .on ? "ON" : "OFF")
+    }
+
+    /// Scan `~/.avf/AISandbox/` for bundle directories. Returns a list of
+    /// rows ordered: base first (if present), then sessions sorted by
+    /// creation time descending (newest first).
+    private func scanAISandboxBundles() -> [AISandboxBundleRow] {
+        let fm = FileManager.default
+        let aiRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".avf/AISandbox")
+        var rows: [AISandboxBundleRow] = []
+
+        // Base bundle (one only)
+        let baseURL = aiRoot.appendingPathComponent("ai-sandbox-base-v1.bundle")
+        if fm.fileExists(atPath: baseURL.path) {
+            rows.append(makeBundleRow(url: baseURL, isBase: true))
+        }
+
+        // Sessions (zero or more)
+        let sessionsURL = aiRoot.appendingPathComponent("sessions")
+        if let contents = try? fm.contentsOfDirectory(at: sessionsURL,
+                                                     includingPropertiesForKeys: [.creationDateKey],
+                                                     options: [.skipsHiddenFiles]) {
+            let sessionRows = contents
+                .filter { $0.pathExtension == "bundle" }
+                .map { makeBundleRow(url: $0, isBase: false) }
+                .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+            rows.append(contentsOf: sessionRows)
+        }
+
+        return rows
+    }
+
+    private func makeBundleRow(url: URL, isBase: Bool) -> AISandboxBundleRow {
+        let fm = FileManager.default
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        var name: String?
+        var id: UUID?
+        if let data = try? Data(contentsOf: manifestURL),
+           let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            name = dict["name"] as? String
+            if let s = dict["id"] as? String { id = UUID(uuidString: s) }
+        }
+        let display: String = {
+            if isBase { return name ?? "ai-sandbox-base" }
+            return name ?? url.deletingPathExtension().lastPathComponent
+        }()
+
+        let createdAt = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+        let diskURL = url.appendingPathComponent("disk.img")
+        let diskBytes: Int64 = {
+            guard let attr = try? fm.attributesOfItem(atPath: diskURL.path),
+                  let size = attr[.size] as? NSNumber else { return 0 }
+            return size.int64Value
+        }()
+
+        return AISandboxBundleRow(url: url, displayName: display,
+                                  isBase: isBase, id: id,
+                                  createdAt: createdAt, diskBytes: diskBytes)
     }
 
     private func addStatusBar() {
@@ -2015,18 +2173,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     // MARK: - NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        return vmManager.virtualMachines.count
+        switch currentLibraryTab {
+        case .standard:  return vmManager.virtualMachines.count
+        case .aiSandbox: return aiSandboxBundles.count
+        }
     }
 
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < vmManager.virtualMachines.count else {
-            return nil
-        }
-
-        let vm = vmManager.virtualMachines[row]
-
         // Try to get existing cell, or create new one programmatically
         var cell = tableView.makeView(withIdentifier: tableColumn!.identifier, owner: self) as? NSTableCellView
 
@@ -2051,9 +2206,46 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             ])
         }
 
-        guard let finalCell = cell else {
-            return nil
+        guard let finalCell = cell else { return nil }
+
+        // AI Sandbox tab uses the same columns but filled from the bundle row
+        if currentLibraryTab == .aiSandbox {
+            guard row < aiSandboxBundles.count else { return nil }
+            let bundle = aiSandboxBundles[row]
+            let columnId = tableColumn?.identifier.rawValue ?? ""
+
+            switch columnId {
+            case "NameColumn":
+                finalCell.textField?.stringValue = bundle.displayName + (bundle.isBase ? " (base)" : "")
+            case "StatusColumn":
+                finalCell.textField?.stringValue = bundle.isBase ? "Template" : "Session"
+            case "OSColumn":
+                finalCell.textField?.stringValue = "macOS"
+            case "CPUColumn":
+                finalCell.textField?.stringValue = bundle.id?.uuidString.prefix(8).description ?? "—"
+            case "MemoryColumn":
+                finalCell.textField?.stringValue = bundle.isBase ? "8 GB" : "—"
+            case "DiskColumn":
+                finalCell.textField?.stringValue = ByteCountFormatter.string(
+                    fromByteCount: bundle.diskBytes, countStyle: .binary)
+            case "LastUsedColumn":
+                if let created = bundle.createdAt {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .short
+                    finalCell.textField?.stringValue = formatter.string(from: created)
+                } else {
+                    finalCell.textField?.stringValue = "—"
+                }
+            default:
+                finalCell.textField?.stringValue = ""
+            }
+            return finalCell
         }
+
+        // Standard VMs tab — existing behavior
+        guard row < vmManager.virtualMachines.count else { return nil }
+        let vm = vmManager.virtualMachines[row]
 
         switch tableColumn?.identifier.rawValue {
         case "NameColumn":
@@ -2096,6 +2288,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to start")
+            return
+        }
+
+        // AI Sandbox tab: route to bootAISandboxSession with the recovery flag
+        // from the checkbox. The base bundle itself is not bootable — only
+        // sessions are. Selecting the base while clicking Start tells the
+        // user to either clone a new session or pick an existing one.
+        if currentLibraryTab == .aiSandbox {
+            guard selectedRow < aiSandboxBundles.count else { return }
+            let bundle = aiSandboxBundles[selectedRow]
+            let inRecovery = (recoveryModeCheckbox?.state == .on)
+            NotificationCenter.default.post(
+                name: .bootAISandbox,
+                object: nil,
+                userInfo: [
+                    "inRecoveryMode": inRecovery,
+                    "isBaseBundle": bundle.isBase
+                ]
+            )
             return
         }
 
