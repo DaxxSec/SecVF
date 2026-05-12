@@ -102,6 +102,52 @@ struct AISandboxVMBundle {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
 
+    // MARK: - One-shot Recovery boot flag (manifest-backed)
+    //
+    // Persisted on the base bundle's manifest.json. Scope: "the next
+    // session spawned from this base should boot into macOS Recovery."
+    // The Disk.img + HardwareModel are sealed read-only via 0o444 but
+    // the manifest is writable — exactly where this kind of one-shot
+    // toggle should live.
+    //
+    // Sessions are ephemeral CoW clones, so Recovery operations run on
+    // the clone's disk and never risk the base. Once a session is
+    // spawned with the flag, the base manifest clears it so future
+    // sessions are normal.
+
+    /// Read `bootIntoRecoveryNext` from the manifest. Returns false if
+    /// the field is missing or the manifest can't be read — fail-safe
+    /// default for a security-relevant boot choice.
+    func loadBootIntoRecoveryNext() -> Bool {
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return false
+        }
+        return (manifest["bootIntoRecoveryNext"] as? Bool) ?? false
+    }
+
+    /// Set (or clear) the one-shot Recovery flag on the manifest.
+    /// throws on disk errors so callers can surface the failure rather
+    /// than silently dropping a security-relevant boot choice.
+    func setBootIntoRecoveryNext(_ value: Bool) throws {
+        var manifest: [String: Any] = [:]
+        if let existing = try? Data(contentsOf: manifestURL),
+           let parsed = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
+            manifest = parsed
+        }
+        if value {
+            manifest["bootIntoRecoveryNext"] = true
+        } else {
+            manifest.removeValue(forKey: "bootIntoRecoveryNext")
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: manifest,
+            options: .prettyPrinted
+        )
+        try data.write(to: manifestURL, options: .atomic)
+    }
+
     /// APFS CoW clone this bundle to a new session bundle.
     /// On APFS, cp -c (clonefile) makes this nearly instantaneous.
     func clone(to destination: URL) throws {

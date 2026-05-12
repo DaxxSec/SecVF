@@ -1689,13 +1689,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         bootSandboxItem.target = self
         toolsMenu.addItem(bootSandboxItem)
 
+        // One-shot Recovery boot for the AI Sandbox. Operates on the base
+        // bundle's manifest (writable; the disk + hardware-model files are
+        // sealed read-only but the manifest is not). On next session boot,
+        // AISandbox start path reads the flag, clears it, and passes
+        // startUpFromMacOSRecovery=true. Session is ephemeral, so Recovery
+        // operations don't risk the sealed base.
+        let recoverySandboxItem = NSMenuItem(
+            title: "Boot AI Sandbox Into Recovery Next",
+            action: #selector(toggleAISandboxRecoveryBoot),
+            keyEquivalent: ""
+        )
+        recoverySandboxItem.target = self
+        toolsMenu.addItem(recoverySandboxItem)
+
         toolsMenu.addItem(NSMenuItem.separator())
 
-        // One-shot Recovery boot. Operates on the VM currently selected in
-        // the library window. validateMenuItem enables/disables based on
-        // whether that VM is a macOS guest. The action shows a confirmation
-        // alert; on approval, sets bootIntoRecoveryNext=true and persists.
-        // AppDelegate's start path clears the flag right before booting.
+        // One-shot Recovery boot for regular macOS VMs. Operates on the VM
+        // currently selected in the library window. validateMenuItem
+        // enables/disables based on whether that VM is a macOS guest. The
+        // action shows a confirmation alert; on approval, sets
+        // bootIntoRecoveryNext=true and persists. AppDelegate's start path
+        // clears the flag right before booting.
         let recoveryBootItem = NSMenuItem(
             title: "Boot Into Recovery Next (macOS VM)",
             action: #selector(toggleRecoveryBootForSelectedVM),
@@ -1784,6 +1799,67 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         }
     }
 
+    @objc private func toggleAISandboxRecoveryBoot(_ sender: Any?) {
+        let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
+        guard baseBundle.exists else {
+            let alert = NSAlert()
+            alert.messageText = "AI Sandbox base not found"
+            alert.informativeText = "There's no AI Sandbox base bundle at \(AISandboxDefaults.baseBundle.path). Use Tools → Create AI Sandbox VM to build one first."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let alreadyArmed = baseBundle.loadBootIntoRecoveryNext()
+        let alert = NSAlert()
+        if alreadyArmed {
+            alert.messageText = "Cancel AI Sandbox Recovery boot?"
+            alert.informativeText = "The next AI Sandbox session is currently scheduled to boot into macOS Recovery. Cancel that and resume normal session boots?"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Cancel Recovery")
+            alert.addButton(withTitle: "Keep Armed")
+        } else {
+            alert.messageText = "Boot next AI Sandbox session into Recovery?"
+            alert.informativeText = """
+                The next time you boot the AI Sandbox, the session will start in macOS Recovery instead of the normal OS. The toggle is one-shot — it clears itself the moment a session is spawned, so subsequent sessions are normal.
+
+                The session is an ephemeral CoW clone of the base bundle, so anything you do in Recovery happens on the clone's disk. The sealed base is not modified.
+
+                Use this for: repairing a broken provision, FileVault unlock during base maintenance, manually reinstalling the agent, or any task that requires the sandbox VM in Recovery mode.
+                """
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Arm Recovery Boot")
+            alert.addButton(withTitle: "Cancel")
+        }
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        let newValue = !alreadyArmed
+        do {
+            try baseBundle.setBootIntoRecoveryNext(newValue)
+            NSLog("[AISandbox] bootIntoRecoveryNext (base manifest) → %@",
+                  newValue ? "true" : "false")
+
+            if newValue {
+                let confirm = NSAlert()
+                confirm.messageText = "AI Sandbox Recovery boot armed"
+                confirm.informativeText = "The next AI Sandbox session you boot will start in macOS Recovery. The flag clears automatically the moment the session is spawned."
+                confirm.alertStyle = .informational
+                confirm.addButton(withTitle: "OK")
+                confirm.runModal()
+            }
+        } catch {
+            let err = NSAlert()
+            err.messageText = "Couldn't update AI Sandbox Recovery flag"
+            err.informativeText = "Failed to persist the Recovery boot flag on the base manifest: \(error.localizedDescription)"
+            err.alertStyle = .critical
+            err.addButton(withTitle: "OK")
+            err.runModal()
+        }
+    }
+
     /// Per-VM action: validate Recovery menu item visibility.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(toggleRecoveryBootForSelectedVM) {
@@ -1801,6 +1877,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 // explanation, which is less helpful.
                 return true
             }
+        }
+        if menuItem.action == #selector(toggleAISandboxRecoveryBoot) {
+            // Title updates from base manifest state.
+            let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
+            if baseBundle.exists {
+                let armed = baseBundle.loadBootIntoRecoveryNext()
+                menuItem.title = armed
+                    ? "Cancel AI Sandbox Recovery Boot"
+                    : "Boot AI Sandbox Into Recovery Next"
+            } else {
+                menuItem.title = "Boot AI Sandbox Into Recovery Next (no base)"
+            }
+            return true
         }
         return true
     }
@@ -2745,6 +2834,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             return
         }
 
+        // Read + clear the one-shot Recovery flag from the BASE manifest
+        // BEFORE we clone the session. Two reasons:
+        //   1. Same crash-safety as the regular VM path — if anything
+        //      explodes mid-boot, the base manifest already says "next
+        //      boot is normal", so the user isn't trapped in a recovery
+        //      loop on subsequent attempts.
+        //   2. We must capture the value before cloneBase() because the
+        //      clone inherits whatever's in the manifest; reading after
+        //      the clone would see whichever copy we cleared last.
+        let bootIntoRecovery = baseBundle.loadBootIntoRecoveryNext()
+        if bootIntoRecovery {
+            NSLog("[AISandbox] One-shot Recovery boot armed; clearing flag on base before cloning")
+            do {
+                try baseBundle.setBootIntoRecoveryNext(false)
+            } catch {
+                NSLog("[AISandbox] Warning: could not clear Recovery flag on base manifest: %@", error.localizedDescription)
+                // Continue anyway — the user explicitly armed it, and refusing
+                // here would just leave them with no way to boot into Recovery.
+                // The cost of a single repeat-boot-into-recovery on a crash is
+                // bounded (sessions are ephemeral, easy to destroy and retry).
+            }
+        }
+
         // If a session is already running, bring its window forward
         if let existing = activeSandboxSession, existing.vm?.state == .running || existing.vm?.state == .starting {
             for window in NSApp.windows where window.title.contains("AI Sandbox") {
@@ -2831,7 +2943,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 }
 
                 NSLog("[AISandbox] Starting session VM (id=%@)…", sandboxVMId.uuidString)
-                try await machine.start()
+                // Recovery-armed path uses the options-aware start variant.
+                // Sessions are ephemeral CoW clones, so Recovery operations
+                // happen on the clone's disk and never risk the sealed base.
+                if bootIntoRecovery {
+                    if #available(macOS 13.0, *) {
+                        let opts = VZMacOSVirtualMachineStartOptions()
+                        opts.startUpFromMacOSRecovery = true
+                        NSLog("[AISandbox] Starting session into macOS Recovery")
+                        try await machine.start(options: opts)
+                    } else {
+                        // Pre-macOS-13: no startUpFromMacOSRecovery support.
+                        // The flag was already cleared above so we don't loop;
+                        // fall through to a normal start with a warning.
+                        NSLog("[AISandbox] Recovery boot not supported on this host (macOS < 13); doing normal boot")
+                        try await machine.start()
+                    }
+                } else {
+                    try await machine.start()
+                }
                 NSLog("[AISandbox] Session VM running")
 
                 // Start the vsock exec bridge so `secvf-cli vm exec` can reach this VM
