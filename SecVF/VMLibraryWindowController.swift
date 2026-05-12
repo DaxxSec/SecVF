@@ -177,26 +177,41 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         deleteButton?.keyEquivalentModifierMask = .command
     }
 
-    /// Apply the cybersecurity-themed button styling. Buttons use a custom
-    /// layer instead of the system bezel, so we must visually depress when
+    /// Apply the tactical-theme button styling. Buttons use a custom layer
+    /// instead of the system bezel, so we must visually depress when
     /// disabled — otherwise `isEnabled = false` reads as "active but
     /// unresponsive."
+    ///
+    /// Tactical conventions:
+    /// - **Primary** (Start) — OD green border + brighter background. "Go".
+    /// - **Destructive** (Delete) — red border + red text. "Stop".
+    /// - **Secondary** — slate background + OD-text. Neutral operations.
     private func applyButtonStyle(_ button: NSButton) {
         let isPrimary = (button === startButton)
         let isDestructive = (button === deleteButton)
         let enabled = button.isEnabled
 
-        let baseBg: NSColor = isPrimary ? AppColors.accentCyan.withAlphaComponent(0.18)
+        // Primary fills with a low-alpha OD tint so it stands out from the
+        // toolbar bezel; everything else uses the standard slate button bg.
+        let baseBg: NSColor = isPrimary ? AppColors.accentOD.withAlphaComponent(0.22)
                                         : AppColors.backgroundButton
         let baseBorder: NSColor
         if isDestructive {
             baseBorder = AppColors.accentRed.withAlphaComponent(0.6)
         } else if isPrimary {
-            baseBorder = AppColors.accentNeonCyan.withAlphaComponent(0.8)
+            baseBorder = AppColors.accentODGlow.withAlphaComponent(0.85)
         } else {
-            baseBorder = AppColors.accentCyan.withAlphaComponent(0.5)
+            baseBorder = AppColors.borderOD
         }
-        let textColor: NSColor = isDestructive ? AppColors.accentRed : AppColors.accentCyan
+        let textColor: NSColor
+        if isDestructive {
+            textColor = AppColors.accentRed
+        } else if isPrimary {
+            // Primary uses a brighter near-white so it pops against the OD fill
+            textColor = AppColors.textPrimary
+        } else {
+            textColor = AppColors.textOD
+        }
 
         button.layer?.backgroundColor = baseBg.withAlphaComponent(enabled ? 1.0 : 0.35).cgColor
         button.layer?.borderColor = baseBorder.withAlphaComponent(enabled ? 1.0 : 0.25).cgColor
