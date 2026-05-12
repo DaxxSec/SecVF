@@ -1307,57 +1307,129 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             }
 
             NSLog("[VM] Starting virtual machine: %@", vmConfig.name)
+
+            // One-shot Recovery boot for macOS guests. If the user flipped
+            // `bootIntoRecoveryNext` on (via the "Boot Into Recovery Next"
+            // menu item), pass startUpFromMacOSRecovery=true to this start
+            // call. The flag is cleared + metadata.json re-written BEFORE
+            // the VM starts so a mid-start crash doesn't trap the user in
+            // a recovery boot loop on every subsequent launch.
+            //
+            // We clear-first-start-second because:
+            //   1. Persisting after the start callback fires is racy — the
+            //      callback runs async; meanwhile the user might quit
+            //      SecVF.app and the flag would never get cleared.
+            //   2. Even on a Force-Quit + relaunch, the saved metadata
+            //      already reflects "next boot is normal".
+            //   3. If the start itself fails (e.g. unsupported macOS), the
+            //      user just re-toggles to retry — strictly better than
+            //      the alternative (silently looping into recovery).
+            let bootIntoRecovery = (vmConfig.osType == "macOS")
+                && (vmConfig.bootIntoRecoveryNext == true)
+            if bootIntoRecovery {
+                NSLog("[VM] One-shot Recovery boot requested for %@; clearing flag before start", vmConfig.name)
+                var cleared = vmConfig
+                cleared.bootIntoRecoveryNext = false
+                self.vmConfigs[vmId] = cleared
+                do {
+                    try VMManager.shared.setRecoveryBootFlag(cleared, on: false)
+                } catch {
+                    NSLog("[VM] Warning: could not persist cleared recovery flag for %@: %@",
+                          cleared.name, error.localizedDescription)
+                }
+            }
+
+            // Branch on Recovery so the no-options call path is unchanged
+            // for the 99% case.
+            if bootIntoRecovery {
+                #if arch(arm64)
+                if #available(macOS 13.0, *) {
+                    let opts = VZMacOSVirtualMachineStartOptions()
+                    opts.startUpFromMacOSRecovery = true
+                    Task { @MainActor in
+                        do {
+                            try await virtualMachine.start(options: opts)
+                            self.handleVMStartSuccess(vmId: vmId)
+                        } catch {
+                            self.handleVMStartFailure(vmId: vmId, error: error,
+                                                       needsInstall: needsInstall)
+                        }
+                    }
+                    return
+                }
+                #endif
+                // Older macOS / non-ARM can't request Recovery; fall through
+                // to a normal boot with a warning. The flag has already been
+                // cleared above so we don't loop.
+                NSLog("[VM] Recovery boot not supported on this host; doing normal boot")
+            }
+
             virtualMachine.start(completionHandler: { [weak self] (result) in
                 guard let self = self else { return }
                 guard let vmConfig = self.vmConfigs[vmId] else { return }
 
                 switch result {
                 case let .failure(error):
-                    VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
-                    // Stop security monitoring on failure
-                    VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
-                    VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
-                    // Disconnect from virtual switch on failure
-                    if vmConfig.networkConfig.mode == .virtual {
-                        VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
-                    }
-
-                    // Log to both NSLog and file
-                    let errorMsg = """
-                    [CRITICAL] VM failed to start!
-                    VM: \(vmConfig.name)
-                    Error: \(error.localizedDescription)
-                    Full error: \(String(describing: error))
-                    OS Type: \(vmConfig.osType)
-                    Needs Install: \(needsInstall)
-                    """
-                    NSLog("%@", errorMsg)
-
-                    // Write to secure debug file (user-only permissions)
-                    let logsDir = NSHomeDirectory() + "/.avf/logs/"
-                    try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
-                                                            attributes: [.posixPermissions: 0o700])
-                    let debugPath = logsDir + "secvf-crash-debug.txt"
-                    try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
-
-                    // Show error to user instead of crashing
-                    let vmError = SecVFError.vmStartFailed(underlying: error)
-                    AlertPresenter.showVMErrorWithLogOption(vmError, vmName: vmConfig.name)
-
+                    self.handleVMStartFailure(
+                        vmId: vmId,
+                        error: error,
+                        needsInstall: needsInstall
+                    )
                 default:
-                    print("Virtual machine successfully started.")
-                    VMManager.shared.updateVMStatus(vmConfig, status: .running)
-
-                    // Log security recommendations
-                    let recommendations = VMSecurityMonitor.shared.getSecurityRecommendations(for: vmConfig)
-                    print("\n⚠️ SECURITY RECOMMENDATIONS:")
-                    for rec in recommendations {
-                        print("  \(rec)")
-                    }
-                    print("")
+                    self.handleVMStartSuccess(vmId: vmId)
+                    _ = vmConfig  // silence unused-var if compiler picks it up later
                 }
             })
         }
+    }
+
+    // MARK: - VM start outcome handlers
+    //
+    // Extracted so both the standard `virtualMachine.start(completionHandler:)`
+    // path and the Recovery-boot `try await virtualMachine.start(options:)`
+    // path land in one place. Keeps security-monitor teardown + virtual-switch
+    // cleanup + error reporting consistent.
+
+    private func handleVMStartSuccess(vmId: UUID) {
+        guard let vmConfig = self.vmConfigs[vmId] else { return }
+        print("Virtual machine successfully started.")
+        VMManager.shared.updateVMStatus(vmConfig, status: .running)
+
+        let recommendations = VMSecurityMonitor.shared.getSecurityRecommendations(for: vmConfig)
+        print("\n⚠️ SECURITY RECOMMENDATIONS:")
+        for rec in recommendations {
+            print("  \(rec)")
+        }
+        print("")
+    }
+
+    private func handleVMStartFailure(vmId: UUID, error: Error, needsInstall: Bool) {
+        guard let vmConfig = self.vmConfigs[vmId] else { return }
+        VMManager.shared.updateVMStatus(vmConfig, status: .stopped)
+        VMSecurityMonitor.shared.stopMonitoring(vmID: vmConfig.id)
+        VsockExecBridgeManager.shared.stopBridge(vmId: vmConfig.id)
+        if vmConfig.networkConfig.mode == .virtual {
+            VirtualNetworkSwitch.shared.disconnectPortSync(vmId: vmConfig.id)
+        }
+
+        let errorMsg = """
+        [CRITICAL] VM failed to start!
+        VM: \(vmConfig.name)
+        Error: \(error.localizedDescription)
+        Full error: \(String(describing: error))
+        OS Type: \(vmConfig.osType)
+        Needs Install: \(needsInstall)
+        """
+        NSLog("%@", errorMsg)
+
+        let logsDir = NSHomeDirectory() + "/.avf/logs/"
+        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        let debugPath = logsDir + "secvf-crash-debug.txt"
+        try? errorMsg.write(toFile: debugPath, atomically: true, encoding: .utf8)
+
+        let vmError = SecVFError.vmStartFailed(underlying: error)
+        AlertPresenter.showVMErrorWithLogOption(vmError, vmName: vmConfig.name)
     }
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -1617,12 +1689,120 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         bootSandboxItem.target = self
         toolsMenu.addItem(bootSandboxItem)
 
+        toolsMenu.addItem(NSMenuItem.separator())
+
+        // One-shot Recovery boot. Operates on the VM currently selected in
+        // the library window. validateMenuItem enables/disables based on
+        // whether that VM is a macOS guest. The action shows a confirmation
+        // alert; on approval, sets bootIntoRecoveryNext=true and persists.
+        // AppDelegate's start path clears the flag right before booting.
+        let recoveryBootItem = NSMenuItem(
+            title: "Boot Into Recovery Next (macOS VM)",
+            action: #selector(toggleRecoveryBootForSelectedVM),
+            keyEquivalent: ""
+        )
+        recoveryBootItem.target = self
+        toolsMenu.addItem(recoveryBootItem)
+
         // Create top-level menu item
         let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
         toolsMenuItem.submenu = toolsMenu
 
         // Insert after Monitoring menu (index 2)
         mainMenu.insertItem(toolsMenuItem, at: 2)
+    }
+
+    /// Find the macOS VM currently selected in the library window, or
+    /// nil if no selection / selection is a Linux VM. Used by the
+    /// Recovery-boot menu item.
+    private func selectedMacOSVMConfig() -> VMConfiguration? {
+        guard let libraryController = libraryWindowController,
+              let selected = libraryController.selectedVM,
+              selected.osType == "macOS" else {
+            return nil
+        }
+        return selected
+    }
+
+    @objc private func toggleRecoveryBootForSelectedVM(_ sender: Any?) {
+        guard let vmConfig = selectedMacOSVMConfig() else {
+            let alert = NSAlert()
+            alert.messageText = "No macOS VM selected"
+            alert.informativeText = "Select a macOS VM in the library, then choose this menu item to schedule its next boot into Recovery mode."
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+
+        let alreadyArmed = vmConfig.bootIntoRecoveryNext == true
+        let alert = NSAlert()
+        if alreadyArmed {
+            alert.messageText = "Cancel Recovery boot for '\(vmConfig.name)'?"
+            alert.informativeText = "The next boot is currently scheduled to enter macOS Recovery. Cancel that and resume normal boots?"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Cancel Recovery")
+            alert.addButton(withTitle: "Keep Armed")
+        } else {
+            alert.messageText = "Boot '\(vmConfig.name)' into Recovery on next start?"
+            alert.informativeText = """
+                The next time you start this VM, it will boot into macOS Recovery instead of the normal OS. The toggle is one-shot — it clears itself right before boot, so subsequent starts are normal.
+
+                Use this for: disk repair, FileVault unlock, reinstalling macOS, resetting firmware password, or any task that requires Recovery.
+                """
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "Arm Recovery Boot")
+            alert.addButton(withTitle: "Cancel")
+        }
+
+        let response = alert.runModal()
+        let proceed = (response == .alertFirstButtonReturn)
+        guard proceed else { return }
+
+        let newValue = !alreadyArmed
+        do {
+            try VMManager.shared.setRecoveryBootFlag(vmConfig, on: newValue)
+            NSLog("[VM] bootIntoRecoveryNext for %@ → %@",
+                  vmConfig.name, newValue ? "true" : "false")
+            libraryWindowController?.refreshTableFromOutside()
+
+            if newValue {
+                let confirm = NSAlert()
+                confirm.messageText = "Recovery boot armed"
+                confirm.informativeText = "'\(vmConfig.name)' will boot into macOS Recovery on its next start. The flag clears automatically after the boot is triggered."
+                confirm.alertStyle = .informational
+                confirm.addButton(withTitle: "OK")
+                confirm.runModal()
+            }
+        } catch {
+            let err = NSAlert()
+            err.messageText = "Couldn't update Recovery flag"
+            err.informativeText = "Failed to persist the Recovery boot flag for '\(vmConfig.name)': \(error.localizedDescription)"
+            err.alertStyle = .critical
+            err.addButton(withTitle: "OK")
+            err.runModal()
+        }
+    }
+
+    /// Per-VM action: validate Recovery menu item visibility.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(toggleRecoveryBootForSelectedVM) {
+            // Title updates dynamically based on current state.
+            if let vm = selectedMacOSVMConfig() {
+                let armed = vm.bootIntoRecoveryNext == true
+                menuItem.title = armed
+                    ? "Cancel Recovery Boot (\(vm.name))"
+                    : "Boot Into Recovery Next (\(vm.name))"
+                return true
+            } else {
+                menuItem.title = "Boot Into Recovery Next (macOS VM)"
+                // Still selectable so the user gets the "select a macOS VM"
+                // alert; otherwise the menu item is just gray with no
+                // explanation, which is less helpful.
+                return true
+            }
+        }
+        return true
     }
 
     @objc private func showSecurityLogs() {

@@ -543,6 +543,22 @@ class VMManager {
         return vmConfig
     }
 
+    /// Set (or clear) the one-shot "boot into macOS Recovery on next start"
+    /// flag, persisting immediately to metadata.json. Used by:
+    ///   - the menu item ("Boot Into Recovery Next") to flip on
+    ///   - AppDelegate's start path to flip off right before VM boots
+    ///
+    /// throws on disk-full / read-only filesystem so the UI can report
+    /// the failure rather than silently dropping a security-relevant
+    /// boot choice on the floor.
+    func setRecoveryBootFlag(_ vmConfig: VMConfiguration, on: Bool) throws {
+        guard let index = virtualMachines.firstIndex(where: { $0.id == vmConfig.id }) else {
+            return
+        }
+        virtualMachines[index].bootIntoRecoveryNext = on
+        try saveVMMetadata(virtualMachines[index])
+    }
+
     func updateLastUsedDate(_ vmConfig: VMConfiguration) {
         if let index = virtualMachines.firstIndex(where: { $0.id == vmConfig.id }) {
             virtualMachines[index].lastUsedDate = Date()

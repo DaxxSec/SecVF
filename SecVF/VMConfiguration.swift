@@ -58,6 +58,19 @@ struct VMConfiguration: Codable {
     var linuxDistribution: String? // For Linux VMs - e.g., "Kali", "Ubuntu", "Debian"
     var linuxVersion: String? // For Linux VMs - e.g., "2024.1", "24.04"
 
+    /// One-shot "boot into macOS Recovery on next start" flag.
+    ///
+    /// When true, the next `start()` call uses
+    /// `VZMacOSVirtualMachineStartOptions.startUpFromMacOSRecovery = true`.
+    /// The flag is cleared (and metadata.json re-written) BEFORE the VM is
+    /// actually started so a crash/abort partway through doesn't leave the
+    /// VM stuck booting into recovery every time. Subsequent boots are
+    /// normal until the user re-toggles it.
+    ///
+    /// Only meaningful for macOS guests; ignored for Linux. Defaults to
+    /// false. Optional in JSON so old metadata files decode cleanly.
+    var bootIntoRecoveryNext: Bool? = false
+
     // Network configuration
     var networkConfig: VirtualNetworkConfig = VirtualNetworkConfig()
 
@@ -86,6 +99,7 @@ struct VMConfiguration: Codable {
         osInstalled = try container.decodeIfPresent(Bool.self, forKey: .osInstalled)
         linuxDistribution = try container.decodeIfPresent(String.self, forKey: .linuxDistribution)
         linuxVersion = try container.decodeIfPresent(String.self, forKey: .linuxVersion)
+        bootIntoRecoveryNext = try container.decodeIfPresent(Bool.self, forKey: .bootIntoRecoveryNext)
 
         // Provide default if networkConfig is missing (for backward compatibility)
         networkConfig = (try? container.decode(VirtualNetworkConfig.self, forKey: .networkConfig)) ?? VirtualNetworkConfig()
@@ -190,5 +204,6 @@ struct VMConfiguration: Codable {
         case id, name, bundlePath, cpuCount, memorySize, diskSize
         case createdDate, lastUsedDate, osType, macOSInstalled, osInstalled
         case linuxDistribution, linuxVersion, networkConfig
+        case bootIntoRecoveryNext
     }
 }
