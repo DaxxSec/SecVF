@@ -453,15 +453,21 @@ Live status of the test-driven rollout. Updated each loop iteration.
 | Discovery handlers (`vm_list`, `vm_status`, `switch_status`, `capture_status`) | `Sources/SecVFMCPCore/Tools/DiscoveryHandlers.swift` | `DiscoveryHandlerTests` (8) |
 | `MCPRouter` (initialize / tools/list / tools/call) | `Sources/SecVFMCPCore/MCPRouter.swift` | `ServerRoutingTests` (6) |
 
-**Total: 58 tests passing across 7 suites.**
+| Lifecycle handlers (`vm_start`, `vm_stop`, `capture_start`, `capture_stop`) | `Sources/SecVFMCPCore/Tools/LifecycleHandlers.swift` | `LifecycleHandlerTests` (10) |
+| `CommandPatternMatcher` + default ruleset | `Sources/SecVFMCPCore/PatternMatcher.swift` | `PatternMatcherTests` (11) |
+| `FileAuditSink` (production: ~/.avf/logs/mcp-audit-*.log) | `Sources/SecVFMCPCore/FileAuditSink.swift` | `FileAuditSinkTests` (5) |
+| `ConfirmationHook` protocol + AlwaysAllow / AlwaysDeny + Dispatcher integration | `Sources/SecVFMCPCore/ConfirmationHook.swift` | `ConfirmationHookTests` (7) |
+| `secvf_detonate_start` / `_run_status` / `_run_result` composite workflow PoC | `Sources/SecVFMCPCore/Tools/DetonateHandlers.swift` | `DetonateHandlerTests` (8) |
+| stdio JSON-RPC loop wiring all 19 handlers | `Sources/secvf-mcp/main.swift` | smoke-tested end-to-end |
+
+**Total: 99 tests passing across 12 suites.**
 
 ### 🚧 In progress / coming next
 
-- Lifecycle handlers (`vm_start`, `vm_stop`, `vm_pause`, `vm_resume`, `capture_start`, `capture_stop`)
-- `secvf_detonate` composite workflow PoC (host→VM, capture, snapshot, report)
-- `AVFAuditSink` (concrete production adapter routing through `AVFAuditLog` for cross-process line coherence)
-- Confirmation hook + dangerous-command pattern matcher for `secvf_exec_in_vm`
-- stdio loop in `secvf-mcp/main.swift` connecting `MCPRouter` to real stdin/stdout
+- Production bridges replacing the stub bridges in `secvf-mcp/main.swift` — call into the real `secvf-cli/Bridges/` to read from `~/.avf` and drive the live VM lifecycle
+- Real `VMWorkflowRunner` to drive a queued `RunStore` entry through boot → capture → snapshot → report (currently `secvf_detonate_start` returns a `run_id` but the runner has to be wired)
+- `ScriptHook` confirmation backend that runs a user-provided executable
+- Per-tool typed `inputSchema` definitions (currently `additionalProperties: true`)
 
 ### ⏳ Later phases
 

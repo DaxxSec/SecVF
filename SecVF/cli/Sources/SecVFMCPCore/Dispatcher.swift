@@ -38,25 +38,41 @@ public enum DispatchResponse: Sendable {
 
 /// Routes an incoming tool request through tier-gating, lookup, invocation,
 /// trust-boundary wrapping, and audit logging.
+///
+/// Optionally also performs Layer 3 (pattern matching) + Layer 4
+/// (confirmation hook) gating between tier-gate and handler-invoke. To
+/// enable, pass `matcher` and `hook` at init; the dispatcher will
+/// extract the command-shaped parameter named by `commandParamKey`
+/// (default: "command"), run the matcher against it, and if any
+/// pattern fires, call the hook for approval before proceeding.
 public final class Dispatcher: @unchecked Sendable {
     private let tier: CapabilityTier
     private let handlers: [String: ToolHandler]
     private let registry: ToolRegistry
     private let auditLogger: MCPAuditLogger
     private let clientPid: Int
+    private let matcher: CommandPatternMatcher?
+    private let hook: ConfirmationHook?
+    private let commandParamKey: String
 
     public init(
         tier: CapabilityTier,
         handlers: [String: ToolHandler],
         auditLogger: MCPAuditLogger,
         clientPid: Int,
-        registry: ToolRegistry? = nil
+        registry: ToolRegistry? = nil,
+        matcher: CommandPatternMatcher? = nil,
+        hook: ConfirmationHook? = nil,
+        commandParamKey: String = "command"
     ) {
         self.tier = tier
         self.handlers = handlers
         self.registry = registry ?? ToolRegistry(tier: tier)
         self.auditLogger = auditLogger
         self.clientPid = clientPid
+        self.matcher = matcher
+        self.hook = hook
+        self.commandParamKey = commandParamKey
     }
 
     public func dispatch(tool name: String, params: [String: Any]) async -> DispatchResponse {
@@ -92,6 +108,56 @@ public final class Dispatcher: @unchecked Sendable {
                 code: "refused_by_tier",
                 message: "tool '\(name)' requires tier '\(descriptor.category.minimumTier.serializedValue)'; server running at '\(tier.serializedValue)'"
             )
+        }
+
+        // 1.5. Pattern match + confirmation hook (Layers 3 + 4).
+        // Only fires when both matcher AND hook are configured AND the
+        // tool params contain the command-shaped key. Pattern-free
+        // calls bypass this layer entirely — no overhead, no false
+        // positives.
+        if let matcher = matcher,
+           let hook = hook,
+           let command = params[commandParamKey] as? String {
+            let matches = matcher.match(command: command)
+            if !matches.isEmpty {
+                let decision = await hook.evaluate(
+                    tool: name,
+                    params: params,
+                    matches: matches
+                )
+                switch decision {
+                case .approve:
+                    break  // fall through to handler invocation
+                case .deny(let reason):
+                    let dur = Int(Date().timeIntervalSince(start) * 1000)
+                    auditLogger.log(
+                        tool: name,
+                        params: params,
+                        tier: tier,
+                        result: .refusedByHook,
+                        durationMs: dur,
+                        clientPid: clientPid
+                    )
+                    return .error(
+                        code: "refused_by_hook",
+                        message: "confirmation hook denied: \(reason)"
+                    )
+                case .abstain:
+                    let dur = Int(Date().timeIntervalSince(start) * 1000)
+                    auditLogger.log(
+                        tool: name,
+                        params: params,
+                        tier: tier,
+                        result: .refusedByHook,
+                        durationMs: dur,
+                        clientPid: clientPid
+                    )
+                    return .error(
+                        code: "refused_by_hook",
+                        message: "confirmation hook abstained (treated as deny for safety)"
+                    )
+                }
+            }
         }
 
         // 2. Handler lookup.

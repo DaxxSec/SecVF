@@ -132,18 +132,25 @@ actor StubCaptureBridge: CaptureBridge {
 let vmBridge = StubVMBridge()
 let switchBridge = StubSwitchBridge()
 let captureBridge = StubCaptureBridge()
+let runStore = RunStore()
 
 // MARK: - Handler registry
 
 let handlers: [String: ToolHandler] = [
+    // Discovery (read-only)
     "secvf_vm_list":         VMListHandler(bridge: vmBridge),
     "secvf_vm_status":       VMStatusHandler(bridge: vmBridge),
     "secvf_switch_status":   SwitchStatusHandler(bridge: switchBridge),
     "secvf_capture_status":  CaptureStatusHandler(bridge: captureBridge),
+    // Lifecycle (safe-mutate)
     "secvf_vm_start":        VMStartHandler(bridge: vmBridge),
     "secvf_vm_stop":         VMStopHandler(bridge: vmBridge),
     "secvf_capture_start":   CaptureStartHandler(bridge: captureBridge),
     "secvf_capture_stop":    CaptureStopHandler(bridge: captureBridge),
+    // Composite workflow (safe-mutate)
+    "secvf_detonate_start":  DetonateStartHandler(runs: runStore),
+    "secvf_run_status":      RunStatusHandler(runs: runStore),
+    "secvf_run_result":      RunResultHandler(runs: runStore),
 ]
 
 let router = MCPRouter(

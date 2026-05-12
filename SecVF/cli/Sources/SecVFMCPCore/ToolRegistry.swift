@@ -148,6 +148,26 @@ public struct ToolRegistry {
             description: "Stop capture and finalize PCAP."
         ),
 
+        // === Composite workflows (safe-mutate) ===
+        ToolDescriptor(
+            name: "secvf_detonate_start",
+            category: .workflow,
+            direction: .input,
+            description: "Start a detonation workflow: clone template VM, mount sample, boot, capture, snapshot. Returns a run_id; poll with secvf_run_status, fetch result with secvf_run_result."
+        ),
+        ToolDescriptor(
+            name: "secvf_run_status",
+            category: .workflow,
+            direction: .input,
+            description: "Poll the state of an active detonation run."
+        ),
+        ToolDescriptor(
+            name: "secvf_run_result",
+            category: .workflow,
+            direction: .output,  // contains VM-derived content — UNTRUSTED
+            description: "Fetch the final report for a completed detonation run."
+        ),
+
         // === Destructive (full tier only) ===
         ToolDescriptor(
             name: "secvf_vm_create",
