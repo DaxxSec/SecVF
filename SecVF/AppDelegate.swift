@@ -408,17 +408,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     @objc private func handleBootAISandbox(_ notification: Notification) {
         let info = notification.userInfo ?? [:]
         let inRecovery = (info["inRecoveryMode"] as? Bool) ?? false
+        let reuseID = info["reusingSessionID"] as? String
         let isBase = (info["isBaseBundle"] as? Bool) ?? false
 
-        if isBase {
-            // Cloning a fresh session from the base IS the normal boot path,
-            // so this is fine — just call through. We surface a heads-up alert
-            // because users sometimes expect "Start the base bundle" to mean
-            // "boot the template in place" (it doesn't, and shouldn't —
-            // overwriting the template breaks future cloning).
+        if isBase && reuseID == nil {
+            // Base bundle selected and no session to reuse — caller asked
+            // for a fresh clone-and-boot. Standard path.
             NSLog("[AISandbox] Start clicked on base bundle — cloning to new session")
+        } else if reuseID != nil {
+            NSLog("[AISandbox] Start clicked — reusing existing session %@", reuseID!)
         }
-        bootAISandboxSession(inRecoveryMode: inRecovery)
+        bootAISandboxSession(inRecoveryMode: inRecovery, reusingSessionID: reuseID)
     }
 
     @objc private func handlePauseVM(_ notification: Notification) {
@@ -2542,17 +2542,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     /// `@objc` entry point used by the existing "Tools → Boot AI Sandbox"
     /// menu item. Boots in normal mode.
     @objc private func bootAISandboxSession() {
-        bootAISandboxSession(inRecoveryMode: false)
+        bootAISandboxSession(inRecoveryMode: false, reusingSessionID: nil)
     }
 
     /// `@objc` entry point used by the new "Tools → Boot AI Sandbox in
     /// Recovery…" menu item and by the recovery-mode toggle in the main
     /// window's AI Sandbox tab.
     @objc private func bootAISandboxSessionInRecovery() {
-        bootAISandboxSession(inRecoveryMode: true)
+        bootAISandboxSession(inRecoveryMode: true, reusingSessionID: nil)
     }
 
-    private func bootAISandboxSession(inRecoveryMode: Bool) {
+    /// Boot an AI Sandbox session VM.
+    ///
+    /// - parameter inRecoveryMode: when true, passes
+    ///   `VZMacOSVirtualMachineStartOptions(startUpFromMacOSRecovery: true)`
+    ///   to `machine.start(options:)`.
+    /// - parameter reusingSessionID: when non-nil, boot the existing session
+    ///   bundle at `~/.avf/AISandbox/sessions/ai-sandbox-exec-<id>.bundle`
+    ///   without cloning. When nil, clone the base bundle to a fresh session
+    ///   first. The tree-view UI in the main library uses this to "Start"
+    ///   the latest session when the user has the base row selected.
+    private func bootAISandboxSession(inRecoveryMode: Bool, reusingSessionID: String?) {
         let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
         guard baseBundle.exists else {
             showAlert(
@@ -2585,12 +2595,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         Task { @MainActor in
             defer { self.activeSandboxBootInFlight = false }
 
-            let session = AISandboxVMSession()
-            NSLog("[AISandbox] Cloning base → session %@", session.sessionID)
+            // When `reusingSessionID` is set, attach to the existing session
+            // bundle in place — no clone. Otherwise mint a fresh session id
+            // and clone the base into it.
+            let session: AISandboxVMSession
+            if let existingID = reusingSessionID {
+                session = AISandboxVMSession(sessionID: existingID)
+                NSLog("[AISandbox] Reusing existing session %@", session.sessionID)
+            } else {
+                session = AISandboxVMSession()
+                NSLog("[AISandbox] Cloning base → session %@", session.sessionID)
+            }
 
             do {
-                try session.cloneBase()
-                NSLog("[AISandbox] Clone complete: %@", session.bundleURL.path)
+                if reusingSessionID == nil {
+                    try session.cloneBase()
+                    NSLog("[AISandbox] Clone complete: %@", session.bundleURL.path)
+                } else if !FileManager.default.fileExists(atPath: session.bundleURL.path) {
+                    // The session row in the UI got out of sync with disk
+                    // (manual delete, etc.). Fall back to clone + boot from
+                    // base so the user still gets a working VM.
+                    NSLog("[AISandbox] Session bundle missing — falling back to fresh clone")
+                    try session.cloneBase()
+                }
 
                 // Build VZ config from the cloned session bundle
                 let bundle = AISandboxVMBundle(url: session.bundleURL)

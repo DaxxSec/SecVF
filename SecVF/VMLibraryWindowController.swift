@@ -16,10 +16,36 @@ struct AISandboxBundleRow {
     let id: UUID?
     let createdAt: Date?
     let diskBytes: Int64
+
+    /// Pulled from the bundle URL: `ai-sandbox-exec-<sessionID>.bundle`.
+    /// Returns nil for the base bundle (which has no session id).
+    var sessionID: String? {
+        guard !isBase else { return nil }
+        let name = url.deletingPathExtension().lastPathComponent
+        let prefix = "ai-sandbox-exec-"
+        return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : nil
+    }
+}
+
+/// Reference-typed wrapper used as NSOutlineView's "item". NSOutlineView
+/// identifies items by object identity for reference types, which is the
+/// only reliable way to track selection / expansion state across reloads.
+/// `children` is nil for session leaves; non-nil (possibly empty) for the
+/// base node.
+final class AISandboxNode: NSObject {
+    let bundle: AISandboxBundleRow
+    var children: [AISandboxNode]?
+    init(bundle: AISandboxBundleRow, children: [AISandboxNode]?) {
+        self.bundle = bundle
+        self.children = children
+    }
 }
 
 @MainActor
-class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
+class VMLibraryWindowController: NSWindowController,
+                                 NSTableViewDataSource, NSTableViewDelegate,
+                                 NSOutlineViewDataSource, NSOutlineViewDelegate,
+                                 NSWindowDelegate {
 
     @IBOutlet weak var tableView: NSTableView?
     @IBOutlet weak var startButton: NSButton?
@@ -79,7 +105,22 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var recoveryModeCheckbox: NSButton?
     /// Cached scan of `~/.avf/AISandbox/` — base + each session bundle.
     /// Refreshed each time the AI Sandbox tab is selected.
+    /// In tree-view mode this still backs the data: `[0]` is the base
+    /// (root parent) and `[1...]` are sessions (children of the base),
+    /// ordered newest-first.
     private var aiSandboxBundles: [AISandboxBundleRow] = []
+
+    /// Separate outline view + scroll view for the AI Sandbox tab. Sits
+    /// underneath the main NSTableView (same frame) and toggles visibility
+    /// on tab switch. The standard NSTableView stays in charge of standard
+    /// VMs; outline view shows the base→sessions tree.
+    private var aiSandboxOutlineView: NSOutlineView?
+    private var aiSandboxOutlineScroll: NSScrollView?
+
+    /// Node tree backing `aiSandboxOutlineView`. Single root (the base)
+    /// with the session bundles as children. Rebuilt whenever
+    /// `aiSandboxBundles` is re-scanned.
+    private var aiSandboxRootNode: AISandboxNode?
 
     // Selected VM detail card (horizontal strip between table and packet panel)
     private var selectedVMDetailCard: NSView?
@@ -687,6 +728,17 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             scrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
         }
 
+        // AI Sandbox outline view — same frame as the table scroll view but
+        // hidden until the AI Sandbox tab is selected. Created once; later
+        // tab switches just toggle .isHidden.
+        if aiSandboxOutlineScroll == nil {
+            buildAISandboxOutlineView(in: contentView, frame: NSRect(
+                x: tableX, y: tableY, width: tableWidth, height: tableHeight))
+        } else {
+            aiSandboxOutlineScroll?.frame = NSRect(
+                x: tableX, y: tableY, width: tableWidth, height: tableHeight)
+        }
+
         // Selected-VM detail card — at-a-glance summary for the highlighted
         // row. Sits between the table and the packet panel.
         addSelectedVMDetailCard(in: contentView,
@@ -900,13 +952,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func updateSelectedVMDetailCard() {
         guard selectedVMDetailCard != nil else { return }
 
-        let selectedRow = tableView?.selectedRow ?? -1
-
-        // AI Sandbox tab populates the card from the bundle row.
+        // AI Sandbox tab pulls the row from the outline view, not the table.
         if currentLibraryTab == .aiSandbox {
-            updateDetailCardForAISandbox(selectedRow: selectedRow)
+            updateDetailCardForAISandbox(selectedNode: aiSandboxOutlineView.flatMap {
+                $0.item(atRow: $0.selectedRow) as? AISandboxNode
+            })
             return
         }
+
+        let selectedRow = tableView?.selectedRow ?? -1
 
         let allVMs = vmManager.virtualMachines
 
@@ -1086,10 +1140,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     /// Repaint the detail card from the currently-selected AI Sandbox
-    /// bundle. AI Sandbox VMs have a fixed shape (macOS, isolated, 4 vCPU
-    /// / 8 GB RAM via AISandboxDefaults), so several cells are constant.
-    private func updateDetailCardForAISandbox(selectedRow: Int) {
-        guard selectedRow >= 0, selectedRow < aiSandboxBundles.count else {
+    /// outline node. AI Sandbox VMs have a fixed shape (macOS, isolated,
+    /// 4 vCPU / 8 GB RAM via AISandboxDefaults), so several cells are
+    /// constant.
+    private func updateDetailCardForAISandbox(selectedNode: AISandboxNode?) {
+        guard let node = selectedNode else {
             detailNameLabel?.stringValue = aiSandboxBundles.isEmpty ?
                 "No AI Sandbox bundles" : "No bundle selected"
             detailNameLabel?.textColor = AppColors.textMuted
@@ -1105,7 +1160,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             return
         }
 
-        let bundle = aiSandboxBundles[selectedRow]
+        let bundle = node.bundle
 
         detailNameLabel?.stringValue = bundle.displayName
         detailNameLabel?.textColor = AppColors.textPrimary
@@ -1185,9 +1240,15 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Toggle the recovery checkbox visibility
         recoveryModeCheckbox?.isHidden = (newTab != .aiSandbox)
 
-        // Reload the table from whichever data source the tab points to
-        if newTab == .aiSandbox {
+        // Show the outline view in the AI Sandbox tab; keep the standard
+        // NSTableView for the Standard tab. They share the same frame.
+        let showOutline = (newTab == .aiSandbox)
+        tableView?.enclosingScrollView?.isHidden = showOutline
+        aiSandboxOutlineScroll?.isHidden = !showOutline
+
+        if showOutline {
             aiSandboxBundles = scanAISandboxBundles()
+            rebuildAISandboxNodeTree()
         }
         tableView?.reloadData()
         updateButtonStates()
@@ -1198,6 +1259,92 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // State is read at Start-button click time; nothing to do here
         // besides log so the user gets feedback the toggle took.
         NSLog("[Library] Recovery mode toggle → %@", sender.state == .on ? "ON" : "OFF")
+    }
+
+    // MARK: AI Sandbox outline view
+
+    /// Build the NSOutlineView used by the AI Sandbox tab. Columns mirror
+    /// the standard table's set (Name, Status, OS, CPU, Memory, Disk,
+    /// LastUsed) so the visual rhythm stays consistent on tab swap. The
+    /// first column gets the disclosure triangle.
+    private func buildAISandboxOutlineView(in contentView: NSView, frame: NSRect) {
+        let scroll = NSScrollView(frame: frame)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.borderType = .noBorder
+        scroll.wantsLayer = true
+        scroll.layer?.borderWidth = LayoutConstants.borderHairline
+        scroll.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
+        scroll.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        scroll.backgroundColor = AppColors.backgroundSecondary
+        scroll.drawsBackground = true
+        scroll.isHidden = true   // Standard tab is default; reveal on switch
+
+        let outline = NSOutlineView()
+        outline.headerView = NSTableHeaderView()
+        outline.allowsMultipleSelection = false
+        outline.allowsEmptySelection = true
+        outline.usesAlternatingRowBackgroundColors = false
+        outline.backgroundColor = AppColors.backgroundSecondary
+        outline.gridColor = AppColors.borderOD
+        outline.gridStyleMask = []
+        outline.style = .plain
+        outline.rowSizeStyle = .default
+        outline.indentationPerLevel = 16
+        outline.dataSource = self
+        outline.delegate = self
+        outline.target = self
+        outline.doubleAction = #selector(startVM(_:))
+
+        // Columns — same identifiers as the XIB so cell-render code can be
+        // shared (we still branch by `currentLibraryTab`).
+        let columnSpecs: [(id: String, title: String, width: CGFloat)] = [
+            ("NameColumn",    "Name",      220),
+            ("StatusColumn",  "Status",     90),
+            ("OSColumn",      "OS",         90),
+            ("CPUColumn",     "Session ID", 110),
+            ("MemoryColumn",  "Memory",     80),
+            ("DiskColumn",    "Disk",      100),
+            ("LastUsedColumn","Created",   140),
+        ]
+        for spec in columnSpecs {
+            let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(spec.id))
+            col.title = spec.title
+            col.width = spec.width
+            col.minWidth = 60
+            outline.addTableColumn(col)
+        }
+        outline.outlineTableColumn = outline.tableColumns.first  // Name column gets the disclosure ▶
+
+        scroll.documentView = outline
+        contentView.addSubview(scroll)
+        aiSandboxOutlineScroll = scroll
+        aiSandboxOutlineView = outline
+    }
+
+    /// Rebuild the node tree from `aiSandboxBundles`, reload the outline,
+    /// auto-expand the base node.
+    private func rebuildAISandboxNodeTree() {
+        guard let baseRow = aiSandboxBundles.first(where: { $0.isBase }) else {
+            aiSandboxRootNode = nil
+            aiSandboxOutlineView?.reloadData()
+            return
+        }
+        let sessionRows = aiSandboxBundles.filter { !$0.isBase }
+        let sessionNodes = sessionRows.map { AISandboxNode(bundle: $0, children: nil) }
+        aiSandboxRootNode = AISandboxNode(bundle: baseRow, children: sessionNodes)
+        aiSandboxOutlineView?.reloadData()
+        if let root = aiSandboxRootNode {
+            aiSandboxOutlineView?.expandItem(root)
+        }
+    }
+
+    /// Find the most-recently-created session node, or nil if there are no
+    /// session children. Used by Start-on-base routing.
+    private func latestAISandboxSessionNode() -> AISandboxNode? {
+        guard let children = aiSandboxRootNode?.children, !children.isEmpty else { return nil }
+        return children.max(by: { ($0.bundle.createdAt ?? .distantPast) < ($1.bundle.createdAt ?? .distantPast) })
     }
 
     /// Scan `~/.avf/AISandbox/` for bundle directories. Returns a list of
@@ -2201,55 +2348,75 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     func windowDidResize(_ notification: Notification) {
-        // Recalculate layout when window is resized
+        // Recalculate layout when window is resized. Mirrors the math in
+        // adjustContentForSidebar (toolbar at top, packet panel + legend at
+        // bottom, table + detail card in the middle). Autoresizing masks
+        // handle a chunk of this already, but a few panels (Active VMs
+        // height, library tabs Y, detail card Y) are calculated from
+        // contentHeight at layout time and need re-anchoring here.
         guard let contentView = window?.contentView else { return }
 
         let sidebarWidth: CGFloat = 220
         let activePanelWidth: CGFloat = 220
-        let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
+        let buttonHeight: CGFloat = 32
+        let toolbarGap: CGFloat = 8
+        let libraryTabsHeight: CGFloat = 26
+        let libraryTabsGap: CGFloat = 8
+        let detailCardHeight: CGFloat = 70
         let packetPanelHeight: CGFloat = 180
 
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Recalculate table position and size (above packet panel)
+        // Vertical anchors — match adjustContentForSidebar()
+        let toolbarY = contentHeight - padding - buttonHeight
+        let libraryTabsY = toolbarY - toolbarGap - libraryTabsHeight
+
         let tableX = sidebarWidth + padding
         let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let tableY = buttonRowHeight + padding + packetPanelHeight + padding
-        let tableHeight = contentHeight - tableY - padding
+        let detailCardY = padding + packetPanelHeight + padding
+        let tableY = detailCardY + detailCardHeight + padding
+        let tableHeight = libraryTabsY - libraryTabsGap - tableY
 
         if let scrollView = tableView?.enclosingScrollView {
             scrollView.frame = NSRect(x: tableX, y: tableY, width: tableWidth, height: tableHeight)
         }
+        aiSandboxOutlineScroll?.frame = NSRect(x: tableX, y: tableY,
+                                               width: tableWidth, height: tableHeight)
 
-        // Recalculate button positions
-        let buttons: [NSButton?] = [newButton, deleteButton, renameButton, cloneButton, importButton, configureButton, startButton]
-        let buttonWidth: CGFloat = 80
-        let buttonSpacing: CGFloat = 10
-        let visibleButtons = buttons.compactMap { $0 }
-        let totalButtonsWidth = CGFloat(visibleButtons.count) * buttonWidth + CGFloat(visibleButtons.count - 1) * buttonSpacing
-        var buttonX = tableX + (tableWidth - totalButtonsWidth) / 2
+        // Library tabs header + recovery checkbox stay glued under the toolbar.
+        libraryTabControl?.frame.origin.y = libraryTabsY
+        recoveryModeCheckbox?.frame.origin.y = libraryTabsY + (libraryTabsHeight - 20) / 2
 
-        for button in visibleButtons {
-            button.frame = NSRect(x: buttonX, y: padding, width: buttonWidth, height: 32)
-            buttonX += buttonWidth + buttonSpacing
+        // Toolbar buttons re-anchor to the new top — autoresize keeps the
+        // horizontal flow, this just updates Y.
+        let topButtons: [NSButton?] = [startButton, newButton, importButton,
+                                       configureButton, cloneButton,
+                                       renameButton, deleteButton]
+        for button in topButtons.compactMap({ $0 }) {
+            button.frame.origin.y = toolbarY
         }
 
-        // Recalculate Active VMs panel position (right side, same height as table)
+        // Detail card stays at fixed Y (autoresize handles its width).
+        selectedVMDetailCard?.frame.origin.y = detailCardY
+
+        // Active VMs panel — bottom anchored at packet-panel top, top edge
+        // moves with the library tabs.
         if let panel = statusBar {
             let panelX = contentWidth - activePanelWidth - padding
-            let panelY = buttonRowHeight + padding + packetPanelHeight + padding  // Same as table Y
-            let panelHeight = contentHeight - panelY - padding
-            panel.frame = NSRect(x: panelX, y: panelY, width: activePanelWidth, height: panelHeight)
+            let panelY = padding + packetPanelHeight + padding
+            let panelTop = libraryTabsY - libraryTabsGap
+            let panelHeight = panelTop - panelY
+            panel.frame = NSRect(x: panelX, y: panelY,
+                                 width: activePanelWidth, height: panelHeight)
         }
 
-        // Recalculate Packet Log panel position (horizontal, below table)
+        // Packet panel + legend stay flush at the bottom of the content view.
         if let packetPanel = packetLogPanel {
-            let packetX = sidebarWidth + padding
-            let packetY = buttonRowHeight + padding
-            let packetWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-            packetPanel.frame = NSRect(x: packetX, y: packetY, width: packetWidth, height: packetPanelHeight)
+            let packetWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5
+            packetPanel.frame = NSRect(x: sidebarWidth + padding, y: padding,
+                                       width: packetWidth, height: packetPanelHeight)
         }
     }
 
@@ -2571,6 +2738,97 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         return finalCell
     }
 
+    // MARK: - NSOutlineViewDataSource / Delegate (AI Sandbox tab)
+
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        if item == nil {
+            return aiSandboxRootNode == nil ? 0 : 1
+        }
+        return (item as? AISandboxNode)?.children?.count ?? 0
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        if item == nil { return aiSandboxRootNode! }
+        return (item as! AISandboxNode).children![index]
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        return ((item as? AISandboxNode)?.children?.isEmpty == false)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        guard let node = item as? AISandboxNode, let colId = tableColumn?.identifier.rawValue else {
+            return nil
+        }
+        let bundle = node.bundle
+        let cellId = NSUserInterfaceItemIdentifier("AISandboxOutlineCell_\(colId)")
+        var cell = outlineView.makeView(withIdentifier: cellId, owner: self) as? NSTableCellView
+        if cell == nil {
+            cell = NSTableCellView()
+            cell?.identifier = cellId
+            let text = NSTextField()
+            text.isBordered = false
+            text.drawsBackground = false
+            text.isEditable = false
+            text.translatesAutoresizingMaskIntoConstraints = false
+            text.lineBreakMode = .byTruncatingTail
+            cell?.addSubview(text)
+            cell?.textField = text
+            NSLayoutConstraint.activate([
+                text.leadingAnchor.constraint(equalTo: cell!.leadingAnchor, constant: 2),
+                text.trailingAnchor.constraint(equalTo: cell!.trailingAnchor, constant: -2),
+                text.centerYAnchor.constraint(equalTo: cell!.centerYAnchor),
+            ])
+        }
+
+        switch colId {
+        case "NameColumn":
+            cell?.textField?.stringValue = bundle.displayName + (bundle.isBase ? " (base)" : "")
+            cell?.textField?.font = bundle.isBase
+                ? NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
+                : NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+            cell?.textField?.textColor = bundle.isBase ? AppColors.accentODGlow : AppColors.textPrimary
+        case "StatusColumn":
+            cell?.textField?.stringValue = bundle.isBase ? "TEMPLATE" : "SESSION"
+            cell?.textField?.textColor = bundle.isBase ? AppColors.accentOrange : AppColors.statusRunning
+            cell?.textField?.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .semibold)
+        case "OSColumn":
+            cell?.textField?.stringValue = "macOS"
+            cell?.textField?.textColor = AppColors.textMuted
+        case "CPUColumn":  // repurposed for session id prefix
+            cell?.textField?.stringValue = bundle.sessionID ?? "—"
+            cell?.textField?.textColor = AppColors.textMuted
+            cell?.textField?.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+        case "MemoryColumn":
+            cell?.textField?.stringValue = bundle.isBase ? "8 GB" : "—"
+            cell?.textField?.textColor = AppColors.textMuted
+        case "DiskColumn":
+            cell?.textField?.stringValue = ByteCountFormatter.string(
+                fromByteCount: bundle.diskBytes, countStyle: .binary)
+            cell?.textField?.textColor = AppColors.textMuted
+        case "LastUsedColumn":
+            if let created = bundle.createdAt {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .short
+                formatter.timeStyle = .short
+                cell?.textField?.stringValue = formatter.string(from: created)
+            } else {
+                cell?.textField?.stringValue = "—"
+            }
+            cell?.textField?.textColor = AppColors.textMuted
+        default:
+            cell?.textField?.stringValue = ""
+        }
+        return cell
+    }
+
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        updateButtonStates()
+        updateSelectedVMDetailCard()
+    }
+
+    // MARK: - NSTableViewDelegate (cont.)
+
     func tableViewSelectionDidChange(_ notification: Notification) {
         updateButtonStates()
         updateSelectedVMDetailCard()
@@ -2579,29 +2837,48 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     // MARK: - Actions
 
     @IBAction func startVM(_ sender: Any) {
+        // AI Sandbox tab: read from the outline view (not the table). Two
+        // routing rules:
+        //
+        //  - Base node selected: if any sessions exist, boot the latest
+        //    one in place ("Start" on the parent means "boot the most
+        //    recent child"). If no sessions, fall through with reuseID
+        //    = nil so AppDelegate clones+boots a fresh one.
+        //  - Session node selected: boot THAT specific session.
+        //
+        // Either way the recovery-mode checkbox state controls boot path.
+        if currentLibraryTab == .aiSandbox {
+            guard let outline = aiSandboxOutlineView,
+                  let node = outline.item(atRow: outline.selectedRow) as? AISandboxNode else {
+                return
+            }
+            let inRecovery = (recoveryModeCheckbox?.state == .on)
+            var reuseID: String? = nil
+            var isBase = node.bundle.isBase
+            if node.bundle.isBase {
+                if let latest = latestAISandboxSessionNode() {
+                    reuseID = latest.bundle.sessionID
+                    isBase = false   // We're effectively booting a session
+                }
+                // else reuseID stays nil → fresh clone path
+            } else {
+                reuseID = node.bundle.sessionID
+            }
+            var userInfo: [String: Any] = [
+                "inRecoveryMode": inRecovery,
+                "isBaseBundle": isBase
+            ]
+            if let id = reuseID { userInfo["reusingSessionID"] = id }
+            NotificationCenter.default.post(
+                name: .bootAISandbox, object: nil, userInfo: userInfo)
+            return
+        }
+
+        // Standard tab — needs a VM selected in the NSTableView
         guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to start")
-            return
-        }
-
-        // AI Sandbox tab: route to bootAISandboxSession with the recovery flag
-        // from the checkbox. The base bundle itself is not bootable — only
-        // sessions are. Selecting the base while clicking Start tells the
-        // user to either clone a new session or pick an existing one.
-        if currentLibraryTab == .aiSandbox {
-            guard selectedRow < aiSandboxBundles.count else { return }
-            let bundle = aiSandboxBundles[selectedRow]
-            let inRecovery = (recoveryModeCheckbox?.state == .on)
-            NotificationCenter.default.post(
-                name: .bootAISandbox,
-                object: nil,
-                userInfo: [
-                    "inRecoveryMode": inRecovery,
-                    "isBaseBundle": bundle.isBase
-                ]
-            )
             return
         }
 
@@ -2631,20 +2908,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @IBAction func deleteVM(_ sender: Any) {
-        guard let tableView = tableView else { return }
-        let selectedRow = tableView.selectedRow
-        guard selectedRow >= 0 else {
-            showAlert(message: "Please select a VM to delete")
-            return
-        }
-
         // AI Sandbox tab — delete the selected session bundle off disk.
         // updateButtonStates() already disables the Delete button for the
         // base bundle, but we double-check here to defend against keyboard
         // shortcut paths.
         if currentLibraryTab == .aiSandbox {
-            guard selectedRow < aiSandboxBundles.count else { return }
-            let bundle = aiSandboxBundles[selectedRow]
+            guard let outline = aiSandboxOutlineView,
+                  let node = outline.item(atRow: outline.selectedRow) as? AISandboxNode else {
+                return
+            }
+            let bundle = node.bundle
             guard !bundle.isBase else {
                 showAlert(message: "The AI Sandbox base bundle cannot be deleted from here. Use Tools → Create AI Sandbox VM to rebuild it.")
                 return
@@ -2659,7 +2932,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             do {
                 try FileManager.default.removeItem(at: bundle.url)
                 aiSandboxBundles = scanAISandboxBundles()
-                tableView.reloadData()
+                rebuildAISandboxNodeTree()
                 updateButtonStates()
                 updateSelectedVMDetailCard()
             } catch {
@@ -2668,6 +2941,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             return
         }
 
+        // Standard tab — needs a VM selected in the table
+        guard let tableView = tableView else { return }
+        let selectedRow = tableView.selectedRow
+        guard selectedRow >= 0 else {
+            showAlert(message: "Please select a VM to delete")
+            return
+        }
         let vm = vmManager.virtualMachines[selectedRow]
 
         let alert = NSAlert()
@@ -3126,8 +3406,13 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     private func updateButtonStates() {
-        let hasSelection = tableView?.selectedRow ?? -1 >= 0
         let isAITab = (currentLibraryTab == .aiSandbox)
+        let hasSelection: Bool = {
+            if isAITab {
+                return (aiSandboxOutlineView?.selectedRow ?? -1) >= 0
+            }
+            return (tableView?.selectedRow ?? -1) >= 0
+        }()
 
         // AI Sandbox bundles have their own lifecycle (create via Tools menu,
         // boot via Start, otherwise managed on disk). The standard Configure
@@ -3147,14 +3432,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     /// True when the AI Sandbox tab is active AND the currently selected
-    /// row is a session (not the base bundle). The base bundle must not be
-    /// deletable from the library — that's a Tools-menu admin action only.
+    /// outline-view row is a session (not the base bundle). The base bundle
+    /// must not be deletable from the library — that's a Tools-menu admin
+    /// action only.
     private func isAITabSessionRowSelected() -> Bool {
-        guard currentLibraryTab == .aiSandbox else { return false }
-        guard let row = tableView?.selectedRow, row >= 0, row < aiSandboxBundles.count else {
+        guard currentLibraryTab == .aiSandbox,
+              let outline = aiSandboxOutlineView,
+              let node = outline.item(atRow: outline.selectedRow) as? AISandboxNode else {
             return false
         }
-        return !aiSandboxBundles[row].isBase
+        return !node.bundle.isBase
     }
 
     private func showAlert(message: String) {
