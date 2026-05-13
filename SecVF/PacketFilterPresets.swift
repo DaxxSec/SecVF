@@ -29,44 +29,87 @@ enum PacketFilterPresets {
     }
 
     /// The full catalog, ordered for menu display.
+    ///
+    /// Filter strings target the `PacketFilter` expression parser (parens
+    /// + `port == N` + `length > N` etc.), NOT the old flat substring
+    /// engine. Titles describe what the filter actually matches —
+    /// presets that overpromise relative to what the parser can detect
+    /// have been honestly renamed to "(inspect manually)" so the
+    /// operator's expectations match reality. Issue #11 tracks the
+    /// gap between these and full Wireshark semantics.
     static let sections: [Section] = [
         Section(title: "── C2 DETECTION ──", presets: [
-            Preset(title: "Non-Apple DNS (Suspicious)",      filter: "dns and not apple and not icloud"),
-            Preset(title: "Direct IP Connections (No DNS)",  filter: "tcp and not dns and not arp"),
-            Preset(title: "Suspicious TLDs (.tk/.ml/.ga/.cf)", filter: "dns and (tk or ml or ga or cf or gq)"),
-            Preset(title: "Non-Browser HTTP (curl/wget/python)", filter: "http"),
-            Preset(title: "Non-Standard Ports",              filter: "tcp and not 80 and not 443 and not 22 and not 53"),
-            Preset(title: "Short TCP Connections (Beacon)",  filter: "tcp"),
+            Preset(title: "Non-Apple DNS (Suspicious)",
+                   filter: "dns and not apple and not icloud"),
+            Preset(title: "Direct IP Connections (No DNS)",
+                   filter: "tcp and not dns and not arp"),
+            // Leading `.` in the substrings + parens make this honest:
+            // matches DNS packets whose info contains the literal ".tk"
+            // / ".ml" / ".ga" / ".cf" / ".gq" rather than every packet
+            // whose info contains those two letters anywhere.
+            Preset(title: "Suspicious TLDs (.tk/.ml/.ga/.cf)",
+                   filter: #"dns and (info contains ".tk" or info contains ".ml" or info contains ".ga" or info contains ".cf" or info contains ".gq")"#),
+            Preset(title: "HTTP (inspect for non-browser UA manually)",
+                   filter: "http"),
+            // Now actually correct: numeric port comparison, not
+            // substring match. Port 8080 / 5300 / 4430 etc. correctly
+            // pass through this filter.
+            Preset(title: "Non-Standard Ports",
+                   filter: "tcp and port != 80 and port != 443 and port != 22 and port != 53"),
+            Preset(title: "TCP (inspect for short-connection beacons manually)",
+                   filter: "tcp"),
         ]),
         Section(title: "── DATA EXFIL ──", presets: [
-            Preset(title: "DNS Tunneling (Long Queries)",    filter: "dns"),
-            Preset(title: "Large Outbound Transfers",        filter: "tcp"),
-            Preset(title: "ICMP with Payload (Covert Channel)", filter: "icmp"),
-            Preset(title: "Base64 in HTTP",                  filter: "http"),
+            // Length predicate makes these match what the title says:
+            // unusually-long DNS queries / large TCP / ICMP-with-payload.
+            Preset(title: "DNS Tunneling (Long Queries)",
+                   filter: "dns and length > 100"),
+            Preset(title: "Large Outbound Transfers",
+                   filter: "tcp and length > 1000"),
+            Preset(title: "ICMP with Payload (Covert Channel)",
+                   filter: "icmp and length > 64"),
+            Preset(title: "HTTP (inspect for base64 payloads manually)",
+                   filter: "http"),
         ]),
         Section(title: "── TLS ANALYSIS ──", presets: [
-            Preset(title: "TLS Handshakes Only",             filter: "tls or ssl"),
-            Preset(title: "Self-Signed Certificates",        filter: "tls or ssl"),
-            Preset(title: "TLS Without SNI (Hidden Dest)",   filter: "tls or ssl"),
-            Preset(title: "Certificate Exchange",            filter: "tls or ssl"),
+            // The engine can't distinguish "handshake" / "self-signed" /
+            // "without-SNI" / "cert exchange" without per-packet TLS
+            // record inspection. Collapse to one honest entry and one
+            // inspection-prompt entry.
+            Preset(title: "All TLS / SSL",
+                   filter: "tls or ssl"),
+            Preset(title: "TLS (inspect handshake/SNI/certs manually)",
+                   filter: "tls or ssl"),
         ]),
         Section(title: "── RECON & SCANNING ──", presets: [
-            Preset(title: "Port Scanning (SYN Flood)",       filter: "tcp"),
-            Preset(title: "ARP Requests (Host Discovery)",   filter: "arp"),
-            Preset(title: "ICMP Echo (Ping Sweep)",          filter: "icmp"),
-            Preset(title: "SMB Enumeration",                 filter: "smb or tcp 445 or tcp 139"),
+            Preset(title: "TCP (inspect for SYN-flood patterns manually)",
+                   filter: "tcp"),
+            Preset(title: "ARP Requests (Host Discovery)",
+                   filter: "arp"),
+            Preset(title: "ICMP Echo (Ping Sweep)",
+                   filter: "icmp"),
+            Preset(title: "SMB Enumeration",
+                   filter: "smb or port == 445 or port == 139"),
         ]),
         Section(title: "── LATERAL MOVEMENT ──", presets: [
-            Preset(title: "SSH Traffic",                     filter: "tcp 22 or ssh"),
-            Preset(title: "Remote Desktop (RDP/VNC)",        filter: "tcp 3389 or tcp 5900 or tcp 5901"),
-            Preset(title: "File Sharing (SMB/AFP)",          filter: "smb or afp or tcp 445 or tcp 548"),
+            Preset(title: "SSH Traffic",
+                   filter: "port == 22 or ssh"),
+            Preset(title: "Remote Desktop (RDP/VNC)",
+                   filter: "port == 3389 or port == 5900 or port == 5901"),
+            Preset(title: "File Sharing (SMB/AFP)",
+                   filter: "smb or afp or port == 445 or port == 548"),
         ]),
         Section(title: "── PROTOCOLS ──", presets: [
-            Preset(title: "All DNS Traffic",   filter: "dns"),
-            Preset(title: "All HTTP/HTTPS",    filter: "http or https or tcp 80 or tcp 443"),
-            Preset(title: "All TCP",           filter: "tcp"),
-            Preset(title: "All UDP",           filter: "udp"),
-            Preset(title: "All ARP",           filter: "arp"),
+            Preset(title: "All DNS Traffic",
+                   filter: "dns"),
+            Preset(title: "All HTTP/HTTPS",
+                   filter: "http or https or port == 80 or port == 443"),
+            Preset(title: "All TCP",
+                   filter: "tcp"),
+            Preset(title: "All UDP",
+                   filter: "udp"),
+            Preset(title: "All ARP",
+                   filter: "arp"),
         ]),
     ]
 

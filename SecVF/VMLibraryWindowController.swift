@@ -149,6 +149,23 @@ class VMLibraryWindowController: NSWindowController,
     /// "Focus Running ▾" button in the tabs row.
     private var runningFilterIDs: Set<UUID>?
 
+    // Sidebar categorical filters — populated by the new mockup-spec
+    // sidebar navigation. All three combine AND-style with the
+    // runningFilterIDs set (so the user can ticked-list + status +
+    // OS + network all at once and the table shows the intersection).
+    //
+    // `nil` means "all" for the section. Strings are the row IDs that
+    // each TacticalSidebarSection emits via `onSelect`.
+    private var sidebarStatusFilter: String?    // "running" / "paused" / "stopped"
+    private var sidebarOSFilter: String?        // "linux" / "macos" / "windows"
+    private var sidebarNetworkFilter: String?   // "isolated" / "virtual" / "nat"
+
+    /// Sidebar section views, retained so refreshSidebarCounts can
+    /// update their badges in place without a full layout pass.
+    private var sidebarStatusSection: TacticalSidebarSection?
+    private var sidebarOSSection: TacticalSidebarSection?
+    private var sidebarNetworkSection: TacticalSidebarSection?
+
     /// Button that pops the running-VM filter menu. Hidden when no VMs
     /// are running (nothing to filter to). Title gets a count badge
     /// while a filter is active so the user can see at a glance.
@@ -192,6 +209,12 @@ class VMLibraryWindowController: NSWindowController,
     // selected VM isn't running.
     private var detailConsoleButton: NSButton?
     private var detailCaptureButton: NSButton?
+    // Right-anchored container that holds the metric grid (OS / Uptime /
+    // CPU·RAM / Disk / Network / Rate / Packets). Tracked so
+    // windowDidResize can use its actual minX to clamp the name label's
+    // right edge — without that clamp, long VM names overrun past the
+    // metrics on narrow windows.
+    private var detailMetricsContainer: NSView?
     // Per-VM run timestamps, keyed by UUID. Populated when a VM
     // transitions to .running, cleared when it transitions away.
     private var vmStartedAt: [UUID: Date] = [:]
@@ -317,6 +340,7 @@ class VMLibraryWindowController: NSWindowController,
             self.refreshStatusBar()
             self.refreshEmptyStateOverlays()
             self.refreshConnectionOverlay()
+            self.refreshSidebarCounts()
         }
 
         // Force the table to use view-based mode
@@ -622,6 +646,58 @@ class VMLibraryWindowController: NSWindowController,
     ///
     /// The pill's frame is sized to fit its buttons; the caller positions
     /// the pill's origin.
+    /// Build the toolbar's "More ▾" overflow button — collapses the
+    /// Configure / Clone / Rename trio that used to take three slots
+    /// in the toolbar into a single popup-menu trigger. Each menu item
+    /// fires the same @IBAction selector the original button did, so
+    /// keyboard shortcuts and any other selector-based dispatch paths
+    /// (menu bar, scriptability) keep working unchanged.
+    private func makeMoreActionsButton() -> NSButton {
+        let btn = NSButton(title: "More ▾", target: self,
+                           action: #selector(showMoreActionsMenu(_:)))
+        btn.isBordered = false
+        btn.bezelStyle = .regularSquare
+        btn.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        btn.setAccessibilityLabel("More VM actions")
+        btn.toolTip = "VM actions: Configure, Clone, Rename"
+        // Match the same width / styling the wrapped button-pill
+        // container expects (buttonW = 80 inside the pill, set there).
+        return btn
+    }
+
+    @objc private func showMoreActionsMenu(_ sender: NSButton) {
+        let menu = NSMenu(title: "More VM actions")
+
+        if let cfg = configureButton {
+            let item = NSMenuItem(title: "Configure…",
+                                  action: #selector(configureVM(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = cfg.isEnabled
+            menu.addItem(item)
+        }
+        if let clone = cloneButton {
+            let item = NSMenuItem(title: "Clone…",
+                                  action: #selector(cloneVM(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = clone.isEnabled
+            menu.addItem(item)
+        }
+        if let rename = renameButton {
+            let item = NSMenuItem(title: "Rename…",
+                                  action: #selector(renameVM(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = rename.isEnabled
+            menu.addItem(item)
+        }
+
+        // Position the menu just below the button's bottom-left.
+        let origin = NSPoint(x: 0, y: sender.bounds.height + 2)
+        menu.popUp(positioning: nil, at: origin, in: sender)
+    }
+
     private func makeButtonPillContainer(_ buttons: [NSButton],
                                          borderColor: NSColor = AppColors.borderOD,
                                          fillColor: NSColor = AppColors.backgroundButton.withAlphaComponent(0.55)) -> NSView {
@@ -667,12 +743,11 @@ class VMLibraryWindowController: NSWindowController,
 
         let sidebarWidth: CGFloat = 220
 
-        // Create sidebar view - full height
         let sidebar = NSView(frame: NSRect(x: 0, y: 0, width: sidebarWidth, height: contentView.bounds.height))
         sidebar.autoresizingMask = [.height]
         sidebar.wantsLayer = true
 
-        // Cybersecurity gradient - dark grey to black with blue tint
+        // Tactical gradient — dark gradient anchors the left rail visually
         let gradientLayer = CAGradientLayer()
         gradientLayer.frame = sidebar.bounds
         gradientLayer.colors = [
@@ -684,154 +759,212 @@ class VMLibraryWindowController: NSWindowController,
         gradientLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
         sidebar.layer?.addSublayer(gradientLayer)
 
-        // Logo - CENTERED in sidebar
-        let logoWidth: CGFloat = 170
-        let logoHeight: CGFloat = 120
-        let logoX = (sidebarWidth - logoWidth) / 2  // Center horizontally
-        let logoView = NSImageView(frame: NSRect(x: logoX, y: sidebar.bounds.height - 130, width: logoWidth, height: logoHeight))
-        logoView.imageScaling = .scaleProportionallyUpOrDown
-        logoView.image = createStylizedLogo()
-        logoView.autoresizingMask = [.minYMargin, .minXMargin, .maxXMargin]
-        sidebar.addSubview(logoView)
+        // ── Compact brand block (top) ────────────────────────────────────
+        //
+        // Mockup shows a small hex mark + "SecVF" wordmark + "Security
+        // Virtualization" tag — total ~85pt tall. The previous build had
+        // a 170×120 logo plus a 26pt-heavy title plus a subtitle (~225pt
+        // of brand real estate), which left no room for navigation and
+        // turned the rail into marketing space.
+        let brandH: CGFloat = 88
+        let brandY = sidebar.bounds.height - brandH
+        let brand = makeCompactBrandBlock(width: sidebarWidth)
+        brand.frame = NSRect(x: 0, y: brandY, width: sidebarWidth, height: brandH)
+        brand.autoresizingMask = [.minYMargin, .width]
+        sidebar.addSubview(brand)
 
-        // Title - Two-tone: "Sec" in light gray, "VF" in medium gray - CENTERED
-        let titleLabel = NSTextField()
-        titleLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 170, width: sidebarWidth, height: 35)
-        titleLabel.alignment = .center
-        titleLabel.isBordered = false
-        titleLabel.isEditable = false
-        titleLabel.drawsBackground = false
-        titleLabel.autoresizingMask = [.minYMargin, .width]
+        // ── Filter sections (mockup parity) ──────────────────────────────
+        //
+        // Three stacked TacticalSidebarSection blocks: Filters (status) /
+        // Operating System / Network. Counts get refreshed on every VM
+        // list change via refreshSidebarCounts(). The "All …" row in
+        // each section clears that section's filter.
+        let sectionGap: CGFloat = 16
+        var nextY = brandY - sectionGap
 
-        // Create attributed string with two colors and center alignment
-        let attributedTitle = NSMutableAttributedString()
-        let font = NSFont.monospacedSystemFont(ofSize: 26, weight: .heavy)
-
-        // Create paragraph style for centering
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-
-        // "Sec" in light gray
-        let secPart = NSAttributedString(string: "Sec", attributes: [
-            .font: font,
-            .foregroundColor: AppColors.textLight,
-            .paragraphStyle: paragraphStyle
-        ])
-        attributedTitle.append(secPart)
-
-        // "VF" in medium gray
-        let vfPart = NSAttributedString(string: "VF", attributes: [
-            .font: font,
-            .foregroundColor: AppColors.textMuted,
-            .paragraphStyle: paragraphStyle
-        ])
-        attributedTitle.append(vfPart)
-
-        titleLabel.attributedStringValue = attributedTitle
-        sidebar.addSubview(titleLabel)
-
-        // Subtitle - Light gray - CENTERED
-        let subtitleLabel = NSTextField(labelWithString: "Security Virtualization Framework")
-        subtitleLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 195, width: sidebarWidth, height: 20)
-        subtitleLabel.alignment = .center
-        subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        subtitleLabel.textColor = AppColors.textMuted
-        subtitleLabel.isBordered = false
-        subtitleLabel.isEditable = false
-        subtitleLabel.drawsBackground = false
-        subtitleLabel.autoresizingMask = [.minYMargin, .width]
-        sidebar.addSubview(subtitleLabel)
-
-        // Separator line
-        let separator1 = createSeparator(y: sidebar.bounds.height - 220, width: sidebarWidth)
-        separator1.autoresizingMask = [.minYMargin, .width]
-        sidebar.addSubview(separator1)
-
-        // Stats/Info below title - Medium gray accents - CENTERED
-        let statsLabel = NSTextField(labelWithString: "▸ Malware Analysis\n▸ Isolated Sandbox\n▸ Virtual Networking")
-        statsLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 310, width: sidebarWidth, height: 80)
-        statsLabel.alignment = .center
-        statsLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        statsLabel.textColor = AppColors.textSubtle
-        statsLabel.isBordered = false
-        statsLabel.isEditable = false
-        statsLabel.drawsBackground = false
-        statsLabel.autoresizingMask = [.minYMargin, .width]
-        sidebar.addSubview(statsLabel)
-
-        // Logs section — surfaces the three log viewers from the Monitoring
-        // menu in the sidebar so the user can hop to them without diving
-        // into the menu bar. Buttons dispatch via responder chain so the
-        // AppDelegate's existing @objc handlers are called directly (no
-        // duplicate state, no new notifications needed).
-        let logsHeaderY: CGFloat = sidebar.bounds.height - 340
-        let logsHeader = NSTextField(labelWithString: "LOGS")
-        logsHeader.frame = NSRect(x: 0, y: logsHeaderY, width: sidebarWidth, height: 14)
-        logsHeader.alignment = .center
-        logsHeader.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
-        logsHeader.textColor = AppColors.textSubtle
-        logsHeader.isBordered = false
-        logsHeader.isEditable = false
-        logsHeader.drawsBackground = false
-        logsHeader.autoresizingMask = [.minYMargin, .width]
-        sidebar.addSubview(logsHeader)
-
-        let logButtonsTopY: CGFloat = logsHeaderY - 8
-        let logEntries: [(title: String, selectorName: String, tooltip: String)] = [
-            ("◆ Security",  "showSecurityLogs",
-             "Security events captured by VMSecurityMonitor (suspicious activity, resource pressure, isolation breaches). ⇧⌘1"),
-            ("◆ Network",   "showNetworkLogs",
-             "Per-VM network logs (traffic summaries, switch events, NAT activity). ⇧⌘2"),
-            ("◆ ISO Cache", "showISOCacheLogs",
-             "Distro ISO download/verify activity from ISOCacheManager."),
-        ]
-        let buttonHeight: CGFloat = 26
-        let buttonGap: CGFloat = 4
-        let buttonInset: CGFloat = 16
-        for (i, entry) in logEntries.enumerated() {
-            let btnY = logButtonsTopY - CGFloat(i + 1) * (buttonHeight + buttonGap)
-            let btn = TacticalHoverButton(title: entry.title,
-                                          target: nil,
-                                          action: NSSelectorFromString(entry.selectorName))
-            btn.frame = NSRect(x: buttonInset, y: btnY,
-                               width: sidebarWidth - buttonInset * 2,
-                               height: buttonHeight)
-            btn.isBordered = false
-            btn.bezelStyle = .regularSquare
-            btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-            btn.contentTintColor = AppColors.textPrimary
-            btn.alignment = .left
-            btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
-            btn.layer?.borderColor = AppColors.borderOD.cgColor
-            btn.layer?.borderWidth = 1.0
-            btn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
-            btn.attributedTitle = NSAttributedString(string: "  " + entry.title, attributes: [
-                .foregroundColor: AppColors.textPrimary,
-                .font: NSFont.systemFont(ofSize: 11, weight: .medium)
-            ])
-            btn.toolTip = entry.tooltip
-            btn.autoresizingMask = [.minYMargin, .width]
-            btn.setAccessibilityLabel(entry.title.replacingOccurrences(of: "◆ ", with: "") + " logs")
-            btn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
-            sidebar.addSubview(btn)
+        let statusSection = TacticalSidebarSection(
+            title: "Filters",
+            rows: sidebarStatusRows(counts: [:]))
+        statusSection.frame = NSRect(x: 0, y: nextY - statusSection.intrinsicHeight,
+                                     width: sidebarWidth, height: statusSection.intrinsicHeight)
+        statusSection.autoresizingMask = [.minYMargin, .width]
+        statusSection.selectedID = "all"
+        statusSection.onSelect = { [weak self] id in
+            self?.sidebarStatusFilter = (id == "all") ? nil : id
+            self?.handleSidebarFilterChange()
         }
+        sidebar.addSubview(statusSection)
+        sidebarStatusSection = statusSection
+        nextY = statusSection.frame.minY - sectionGap
 
-        // Separator line above developer info
-        let separator2 = createSeparator(y: 155, width: sidebarWidth)
-        separator2.autoresizingMask = [.maxYMargin, .width]
-        sidebar.addSubview(separator2)
+        let osSection = TacticalSidebarSection(
+            title: "Operating System",
+            rows: sidebarOSRows(counts: [:]))
+        osSection.frame = NSRect(x: 0, y: nextY - osSection.intrinsicHeight,
+                                 width: sidebarWidth, height: osSection.intrinsicHeight)
+        osSection.autoresizingMask = [.minYMargin, .width]
+        osSection.selectedID = "all"
+        osSection.onSelect = { [weak self] id in
+            self?.sidebarOSFilter = (id == "all") ? nil : id
+            self?.handleSidebarFilterChange()
+        }
+        sidebar.addSubview(osSection)
+        sidebarOSSection = osSection
+        nextY = osSection.frame.minY - sectionGap
 
-        // Framework info section at bottom - CENTERED
-        let infoY: CGFloat = 115
-        addInfoLabel(to: sidebar, text: "Built on", y: infoY, bold: false, width: sidebarWidth)
-        addInfoLabel(to: sidebar, text: "Apple Virtualization Framework", y: infoY - 28, bold: true, width: sidebarWidth)
-        addInfoLabel(to: sidebar, text: "github.com/DaxxSec/SecVF", y: infoY - 58, bold: false, color: AppColors.textSubtle, width: sidebarWidth)
+        let netSection = TacticalSidebarSection(
+            title: "Network",
+            rows: sidebarNetworkRows(counts: [:]))
+        netSection.frame = NSRect(x: 0, y: nextY - netSection.intrinsicHeight,
+                                  width: sidebarWidth, height: netSection.intrinsicHeight)
+        netSection.autoresizingMask = [.minYMargin, .width]
+        netSection.selectedID = "all"
+        netSection.onSelect = { [weak self] id in
+            self?.sidebarNetworkFilter = (id == "all") ? nil : id
+            self?.handleSidebarFilterChange()
+        }
+        sidebar.addSubview(netSection)
+        sidebarNetworkSection = netSection
+        nextY = netSection.frame.minY - sectionGap
 
-        // Add sidebar to window
+        // ── LOGS section ─────────────────────────────────────────────────
+        //
+        // Re-implemented in the same TacticalSidebarSection style as the
+        // filter blocks (matching width, glyphs, hover). Tapping a row
+        // dispatches through the responder chain to the AppDelegate's
+        // existing @objc handlers — no new notifications needed.
+        let logsSection = TacticalSidebarSection(
+            title: "Logs",
+            rows: [
+                .init(id: "security",  glyph: "◆", title: "Security",  count: nil),
+                .init(id: "network",   glyph: "◆", title: "Network",   count: nil),
+                .init(id: "iso-cache", glyph: "◆", title: "ISO Cache", count: nil),
+            ])
+        logsSection.frame = NSRect(x: 0, y: nextY - logsSection.intrinsicHeight,
+                                   width: sidebarWidth, height: logsSection.intrinsicHeight)
+        logsSection.autoresizingMask = [.minYMargin, .width]
+        // Logs is *not* a selectable filter — clear the visual selection
+        // after the action fires so the row doesn't read as "active".
+        logsSection.onSelect = { [weak logsSection] id in
+            let selector: Selector
+            switch id {
+            case "security":  selector = NSSelectorFromString("showSecurityLogs")
+            case "network":   selector = NSSelectorFromString("showNetworkLogs")
+            case "iso-cache": selector = NSSelectorFromString("showISOCacheLogs")
+            default: return
+            }
+            NSApp.sendAction(selector, to: nil, from: nil)
+            // Pop the selection — Logs rows are actions, not filters.
+            DispatchQueue.main.async { logsSection?.selectedID = nil }
+        }
+        sidebar.addSubview(logsSection)
+
         contentView.addSubview(sidebar, positioned: .above, relativeTo: nil)
-
-        // Adjust existing content to make room for sidebar
         adjustContentForSidebar(sidebarWidth: sidebarWidth)
+
+        // Initial count populate — Vm list may already be loaded.
+        refreshSidebarCounts()
+    }
+
+    /// Compact brand block. Small hex glyph + "SecVF" wordmark + small
+    /// "Security Virtualization" tag underneath. ~88pt tall vs the
+    /// previous ~225pt marketing block, freeing real estate for actual
+    /// navigation.
+    private func makeCompactBrandBlock(width: CGFloat) -> NSView {
+        let block = NSView()
+
+        let markSize: CGFloat = 28
+        let mark = NSImageView(frame: NSRect(x: (width - markSize) / 2, y: 50,
+                                             width: markSize, height: markSize))
+        mark.image = createStylizedLogo()
+        mark.imageScaling = .scaleProportionallyUpOrDown
+        block.addSubview(mark)
+
+        let titleLabel = NSTextField(labelWithAttributedString: NSAttributedString(
+            string: "SecVF",
+            attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 16, weight: .heavy),
+                .foregroundColor: AppColors.textLight,
+            ]))
+        titleLabel.alignment = .center
+        titleLabel.frame = NSRect(x: 0, y: 24, width: width, height: 20)
+        block.addSubview(titleLabel)
+
+        let tag = NSTextField(labelWithString: "Security Virtualization")
+        tag.font = NSFont.monospacedSystemFont(ofSize: 8, weight: .medium)
+        tag.textColor = AppColors.textMuted
+        tag.alignment = .center
+        tag.frame = NSRect(x: 0, y: 8, width: width, height: 12)
+        block.addSubview(tag)
+
+        return block
+    }
+
+    /// Build the "Filters" section rows (status filter). Each row's
+    /// `count` is the number of VMs in the master list with that status.
+    /// Passed an empty dict on initial build before `refreshSidebarCounts`
+    /// has populated the live numbers.
+    private func sidebarStatusRows(counts: [String: Int]) -> [TacticalSidebarSection.Row] {
+        return [
+            .init(id: "all",     glyph: "▣", title: "All VMs",  count: counts["all"]),
+            .init(id: "running", glyph: "●", title: "Running",  count: counts["running"]),
+            .init(id: "paused",  glyph: "◐", title: "Paused",   count: counts["paused"]),
+            .init(id: "stopped", glyph: "○", title: "Stopped",  count: counts["stopped"]),
+        ]
+    }
+
+    private func sidebarOSRows(counts: [String: Int]) -> [TacticalSidebarSection.Row] {
+        return [
+            .init(id: "all",     glyph: "▾", title: "All",     count: counts["all"]),
+            .init(id: "linux",   glyph: "🐧", title: "Linux",   count: counts["linux"]),
+            .init(id: "macos",   glyph: "⌘", title: "macOS",   count: counts["macos"]),
+            .init(id: "windows", glyph: "▩", title: "Windows", count: counts["windows"]),
+        ]
+    }
+
+    private func sidebarNetworkRows(counts: [String: Int]) -> [TacticalSidebarSection.Row] {
+        return [
+            .init(id: "all",      glyph: "▾", title: "All",      count: counts["all"]),
+            .init(id: "isolated", glyph: "⊘", title: "Isolated", count: counts["isolated"]),
+            .init(id: "virtual",  glyph: "⇄", title: "Virtual",  count: counts["virtual"]),
+            .init(id: "nat",      glyph: "🌐", title: "NAT",      count: counts["nat"]),
+        ]
+    }
+
+    /// Recompute the per-section count badges from the current VM list.
+    /// Called on every VM status / list change so the badges stay
+    /// honest. Cheap — three full-list walks.
+    func refreshSidebarCounts() {
+        let vms = vmManager.virtualMachines
+
+        var statusCounts: [String: Int] = ["all": vms.count]
+        statusCounts["running"] = vms.filter { Self.matchesStatusFilter($0.status, id: "running") }.count
+        statusCounts["paused"]  = vms.filter { Self.matchesStatusFilter($0.status, id: "paused")  }.count
+        statusCounts["stopped"] = vms.filter { Self.matchesStatusFilter($0.status, id: "stopped") }.count
+        sidebarStatusSection?.refreshCounts(statusCounts)
+
+        var osCounts: [String: Int] = ["all": vms.count]
+        osCounts["linux"]   = vms.filter { Self.matchesOSFilter($0.osType, id: "linux")   }.count
+        osCounts["macos"]   = vms.filter { Self.matchesOSFilter($0.osType, id: "macos")   }.count
+        osCounts["windows"] = vms.filter { Self.matchesOSFilter($0.osType, id: "windows") }.count
+        sidebarOSSection?.refreshCounts(osCounts)
+
+        var netCounts: [String: Int] = ["all": vms.count]
+        netCounts["isolated"] = vms.filter { Self.matchesNetworkFilter($0.networkConfig, id: "isolated") }.count
+        netCounts["virtual"]  = vms.filter { Self.matchesNetworkFilter($0.networkConfig, id: "virtual")  }.count
+        netCounts["nat"]      = vms.filter { Self.matchesNetworkFilter($0.networkConfig, id: "nat")      }.count
+        sidebarNetworkSection?.refreshCounts(netCounts)
+    }
+
+    /// Called when any sidebar filter section changes. Re-renders the
+    /// table to honor the new combined filter, refreshes the connection
+    /// overlay (rows may have changed), and updates the detail card +
+    /// quick-action button enablement.
+    private func handleSidebarFilterChange() {
+        tableView?.reloadData()
+        refreshConnectionOverlay()
+        updateSelectedVMDetailCard()
+        refreshEmptyStateOverlays()
     }
 
     private func createProtocolLegend(width: CGFloat, height: CGFloat) -> NSView {
@@ -1171,15 +1304,29 @@ class VMLibraryWindowController: NSWindowController,
 
         toolbarPillContainers.forEach { $0.removeFromSuperview() }
 
+        // Configure / Clone / Rename collapsed into a single "More ▾"
+        // overflow button. They were three persistent toolbar buttons
+        // for actions taken occasionally; the menu version saves visible
+        // pill width without losing the action paths (each menu item
+        // calls the same @IBAction the original button did).
+        let moreButton = makeMoreActionsButton()
+
         let pills: [NSView] = [
             makeButtonPillContainer([startButton].compactMap { $0 },
                                     borderColor: AppColors.accentODGlow.withAlphaComponent(0.7),
                                     fillColor: AppColors.accentOD.withAlphaComponent(0.18)),
             makeButtonPillContainer([newButton, importButton].compactMap { $0 }),
-            makeButtonPillContainer([configureButton, cloneButton, renameButton].compactMap { $0 }),
+            makeButtonPillContainer([moreButton]),
             makeButtonPillContainer([deleteButton].compactMap { $0 },
                                     borderColor: AppColors.accentRed.withAlphaComponent(0.6)),
         ]
+
+        // The wrapped Configure / Clone / Rename buttons no longer
+        // appear in the toolbar but stay as @IBOutlet bindings so the
+        // menu can fire their @IBAction selectors. Pull them out of
+        // any prior pill container so they don't paint twice.
+        [configureButton, cloneButton, renameButton].compactMap { $0 }
+            .forEach { $0.removeFromSuperview() }
 
         var px = tableX
         for pill in pills {
@@ -1241,8 +1388,13 @@ class VMLibraryWindowController: NSWindowController,
         let valueH: CGFloat = 20
         let captionY: CGFloat = 41
         let captionH: CGFloat = 12
-        let pillW: CGFloat = 96       // bumped 84→96 so "◆ TEMPLATE" / "● RUNNING" have breathing room
+        let pillW: CGFloat = 80       // tight to longest content ("◆ TEMPLATE" ~70pt); centered text reads clean without dead space
         let pillH: CGFloat = 22
+        // Initial name-label width — actual width is recomputed in
+        // windowDidResize to fill the gap between the pill and the
+        // right-anchored metrics container, so the name truncates
+        // gracefully on narrow windows instead of overrunning into
+        // the metric grid.
         let nameW: CGFloat = 200
         let gapMetric: CGFloat = LayoutConstants.spacingLG     // 16pt between metric cells (was 12)
 
@@ -1262,6 +1414,10 @@ class VMLibraryWindowController: NSWindowController,
                                  y: valueY,
                                  width: nameW, height: valueH)
         nameLabel.lineBreakMode = .byTruncatingTail
+        // Width is recomputed in windowDidResize to fill the gap between
+        // the pill and the right-anchored metrics container. Pin the
+        // label's left edge so it doesn't drift with the card's resize.
+        nameLabel.autoresizingMask = [.width]
         nameLabel.setAccessibilityLabel("Selected VM name")
         card.addSubview(nameLabel)
         detailNameLabel = nameLabel
@@ -1270,12 +1426,18 @@ class VMLibraryWindowController: NSWindowController,
         // Compute total width: 5 cells with their widths + 4 gaps + leading
         // divider region. The container's x = card.width - totalW - cellPadding,
         // and .minXMargin autoresizing keeps it glued to the right edge.
-        let osW: CGFloat = 120       // trimmed -10 to make room for action buttons
-        let uptimeW: CGFloat = 80    // "12h 47m" / "—"
-        let cpuW: CGFloat = 110
-        let diskW: CGFloat = 110
-        let netModeW: CGFloat = 100
-        let rateW: CGFloat = 150     // trimmed -10; "host-routed" still fits
+        // Metric widths sized to fit the longest realistic value at the
+        // monospaced body font (~7.5pt per char). Tighter than the first
+        // pass — the original widths overflowed the card at the default
+        // 1200pt window width, which is what was pushing the VM-name
+        // label past its visible area before windowDidResize ran the
+        // dynamic-truncation logic.
+        let osW: CGFloat = 100       // "Kali 2024.1" / "macOS 15.2" / "Linux"
+        let uptimeW: CGFloat = 70    // "12h 47m" / "3d 4h" / "—"
+        let cpuW: CGFloat = 95       // "4 · 4.0 GB"
+        let diskW: CGFloat = 110     // "108 / 256 GB" — keep generous for big drives
+        let netModeW: CGFloat = 80   // "VIRTUAL" / "ROUTER" / "NAT"
+        let rateW: CGFloat = 150     // "100 kB/s ↓  50 kB/s ↑"
         let packetsW: CGFloat = 90   // "1,234,567" upper bound for a long capture
         let dividerW: CGFloat = 1
         let dividerGap: CGFloat = LayoutConstants.spacingLG  // gap divider → first metric cell
@@ -1330,6 +1492,7 @@ class VMLibraryWindowController: NSWindowController,
                                width: metricsW, height: frame.height)
         metrics.autoresizingMask = [.minXMargin]
         card.addSubview(metrics)
+        detailMetricsContainer = metrics
 
         // Vertical divider between identity and metrics — sits at x=0 inside
         // the metrics container so it's flush with the metric grid's left
@@ -1434,6 +1597,14 @@ class VMLibraryWindowController: NSWindowController,
         contentView.addSubview(card)
         selectedVMDetailCard = card
 
+        // Initial sizing pass for the name label. Without this the first
+        // paint uses the static 200pt width set above and the label can
+        // overrun into the metrics container at the default window
+        // width (the metrics+actions cluster needs more horizontal room
+        // than the card has at minWindowWidth). windowDidResize fires
+        // it again on every resize.
+        resizeDetailNameLabelToFit()
+
         // Populate with whatever the table currently has selected (if anything)
         updateSelectedVMDetailCard()
     }
@@ -1530,6 +1701,24 @@ class VMLibraryWindowController: NSWindowController,
     /// cornerRadius is half the pill height = perfect capsule. Caller sizes
     /// the pill to ~96 × 22pt so the centered "◆ TEMPLATE" / "● RUNNING"
     /// content has ~10pt of horizontal breathing room.
+    /// Clamp the detail-card name label's width so its right edge sits
+    /// just inside the metrics container's left edge. Without this, a
+    /// long VM name on a narrow window overruns the card's identity
+    /// area and visually collides with the OS / Uptime cells. The label
+    /// uses `.byTruncatingTail`, so the right behavior is "shrink the
+    /// frame and let AppKit ellipsize" — never let the frame extend
+    /// past the metrics container.
+    private func resizeDetailNameLabelToFit() {
+        guard let name = detailNameLabel,
+              let metrics = detailMetricsContainer else { return }
+        let gap: CGFloat = LayoutConstants.spacingSM
+        let rightLimit = metrics.frame.minX - gap
+        let available = max(40, rightLimit - name.frame.minX)
+        var f = name.frame
+        f.size.width = available
+        name.frame = f
+    }
+
     private func makeStatusPill() -> NSTextField {
         let pill = NSTextField(labelWithString: "—")
         pill.alignment = .center
@@ -1981,9 +2170,54 @@ class VMLibraryWindowController: NSWindowController,
     /// action handlers) must read through this — never `vmManager.virtualMachines`
     /// directly — so row indices stay consistent with what's on screen.
     private var displayedStandardVMs: [VMConfiguration] {
-        let all = vmManager.virtualMachines
-        guard let ids = runningFilterIDs, !ids.isEmpty else { return all }
-        return all.filter { ids.contains($0.id) }
+        var list = vmManager.virtualMachines
+        if let ids = runningFilterIDs, !ids.isEmpty {
+            list = list.filter { ids.contains($0.id) }
+        }
+        if let id = sidebarStatusFilter {
+            list = list.filter { Self.matchesStatusFilter($0.status, id: id) }
+        }
+        if let id = sidebarOSFilter {
+            list = list.filter { Self.matchesOSFilter($0.osType, id: id) }
+        }
+        if let id = sidebarNetworkFilter {
+            list = list.filter { Self.matchesNetworkFilter($0.networkConfig, id: id) }
+        }
+        return list
+    }
+
+    // MARK: - Sidebar filter predicates (pure, testable)
+
+    static func matchesStatusFilter(_ status: VMStatus, id: String) -> Bool {
+        switch id {
+        case "running":  return status == .running
+        case "paused":   return status == .starting || status == .stopping
+        case "stopped":  return status == .stopped
+        default:         return true
+        }
+    }
+
+    static func matchesOSFilter(_ osType: String, id: String) -> Bool {
+        let lower = osType.lowercased()
+        switch id {
+        case "linux":   return lower.contains("linux")
+        case "macos":   return lower.contains("mac")
+        case "windows": return lower.contains("windows")
+        default:        return true
+        }
+    }
+
+    static func matchesNetworkFilter(_ config: VirtualNetworkConfig, id: String) -> Bool {
+        switch id {
+        case "nat":      return config.mode == .nat
+        case "virtual":  return config.mode == .virtual
+        case "isolated":
+            // "Isolated" in the mockup means "virtual-mode with no router
+            // assigned and not acting as a router itself" — purely
+            // isolated, no internet access path.
+            return config.mode == .virtual && config.routerVMId == nil && !config.isRouter
+        default: return true
+        }
     }
 
     /// Safe row→VM lookup against the currently-displayed standard list.
@@ -3512,6 +3746,13 @@ class VMLibraryWindowController: NSWindowController,
         // Detail card stays at fixed Y (autoresize handles its width).
         selectedVMDetailCard?.frame.origin.y = detailCardY
 
+        // Detail card's name label is fixed-width by default but
+        // gets resized here to fill the gap between the pill and the
+        // right-anchored metrics container — without this, narrow
+        // windows let a long VM name overrun past the metrics into
+        // the void on the right of the card.
+        resizeDetailNameLabelToFit()
+
         // (Active VMs / Legend panels were removed; no right-side re-anchor.)
 
         // Packet panel sits just above the bottom status bar.
@@ -3547,6 +3788,10 @@ class VMLibraryWindowController: NSWindowController,
 
             // Re-evaluate VM-VM connection brackets on running pills
             self.refreshConnectionOverlay()
+
+            // Refresh sidebar count badges — a VM moving Running→Stopped
+            // changes which section bucket it falls into.
+            self.refreshSidebarCounts()
         }
     }
 
@@ -3853,9 +4098,11 @@ class VMLibraryWindowController: NSWindowController,
             tableView?.reloadData()
             refreshConnectionOverlay()
             updateSelectedVMDetailCard()
-            // NB: when this branch merges atop the sidebar-filter-nav
-            // branch (#14), also call refreshSidebarCounts() here so
-            // the Network section's count badges reflect the cycle.
+            // Sidebar Network section's count badges (Isolated /
+            // Virtual / NAT) bucketize by `networkConfig.mode` and
+            // router relationships — cycling changes both, so the
+            // counts need to refresh.
+            refreshSidebarCounts()
         } catch {
             showAlert(message: error.localizedDescription)
         }
@@ -4747,6 +4994,7 @@ class VMLibraryWindowController: NSWindowController,
             self.updateButtonStates()
             self.refreshEmptyStateOverlays()
             self.refreshConnectionOverlay()
+            self.refreshSidebarCounts()
         }
     }
 
