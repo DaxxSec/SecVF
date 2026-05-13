@@ -39,6 +39,7 @@
 		LCT002LCT002LCT002002 /* LayoutConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */; };
 		ACT002ACT002ACT002002 /* AppColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACT001ACT001ACT001001 /* AppColorsTests.swift */; };
 		VCBC002VCBC002VCBC002002 /* VMConfigurationBackwardCompatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VCBC001VCBC001VCBC001001 /* VMConfigurationBackwardCompatTests.swift */; };
+		SVET002SVET002SVET002002 /* SecVFErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SVET001SVET001SVET001001 /* SecVFErrorTests.swift */; };
 		AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */; };
 		BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */; };
 		VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */; };
@@ -128,6 +129,7 @@
 		LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstantsTests.swift; sourceTree = "<group>"; };
 		ACT001ACT001ACT001001 /* AppColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColorsTests.swift; sourceTree = "<group>"; };
 		VCBC001VCBC001VCBC001001 /* VMConfigurationBackwardCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationBackwardCompatTests.swift; sourceTree = "<group>"; };
+		SVET001SVET001SVET001001 /* SecVFErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFErrorTests.swift; sourceTree = "<group>"; };
 		AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxNodeTests.swift; sourceTree = "<group>"; };
 		BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStatsTests.swift; sourceTree = "<group>"; };
 		VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerBundleSizeTests.swift; sourceTree = "<group>"; };
@@ -295,6 +297,7 @@
 				LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */,
 				ACT001ACT001ACT001001 /* AppColorsTests.swift */,
 				VCBC001VCBC001VCBC001001 /* VMConfigurationBackwardCompatTests.swift */,
+				SVET001SVET001SVET001001 /* SecVFErrorTests.swift */,
 				AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */,
 				BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */,
 				VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */,
@@ -492,6 +495,7 @@
 				LCT002LCT002LCT002002 /* LayoutConstantsTests.swift in Sources */,
 				ACT002ACT002ACT002002 /* AppColorsTests.swift in Sources */,
 				VCBC002VCBC002VCBC002002 /* VMConfigurationBackwardCompatTests.swift in Sources */,
+				SVET002SVET002SVET002002 /* SecVFErrorTests.swift in Sources */,
 				AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */,
 				BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */,
 				VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */,
