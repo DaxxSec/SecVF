@@ -143,22 +143,23 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         autoScrollCheckbox = NSButton(checkboxWithTitle: "Auto-scroll", target: self, action: #selector(toggleAutoScroll(_:)))
         autoScrollCheckbox.frame = NSRect(x: xOffset, y: 47, width: 100, height: 24)
         autoScrollCheckbox.state = .on
-        autoScrollCheckbox.contentTintColor = NSColor.white
+        autoScrollCheckbox.contentTintColor = AppColors.textPrimary
+        autoScrollCheckbox.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
         autoScrollCheckbox.toolTip = "Follow new packets as they arrive (jump to the latest row)"
         toolbarView.addSubview(autoScrollCheckbox)
 
         // Row 2: Filter with preset dropdown
         let filterLabel = NSTextField(labelWithString: "Filter:")
         filterLabel.frame = NSRect(x: 15, y: 10, width: 45, height: 24)
-        filterLabel.textColor = NSColor.white
-        filterLabel.font = NSFont.systemFont(ofSize: 12)
+        filterLabel.textColor = AppColors.textPrimary
+        filterLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
         toolbarView.addSubview(filterLabel)
 
         // Preset filters popup — built from the shared catalog in
         // PacketFilterPresets so the library window's Filter button shows
         // the exact same menu.
         let presetPopup = NSPopUpButton(frame: NSRect(x: 60, y: 10, width: 180, height: 24), pullsDown: true)
-        presetPopup.font = NSFont.systemFont(ofSize: 10)
+        presetPopup.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeSmall)
         presetPopup.addItem(withTitle: "⚡ Malware Analysis Filters")
         // Append directly onto the popup's existing menu so the title
         // item created above is preserved — no allocate-then-copy.
@@ -194,7 +195,14 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         scrollView.autoresizingMask = [.width, .height]
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
-        scrollView.borderType = .bezelBorder
+        // Tactical-style 1pt OD border instead of macOS's bevel — the
+        // bevel reads as classic Aqua and conflicts with the dark
+        // tactical palette the library window uses.
+        scrollView.borderType = .noBorder
+        scrollView.wantsLayer = true
+        scrollView.layer?.borderColor = AppColors.borderOD.cgColor
+        scrollView.layer?.borderWidth = LayoutConstants.borderHairline
+        scrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
 
         packetTableView = NSTableView(frame: scrollView.bounds)
         packetTableView.style = .plain
@@ -222,7 +230,10 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
             column.title = col.title
             column.width = col.width
             column.minWidth = 40
-            column.headerCell.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+            // Tactical header cells (uppercase, monospaced, OD-tinted)
+            // matching the library window's table — packet window now
+            // reads as the same product not a separate tool.
+            column.headerCell = TacticalTableHeaderCell(textCell: col.title)
             packetTableView.addTableColumn(column)
         }
 
@@ -254,17 +265,23 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         let detailY: CGFloat = 35
         let detailHeight = tableY - detailY - 10
 
-        let detailLabel = NSTextField(labelWithString: "Packet Details:")
-        detailLabel.frame = NSRect(x: 15, y: tableY - 25, width: 150, height: 20)
-        detailLabel.textColor = AppColors.accentODGlow
-        detailLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
+        // Match the library window's `▸ LIVE TRAFFIC` orange-accented
+        // panel header so the two windows read as the same product.
+        let detailLabel = NSTextField(labelWithString: "▸ PACKET DETAILS")
+        detailLabel.frame = NSRect(x: 15, y: tableY - 25, width: 200, height: 20)
+        detailLabel.textColor = AppColors.accentOrange
+        detailLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .bold)
         detailLabel.autoresizingMask = [.minYMargin]
         contentView.addSubview(detailLabel)
 
         let detailScrollView = NSScrollView(frame: NSRect(x: 10, y: detailY, width: width - 20, height: detailHeight))
         detailScrollView.autoresizingMask = [.width, .height]
         detailScrollView.hasVerticalScroller = true
-        detailScrollView.borderType = .bezelBorder
+        detailScrollView.borderType = .noBorder
+        detailScrollView.wantsLayer = true
+        detailScrollView.layer?.borderColor = AppColors.borderOD.cgColor
+        detailScrollView.layer?.borderWidth = LayoutConstants.borderHairline
+        detailScrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
 
         detailTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: width - 20, height: detailHeight))
         detailTextView.isEditable = false
@@ -297,10 +314,24 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         updateButtonStates()
     }
 
+    /// Tactical toolbar button matching the library window's pill style.
+    /// Replaces the previous stock `.rounded` AppKit bezel which read as
+    /// classic Aqua and clashed with the dark tactical palette.
     private func createToolbarButton(title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .rounded
-        button.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let button = TacticalHoverButton(title: title, target: self, action: action)
+        button.isBordered = false
+        button.bezelStyle = .regularSquare
+        button.wantsLayer = true
+        button.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        button.layer?.borderColor = AppColors.borderOD.cgColor
+        button.layer?.borderWidth = LayoutConstants.borderHairline
+        button.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        button.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        ])
+        button.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
         return button
     }
 
