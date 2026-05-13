@@ -424,11 +424,20 @@ class ISOCacheManager {
         print("[Cache] Deleted cached image: \(path)")
     }
 
-    /// Get download information for a Linux distribution
-    func getDistributionInfo(for distro: LinuxDistro) -> (releaseDate: Date, lastDownloaded: Date?, isCached: Bool) {
+    /// Get download information for a Linux distribution.
+    ///
+    /// - `cachedVersion`: when the ISO is cached, the version string parsed
+    ///   from the filename (e.g. "2024.2" from `kali-linux-2024.2-installer-arm64.iso`,
+    ///   or "24.04.1" from `ubuntu-24.04.1-desktop-amd64.iso`). Falls back to
+    ///   the filename's stem when no recognizable version is present. nil
+    ///   when nothing is cached.
+    func getDistributionInfo(for distro: LinuxDistro)
+        -> (releaseDate: Date, lastDownloaded: Date?, isCached: Bool, cachedVersion: String?)
+    {
         let imagePath = getImagePath(for: .linux(distro: distro, version: distro.version))
         var lastDownloaded: Date? = nil
         var isCached = false
+        var cachedVersion: String? = nil
 
         // Check if ISO is cached and get its modification date
         if let contents = try? FileManager.default.contentsOfDirectory(atPath: imagePath) {
@@ -441,12 +450,33 @@ class ISOCacheManager {
                        let modDate = attrs[.modificationDate] as? Date {
                         lastDownloaded = modDate
                     }
+                    cachedVersion = Self.extractVersion(fromISOFilename: file)
                     break
                 }
             }
         }
 
-        return (distro.releaseDate, lastDownloaded, isCached)
+        return (distro.releaseDate, lastDownloaded, isCached, cachedVersion)
+    }
+
+    /// Pull a recognizable version (e.g. "2024.2", "24.04.1") out of a Linux
+    /// ISO filename. Falls back to the filename stem when no version-like
+    /// token is found so the caller can still surface something concrete.
+    static func extractVersion(fromISOFilename filename: String) -> String? {
+        let stem = filename.hasSuffix(".iso")
+            ? String(filename.dropLast(4))
+            : filename
+        // Look for a dotted-numeric token: 1+ digits, dot, 1+ digits,
+        // optionally one more `.digits` group. Matches "2024.2",
+        // "24.04.1", "12.5.0", "6.0", but not "amd64" / "arm64".
+        let pattern = #"\d+\.\d+(\.\d+)?"#
+        if let regex = try? NSRegularExpression(pattern: pattern),
+           let match = regex.firstMatch(in: stem,
+                                        range: NSRange(stem.startIndex..., in: stem)),
+           let r = Range(match.range, in: stem) {
+            return String(stem[r])
+        }
+        return stem.isEmpty ? nil : stem
     }
 
     // MARK: - Private Helpers

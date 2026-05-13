@@ -3880,13 +3880,19 @@ class VMLibraryWindowController: NSWindowController,
         versionSpinner.isHidden = true
         view.addSubview(versionSpinner)
 
-        // ISO Cache Status Label (below version dropdown)
+        // ISO Cache Status Label (below version dropdown). Two lines tall:
+        // line 1 shows version, line 2 shows download date. Frame height
+        // bumped to 32 to fit both at 11pt; .byWordWrapping handles the
+        // wrap on the explicit "\n" we insert when populating the value.
         let isoCacheStatusLabel = NSTextField(labelWithString: "")
-        isoCacheStatusLabel.frame = NSRect(x: 110, y: 230, width: 280, height: 20)
+        isoCacheStatusLabel.frame = NSRect(x: 110, y: 218, width: 280, height: 32)
         isoCacheStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         isoCacheStatusLabel.isEditable = false
         isoCacheStatusLabel.isBordered = false
         isoCacheStatusLabel.drawsBackground = false
+        isoCacheStatusLabel.usesSingleLineMode = false
+        isoCacheStatusLabel.maximumNumberOfLines = 2
+        isoCacheStatusLabel.lineBreakMode = .byWordWrapping
         view.addSubview(isoCacheStatusLabel)
 
         // Delegate to handle dynamic UI updates
@@ -4104,18 +4110,29 @@ class VMLibraryWindowController: NSWindowController,
                 let distroInfo = ISOCacheManager.shared.getDistributionInfo(for: linuxDistro)
 
                 if distroInfo.isCached, let downloadDate = distroInfo.lastDownloaded {
-                    // ISO is cached - show green text
+                    // ISO is cached — show version + date on two lines so
+                    // the user sees what "Latest" actually resolved to last
+                    // time it downloaded.
                     let formatter = DateFormatter()
                     formatter.dateStyle = .medium
                     formatter.timeStyle = .short
                     let dateString = formatter.string(from: downloadDate)
 
-                    isoCacheStatusLabel.stringValue = "ISO Cached! (downloaded: \(dateString))"
-                    isoCacheStatusLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 0.2, alpha: 1.0) // Green
+                    let versionLine: String
+                    if let v = distroInfo.cachedVersion, !v.isEmpty {
+                        versionLine = "ISO Cached · v\(v)"
+                    } else {
+                        versionLine = "ISO Cached"
+                    }
+                    isoCacheStatusLabel.stringValue =
+                        "\(versionLine)\ndownloaded \(dateString)"
+                    isoCacheStatusLabel.textColor = AppColors.statusRunning
+                    isoCacheStatusLabel.maximumNumberOfLines = 2
+                    isoCacheStatusLabel.lineBreakMode = .byWordWrapping
                 } else {
                     // ISO not cached - show red text
                     isoCacheStatusLabel.stringValue = "Will download latest ISO"
-                    isoCacheStatusLabel.textColor = NSColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1.0) // Red
+                    isoCacheStatusLabel.textColor = AppColors.accentRed
                 }
             }
 
