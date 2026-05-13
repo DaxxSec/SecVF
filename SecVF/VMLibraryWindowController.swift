@@ -137,6 +137,12 @@ class VMLibraryWindowController: NSWindowController,
     // changes.
     private var connectionOverlay: VMConnectionOverlayView?
 
+    // Left-edge overlay that cascades small "packet" dots down each row
+    // whose VM is running with non-zero network activity. Pure eyecandy
+    // (relocated from the deleted right-panel NetworkTrafficView); the
+    // overlay drives its own 30 fps timer and auto-stops when idle.
+    private var trafficFallOverlay: VMTrafficFallOverlayView?
+
     /// Optional set of VM UUIDs to focus the standard-tab table on.
     /// `nil` (default) means "show every VM"; a non-nil set means
     /// "show only the rows whose IDs are in this set". Driven by the
@@ -248,6 +254,19 @@ class VMLibraryWindowController: NSWindowController,
             overlay.autoresizingMask = [.width, .height]
             tableView.addSubview(overlay)
             connectionOverlay = overlay
+        }
+
+        // Traffic-fall overlay sits on the LEFT edge of each row (4-10pt
+        // strip) and is purely decorative. Added BELOW the connection
+        // overlay z-wise (which lives on the right gutter) so the two
+        // never visually overlap. Same coordinate trick: subview of the
+        // table, autoresize to track.
+        if let tableView = tableView, trafficFallOverlay == nil {
+            let overlay = VMTrafficFallOverlayView(frame: tableView.bounds)
+            overlay.tableView = tableView
+            overlay.autoresizingMask = [.width, .height]
+            tableView.addSubview(overlay, positioned: .below, relativeTo: connectionOverlay)
+            trafficFallOverlay = overlay
         }
 
         // Programmatically append a Traffic column at the end of whatever
@@ -1460,7 +1479,33 @@ class VMLibraryWindowController: NSWindowController,
             // Update only the Traffic column to keep the sparklines fresh
             // without re-rendering every cell on every tick.
             refreshTrafficColumn()
+            // Push per-row intensities into the falling-packets overlay
+            // so the decorative cascade tracks real activity.
+            refreshTrafficFallOverlay()
         }
+    }
+
+    /// Compute per-row intensities (0..1) from the latest rate samples and
+    /// hand them to `trafficFallOverlay`. The overlay handles its own
+    /// timer / spawning / drawing — the controller just needs to publish
+    /// the activity map.
+    ///
+    /// Intensity is `min(1, totalBps / 1 MB/s)` clamped: 1 MB/s of mixed
+    /// rx+tx maps to a fully-saturated cascade, anything heavier still
+    /// caps at 1.0 so we don't burn a runaway spawn rate on busy guests.
+    private func refreshTrafficFallOverlay() {
+        guard let overlay = trafficFallOverlay,
+              currentLibraryTab == .standard else { return }
+        let vms = displayedStandardVMs
+        var intensities: [Int: Double] = [:]
+        let saturation: Double = 1_048_576.0   // 1 MB/s
+        for (i, vm) in vms.enumerated() where vm.status == .running {
+            guard let rate = liveRateBps[vm.name] else { continue }
+            let total = rate.down + rate.up
+            guard total > 0 else { continue }
+            intensities[i] = min(1.0, total / saturation)
+        }
+        overlay.setActiveRows(intensities)
     }
 
     /// Append a (down + up) bytes/sec sample to the rolling buffer for `vmName`,
