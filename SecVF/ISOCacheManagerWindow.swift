@@ -214,7 +214,8 @@ class ISOCacheManagerWindow: NSWindowController, NSTableViewDataSource, NSTableV
         button.isBordered = true
         button.target = self
         button.action = action
-        button.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        button.font = NSFont.systemFont(
+            ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
         return button
     }
 

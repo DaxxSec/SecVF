@@ -888,7 +888,8 @@ class VMLibraryWindowController: NSWindowController,
         let titleLabel = NSTextField(labelWithAttributedString: NSAttributedString(
             string: "SecVF",
             attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 16, weight: .heavy),
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: LayoutConstants.fontSizeHeader, weight: .heavy),
                 .foregroundColor: AppColors.textLight,
             ]))
         titleLabel.alignment = .center
@@ -1143,7 +1144,9 @@ class VMLibraryWindowController: NSWindowController,
         let label = NSTextField(labelWithString: text)
         label.frame = NSRect(x: 0, y: y, width: width, height: 20)
         label.alignment = .center
-        label.font = bold ? NSFont.systemFont(ofSize: 13, weight: .bold) : NSFont.systemFont(ofSize: 11, weight: .regular)
+        label.font = bold
+            ? NSFont.systemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .bold)
+            : NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
         label.textColor = color
         label.isBordered = false
         label.isEditable = false
@@ -1628,7 +1631,7 @@ class VMLibraryWindowController: NSWindowController,
         btn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
         btn.attributedTitle = NSAttributedString(string: title, attributes: [
             .foregroundColor: AppColors.textPrimary,
-            .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+            .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .medium)
         ])
         btn.toolTip = tooltip
         btn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
@@ -2939,8 +2942,8 @@ class VMLibraryWindowController: NSWindowController,
         let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
         arpCheckbox.frame = NSRect(x: 188, y: packetPanelHeight - 56, width: 90, height: 22)
         arpCheckbox.state = .on  // Checked by default
-        arpCheckbox.font = NSFont.systemFont(ofSize: 11)
-        arpCheckbox.contentTintColor = NSColor.white
+        arpCheckbox.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody)
+        arpCheckbox.contentTintColor = AppColors.textPrimary
         packetPanel.addSubview(arpCheckbox)
 
         // ARP filtered count label.
