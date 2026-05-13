@@ -37,6 +37,7 @@
 		PFPT002PFPT002PFPT002002 /* PacketFilterPresetsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */; };
 		OVLT002OVLT002OVLT002002 /* OverlayViewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OVLT001OVLT001OVLT001001 /* OverlayViewsTests.swift */; };
 		LCT002LCT002LCT002002 /* LayoutConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */; };
+		ACT002ACT002ACT002002 /* AppColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACT001ACT001ACT001001 /* AppColorsTests.swift */; };
 		AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */; };
 		BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */; };
 		VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */; };
@@ -124,6 +125,7 @@
 		PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketFilterPresetsTests.swift; sourceTree = "<group>"; };
 		OVLT001OVLT001OVLT001001 /* OverlayViewsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayViewsTests.swift; sourceTree = "<group>"; };
 		LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstantsTests.swift; sourceTree = "<group>"; };
+		ACT001ACT001ACT001001 /* AppColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColorsTests.swift; sourceTree = "<group>"; };
 		AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxNodeTests.swift; sourceTree = "<group>"; };
 		BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStatsTests.swift; sourceTree = "<group>"; };
 		VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerBundleSizeTests.swift; sourceTree = "<group>"; };
@@ -289,6 +291,7 @@
 				PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */,
 				OVLT001OVLT001OVLT001001 /* OverlayViewsTests.swift */,
 				LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */,
+				ACT001ACT001ACT001001 /* AppColorsTests.swift */,
 				AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */,
 				BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */,
 				VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */,
@@ -484,6 +487,7 @@
 				PFPT002PFPT002PFPT002002 /* PacketFilterPresetsTests.swift in Sources */,
 				OVLT002OVLT002OVLT002002 /* OverlayViewsTests.swift in Sources */,
 				LCT002LCT002LCT002002 /* LayoutConstantsTests.swift in Sources */,
+				ACT002ACT002ACT002002 /* AppColorsTests.swift in Sources */,
 				AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */,
 				BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */,
 				VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */,
