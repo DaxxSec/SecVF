@@ -146,81 +146,19 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         filterLabel.font = NSFont.systemFont(ofSize: 12)
         toolbarView.addSubview(filterLabel)
 
-        // Preset filters popup - MALWARE ANALYSIS FOCUSED
+        // Preset filters popup — built from the shared catalog in
+        // PacketFilterPresets so the library window's Filter button shows
+        // the exact same menu.
         let presetPopup = NSPopUpButton(frame: NSRect(x: 60, y: 10, width: 180, height: 24), pullsDown: true)
         presetPopup.font = NSFont.systemFont(ofSize: 10)
         presetPopup.addItem(withTitle: "⚡ Malware Analysis Filters")
-        presetPopup.menu?.addItem(NSMenuItem.separator())
-
-        // === C2 (Command & Control) Detection ===
-        let c2Header = NSMenuItem(title: "── C2 DETECTION ──", action: nil, keyEquivalent: "")
-        c2Header.isEnabled = false
-        presetPopup.menu?.addItem(c2Header)
-
-        presetPopup.addItem(withTitle: "Non-Apple DNS (Suspicious)")
-        presetPopup.addItem(withTitle: "Direct IP Connections (No DNS)")
-        presetPopup.addItem(withTitle: "Suspicious TLDs (.tk/.ml/.ga/.cf)")
-        presetPopup.addItem(withTitle: "Non-Browser HTTP (curl/wget/python)")
-        presetPopup.addItem(withTitle: "Non-Standard Ports")
-        presetPopup.addItem(withTitle: "Short TCP Connections (Beacon)")
-
-        // === Data Exfiltration ===
-        presetPopup.menu?.addItem(NSMenuItem.separator())
-        let exfilHeader = NSMenuItem(title: "── DATA EXFIL ──", action: nil, keyEquivalent: "")
-        exfilHeader.isEnabled = false
-        presetPopup.menu?.addItem(exfilHeader)
-
-        presetPopup.addItem(withTitle: "DNS Tunneling (Long Queries)")
-        presetPopup.addItem(withTitle: "Large Outbound Transfers")
-        presetPopup.addItem(withTitle: "ICMP with Payload (Covert Channel)")
-        presetPopup.addItem(withTitle: "Base64 in HTTP")
-
-        // === Encrypted Traffic ===
-        presetPopup.menu?.addItem(NSMenuItem.separator())
-        let tlsHeader = NSMenuItem(title: "── TLS ANALYSIS ──", action: nil, keyEquivalent: "")
-        tlsHeader.isEnabled = false
-        presetPopup.menu?.addItem(tlsHeader)
-
-        presetPopup.addItem(withTitle: "TLS Handshakes Only")
-        presetPopup.addItem(withTitle: "Self-Signed Certificates")
-        presetPopup.addItem(withTitle: "TLS Without SNI (Hidden Dest)")
-        presetPopup.addItem(withTitle: "Certificate Exchange")
-
-        // === Network Recon ===
-        presetPopup.menu?.addItem(NSMenuItem.separator())
-        let reconHeader = NSMenuItem(title: "── RECON & SCANNING ──", action: nil, keyEquivalent: "")
-        reconHeader.isEnabled = false
-        presetPopup.menu?.addItem(reconHeader)
-
-        presetPopup.addItem(withTitle: "Port Scanning (SYN Flood)")
-        presetPopup.addItem(withTitle: "ARP Requests (Host Discovery)")
-        presetPopup.addItem(withTitle: "ICMP Echo (Ping Sweep)")
-        presetPopup.addItem(withTitle: "SMB Enumeration")
-
-        // === Lateral Movement ===
-        presetPopup.menu?.addItem(NSMenuItem.separator())
-        let lateralHeader = NSMenuItem(title: "── LATERAL MOVEMENT ──", action: nil, keyEquivalent: "")
-        lateralHeader.isEnabled = false
-        presetPopup.menu?.addItem(lateralHeader)
-
-        presetPopup.addItem(withTitle: "SSH Traffic")
-        presetPopup.addItem(withTitle: "Remote Desktop (RDP/VNC)")
-        presetPopup.addItem(withTitle: "File Sharing (SMB/AFP)")
-
-        // === Protocol Specific ===
-        presetPopup.menu?.addItem(NSMenuItem.separator())
-        let protoHeader = NSMenuItem(title: "── PROTOCOLS ──", action: nil, keyEquivalent: "")
-        protoHeader.isEnabled = false
-        presetPopup.menu?.addItem(protoHeader)
-
-        presetPopup.addItem(withTitle: "All DNS Traffic")
-        presetPopup.addItem(withTitle: "All HTTP/HTTPS")
-        presetPopup.addItem(withTitle: "All TCP")
-        presetPopup.addItem(withTitle: "All UDP")
-        presetPopup.addItem(withTitle: "All ARP")
-
-        presetPopup.target = self
-        presetPopup.action = #selector(presetFilterSelected(_:))
+        // Append directly onto the popup's existing menu so the title
+        // item created above is preserved — no allocate-then-copy.
+        if let popupMenu = presetPopup.menu {
+            PacketFilterPresets.populateMenu(popupMenu,
+                                             target: self,
+                                             action: #selector(presetFilterSelected(_:)))
+        }
         toolbarView.addSubview(presetPopup)
 
         filterTextField = NSTextField(frame: NSRect(x: 250, y: 10, width: width - 365, height: 24))
@@ -495,60 +433,38 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         }
     }
 
-    @objc private func presetFilterSelected(_ sender: NSPopUpButton) {
-        guard let selectedTitle = sender.selectedItem?.title else { return }
-
-        // Map menu titles to actual filter expressions
-        // These are protocol-based filters that work with our basic packet parsing
-        let filterMap: [String: String] = [
-            // C2 Detection
-            "Non-Apple DNS (Suspicious)": "dns and not apple and not icloud",
-            "Direct IP Connections (No DNS)": "tcp and not dns and not arp",
-            "Suspicious TLDs (.tk/.ml/.ga/.cf)": "dns and (tk or ml or ga or cf or gq)",
-            "Non-Browser HTTP (curl/wget/python)": "http",
-            "Non-Standard Ports": "tcp and not 80 and not 443 and not 22 and not 53",
-            "Short TCP Connections (Beacon)": "tcp",
-
-            // Data Exfiltration
-            "DNS Tunneling (Long Queries)": "dns",
-            "Large Outbound Transfers": "tcp",
-            "ICMP with Payload (Covert Channel)": "icmp",
-            "Base64 in HTTP": "http",
-
-            // TLS Analysis
-            "TLS Handshakes Only": "tls or ssl",
-            "Self-Signed Certificates": "tls or ssl",
-            "TLS Without SNI (Hidden Dest)": "tls or ssl",
-            "Certificate Exchange": "tls or ssl",
-
-            // Recon & Scanning
-            "Port Scanning (SYN Flood)": "tcp",
-            "ARP Requests (Host Discovery)": "arp",
-            "ICMP Echo (Ping Sweep)": "icmp",
-            "SMB Enumeration": "smb or tcp 445 or tcp 139",
-
-            // Lateral Movement
-            "SSH Traffic": "tcp 22 or ssh",
-            "Remote Desktop (RDP/VNC)": "tcp 3389 or tcp 5900 or tcp 5901",
-            "File Sharing (SMB/AFP)": "smb or afp or tcp 445 or tcp 548",
-
-            // Protocols
-            "All DNS Traffic": "dns",
-            "All HTTP/HTTPS": "http or https or tcp 80 or tcp 443",
-            "All TCP": "tcp",
-            "All UDP": "udp",
-            "All ARP": "arp"
-        ]
-
-        if let filter = filterMap[selectedTitle] {
-            filterTextField.stringValue = filter
-            currentFilter = filter.lowercased()
-            reloadPackets()
-            updateStatus()
-
-            // Show info about what this filter detects
-            showFilterInfo(for: selectedTitle)
+    /// Called when the user picks a preset from the toolbar's
+    /// "⚡ Malware Analysis Filters" popup. Sender is the NSMenuItem owned
+    /// by the popup's menu (target/action wired in
+    /// `PacketFilterPresets.buildMenu`). Apply the corresponding filter and
+    /// surface an explanation in `showFilterInfo`.
+    @objc func presetFilterSelected(_ sender: Any?) {
+        let title: String? = {
+            if let item = sender as? NSMenuItem { return item.title }
+            if let popup = sender as? NSPopUpButton { return popup.selectedItem?.title }
+            return nil
+        }()
+        guard let selectedTitle = title,
+              let filter = PacketFilterPresets.filter(for: selectedTitle) else {
+            return
         }
+        filterTextField.stringValue = filter
+        currentFilter = filter.lowercased()
+        reloadPackets()
+        updateStatus()
+        showFilterInfo(for: selectedTitle)
+    }
+
+    /// Public entry point used by `VMLibraryWindowController`'s Filter
+    /// button: open this window with the given preset already applied so
+    /// the user lands on the filtered packet list.
+    func applyPresetByTitle(_ title: String) {
+        guard let filter = PacketFilterPresets.filter(for: title) else { return }
+        filterTextField.stringValue = filter
+        currentFilter = filter.lowercased()
+        reloadPackets()
+        updateStatus()
+        showFilterInfo(for: title)
     }
 
     private func showFilterInfo(for filterName: String) {

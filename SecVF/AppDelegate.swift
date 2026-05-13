@@ -9,7 +9,7 @@ The app delegate that sets up and starts the virtual machine.
 
 @main
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
 
     // Multi-VM architecture - manage separate windows for each running VM
     private var vmWindows: [UUID: NSWindow] = [:]
@@ -101,6 +101,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             self,
             selector: #selector(handleOpenPacketAnalysis(_:)),
             name: .openPacketAnalysis,
+            object: nil
+        )
+
+        // Bring a running VM's guest console window to the front. Posted
+        // by the library window's Console quick-action button.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFocusVMConsole(_:)),
+            name: .focusVMConsole,
             object: nil
         )
 
@@ -1636,10 +1645,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         packetAnalysisWindow?.window?.makeKeyAndOrderFront(nil)
     }
 
+    /// Bring an already-running VM's guest console window to the front.
+    /// No-op (with a log line) when the VM isn't running — the library
+    /// window's Console button is disabled in that case but a stale
+    /// notification could still arrive after a stop transition.
+    @objc private func handleFocusVMConsole(_ notification: Notification) {
+        guard let vmId = notification.object as? UUID else { return }
+        guard let window = vmWindows[vmId] else {
+            NSLog("[AppDelegate] focusVMConsole posted for VM that has no open window (id=%@)",
+                  vmId.uuidString as NSString)
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
     @objc private func handleOpenPacketAnalysis(_ notification: Notification) {
         // Funnels library-window and any future caller through the same
-        // singleton-owned analysis window.
+        // singleton-owned analysis window. If the caller embedded a
+        // "presetTitle" in the userInfo, apply that filter right after
+        // showing the window so the user lands on the pre-filtered list.
         showPacketAnalysis()
+        if let presetTitle = notification.userInfo?["presetTitle"] as? String {
+            packetAnalysisWindow?.applyPresetByTitle(presetTitle)
+        }
     }
 
     @objc private func showISOCacheLogs() {

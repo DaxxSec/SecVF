@@ -124,8 +124,35 @@ class VMLibraryWindowController: NSWindowController,
 
     // Empty-state overlay labels — one per tab, shown over the table /
     // outline view when there are no rows to display.
-    private var standardEmptyStateLabel: NSTextField?
-    private var aiSandboxEmptyStateLabel: NSTextField?
+    private var standardEmptyStateLabel: NSView?
+    private var aiSandboxEmptyStateLabel: NSView?
+
+    // Top toolbar pill containers (Primary / Create / Modify / Destructive).
+    // Tracked so windowDidResize can re-anchor them.
+    private var toolbarPillContainers: [NSView] = []
+
+    // Right-gutter overlay that draws bracket connectors between rows of
+    // running VMs that share a virtual-switch network group (router and
+    // guests). Refreshed whenever the table reloads or any VM status
+    // changes.
+    private var connectionOverlay: VMConnectionOverlayView?
+
+    // Left-edge overlay that cascades small "packet" dots down each row
+    // whose VM is running with non-zero network activity. Pure eyecandy
+    // (relocated from the deleted right-panel NetworkTrafficView); the
+    // overlay drives its own 30 fps timer and auto-stops when idle.
+    private var trafficFallOverlay: VMTrafficFallOverlayView?
+
+    /// Optional set of VM UUIDs to focus the standard-tab table on.
+    /// `nil` (default) means "show every VM"; a non-nil set means
+    /// "show only the rows whose IDs are in this set". Driven by the
+    /// "Focus Running ▾" button in the tabs row.
+    private var runningFilterIDs: Set<UUID>?
+
+    /// Button that pops the running-VM filter menu. Hidden when no VMs
+    /// are running (nothing to filter to). Title gets a count badge
+    /// while a filter is active so the user can see at a glance.
+    private var runningFilterButton: NSButton?
 
     // Bottom status bar — slim global-state strip pinned to the bottom of
     // the content view, under the packet panel.
@@ -148,6 +175,26 @@ class VMLibraryWindowController: NSWindowController,
     private var detailStatusPill: NSTextField?
     private var detailOSLabel: NSTextField?
     private var detailResourcesLabel: NSTextField?
+    // Thin progress bar that sits just below the CPU · RAM value cell in
+    // the detail card. Shows VM's configured RAM as a fraction of total
+    // host RAM — an honest "is this allocation heavy?" indicator since
+    // live guest RAM usage isn't available without guest tools.
+    private var detailMemoryBarTrack: NSView?
+    private var detailMemoryBarFill: CALayer?
+    // Uptime metric cell. Empty / "—" when the selected VM isn't running;
+    // formatted as "Xh Ym" or "Ym Zs" when it is.
+    private var detailUptimeLabel: NSTextField?
+    // Packets-since-start metric cell. Reads the cumulative rx+tx packet
+    // count for the VM's port on the virtual switch.
+    private var detailPacketsLabel: NSTextField?
+    // Quick-action buttons on the right edge of the detail card. Disabled
+    // when no VM is selected; Console additionally disabled when the
+    // selected VM isn't running.
+    private var detailConsoleButton: NSButton?
+    private var detailCaptureButton: NSButton?
+    // Per-VM run timestamps, keyed by UUID. Populated when a VM
+    // transitions to .running, cleared when it transitions away.
+    private var vmStartedAt: [UUID: Date] = [:]
     private var detailDiskLabel: NSTextField?
     private var detailNetworkModeLabel: NSTextField?
     private var detailNetworkRateLabel: NSTextField?
@@ -155,6 +202,11 @@ class VMLibraryWindowController: NSWindowController,
     // Packet Log Panel
     private var packetLogPanel: NSView?
     private var packetLogTabControl: NSSegmentedControl?
+    // CAPTURING pill + live rate readout (replaces the old Packets/Protocols
+    // tab in the panel header; matches the mockup).
+    private var packetCapturingPill: NSView?
+    private var packetCapturingPillDot: CAShapeLayer?
+    private var packetRateLabel: NSTextField?
     private var packetVMFilterControl: NSSegmentedControl?
     private var packetListContainer: NSScrollView?
     private var protocolStatsContainer: NSView?
@@ -210,6 +262,33 @@ class VMLibraryWindowController: NSWindowController,
         tableView?.target = self
         tableView?.doubleAction = #selector(startVM(_:))
 
+        // Connection overlay — draws bracket connectors in the table's
+        // right gutter between rows of running VMs that share a virtual-
+        // switch network group (router + its guests). Added as a SUBVIEW
+        // of the table so its coords match `tableView.rect(ofRow:)` 1:1
+        // and it scrolls with the content automatically. Mouse events
+        // pass through (hitTest returns nil) so table selection works.
+        if let tableView = tableView, connectionOverlay == nil {
+            let overlay = VMConnectionOverlayView(frame: tableView.bounds)
+            overlay.tableView = tableView
+            overlay.autoresizingMask = [.width, .height]
+            tableView.addSubview(overlay)
+            connectionOverlay = overlay
+        }
+
+        // Traffic-fall overlay sits on the LEFT edge of each row (4-10pt
+        // strip) and is purely decorative. Added BELOW the connection
+        // overlay z-wise (which lives on the right gutter) so the two
+        // never visually overlap. Same coordinate trick: subview of the
+        // table, autoresize to track.
+        if let tableView = tableView, trafficFallOverlay == nil {
+            let overlay = VMTrafficFallOverlayView(frame: tableView.bounds)
+            overlay.tableView = tableView
+            overlay.autoresizingMask = [.width, .height]
+            tableView.addSubview(overlay, positioned: .below, relativeTo: connectionOverlay)
+            trafficFallOverlay = overlay
+        }
+
         // Programmatically append a Traffic column at the end of whatever
         // the XIB defined. Done in code (not the XIB) so the column can
         // host a custom NSView (SparklineView) rather than the default
@@ -219,11 +298,21 @@ class VMLibraryWindowController: NSWindowController,
            !tableView.tableColumns.contains(where: { $0.identifier.rawValue == "TrafficColumn" }) {
             let trafficCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TrafficColumn"))
             trafficCol.title = "Traffic"
+            trafficCol.headerCell = TacticalTableHeaderCell(textCell: "Traffic")
             trafficCol.width = 80
             trafficCol.minWidth = 60
             trafficCol.maxWidth = 120
-            trafficCol.headerCell.alignment = .center
             tableView.addTableColumn(trafficCol)
+        }
+
+        // Apply tactical header styling to every XIB-defined column, too.
+        // The XIB columns kept the stock NSTableHeaderCell from Interface
+        // Builder; swap them at runtime so the whole header reads as one
+        // consistent dark band instead of mixing styles.
+        if let tableView = tableView {
+            for col in tableView.tableColumns where !(col.headerCell is TacticalTableHeaderCell) {
+                col.headerCell = TacticalTableHeaderCell(textCell: col.title)
+            }
         }
 
         // Load VMs asynchronously to avoid blocking main thread
@@ -232,6 +321,7 @@ class VMLibraryWindowController: NSWindowController,
             self.tableView?.reloadData()
             self.refreshStatusBar()
             self.refreshEmptyStateOverlays()
+            self.refreshConnectionOverlay()
         }
 
         // Force the table to use view-based mode
@@ -332,6 +422,94 @@ class VMLibraryWindowController: NSWindowController,
         deleteButton?.keyEquivalentModifierMask = .command
     }
 
+    /// Build the "● CAPTURING" pill for the packet panel header. Orange dot
+    /// pulses while capture is active; the whole pill is hidden when capture
+    /// is idle. Animation is opt-in via `setPacketCapturingActive(_:)`.
+    private func makeCapturingPill() -> NSView {
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = AppColors.accentOrange.withAlphaComponent(0.10).cgColor
+        pill.layer?.borderColor = AppColors.borderOrange.cgColor
+        pill.layer?.borderWidth = LayoutConstants.borderHairline
+        pill.layer?.cornerRadius = 10
+        pill.isHidden = true   // shown when capture starts
+
+        // Pulse dot — same idiom as the bottom status bar.
+        let dotSize: CGFloat = 6
+        let dot = CAShapeLayer()
+        dot.path = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: dotSize, height: dotSize), transform: nil)
+        dot.fillColor = AppColors.accentOrangeHot.cgColor
+        dot.shadowColor = AppColors.accentOrangeHot.cgColor
+        dot.shadowOpacity = 0.8
+        dot.shadowRadius = 4
+        dot.shadowOffset = .zero
+        dot.frame = CGRect(x: 8, y: (20 - dotSize) / 2, width: dotSize, height: dotSize)
+        pill.layer?.addSublayer(dot)
+        packetCapturingPillDot = dot
+
+        let label = NSTextField(labelWithString: "CAPTURING")
+        label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        label.textColor = AppColors.accentOrangeHot
+        label.frame = NSRect(x: 22, y: 3, width: 80, height: 14)
+        label.isBordered = false
+        label.drawsBackground = false
+        label.isEditable = false
+        pill.addSubview(label)
+
+        return pill
+    }
+
+    /// Repaint the "↓ X/s ↑ Y/s · N pkts" rate readout in the packet panel
+    /// header. Combines the aggregate switch + NAT bridge rates so the user
+    /// sees one number that represents "all VM traffic flowing through the
+    /// host", matching the panel's role as the multi-VM live preview.
+    private func refreshPacketPanelRate(totalPackets: Int, capturing: Bool) {
+        guard let rateLabel = packetRateLabel else { return }
+        guard capturing else {
+            rateLabel.stringValue = "capture idle"
+            rateLabel.textColor = AppColors.textMuted
+            return
+        }
+        // Sum the per-VM virtual switch rates (already in liveRateBps).
+        var totalDown: Double = 0
+        var totalUp: Double = 0
+        for (_, rate) in liveRateBps {
+            totalDown += rate.down
+            totalUp += rate.up
+        }
+        // Add the aggregate NAT bridge sample if available — uses the
+        // status bar's existing previous-sample state, so we recompute
+        // from the latest pair to stay consistent.
+        let natSample = BridgeInterfaceStats.sample()
+        if let natRate = BridgeInterfaceStats.rate(from: statusBarPreviousNATSample,
+                                                   to: natSample) {
+            totalDown += natRate.down
+            totalUp += natRate.up
+        }
+        let down = ByteCountFormatter.string(fromByteCount: Int64(totalDown), countStyle: .binary)
+        let up = ByteCountFormatter.string(fromByteCount: Int64(totalUp), countStyle: .binary)
+        rateLabel.stringValue = "↓ \(down)/s  ↑ \(up)/s  ·  \(formatCount(totalPackets)) pkts"
+        // Hot tint when there's real traffic (>1 KiB/s combined)
+        let hot = (totalDown + totalUp) > 1024
+        rateLabel.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+    }
+
+    /// Toggle the packet-capturing pill's visibility + pulse animation.
+    private func setPacketCapturingActive(_ active: Bool) {
+        packetCapturingPill?.isHidden = !active
+        if active, packetCapturingPillDot?.animation(forKey: "pulse") == nil {
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1.0
+            pulse.toValue = 0.4
+            pulse.duration = 1.2
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            packetCapturingPillDot?.add(pulse, forKey: "pulse")
+        } else if !active {
+            packetCapturingPillDot?.removeAnimation(forKey: "pulse")
+        }
+    }
+
     /// Tactical-themed `NSSegmentedControl`. Uses `.roundRect` (cleaner than
     /// the heavy `.texturedSquare`) and tints the selected segment with the
     /// OD-green primary accent so it reads as part of the SecVF palette
@@ -345,51 +523,148 @@ class VMLibraryWindowController: NSWindowController,
         }
     }
 
-    /// Apply the tactical-theme button styling. Buttons use a custom layer
-    /// instead of the system bezel, so we must visually depress when
-    /// disabled — otherwise `isEnabled = false` reads as "active but
-    /// unresponsive."
+    /// Apply the tactical-theme button styling. Buttons now live INSIDE pill
+    /// containers (see `makeButtonPillContainer`) which supply the visual
+    /// frame, so each button's own border + fill are transparent — only the
+    /// text styling stays. The pill itself color-codes the group (OD-glow
+    /// for primary, red for destructive, plain OD for the rest).
     ///
     /// Tactical conventions:
-    /// - **Primary** (Start) — OD green border + brighter background. "Go".
-    /// - **Destructive** (Delete) — red border + red text. "Stop".
-    /// - **Secondary** — slate background + OD-text. Neutral operations.
+    /// - **Primary** (Start) — semibold near-white text in an OD-glow pill.
+    /// - **Destructive** (Delete) — red text in a red-bordered pill.
+    /// - **Secondary** — OD text in a plain OD-bordered pill.
     private func applyButtonStyle(_ button: NSButton) {
         let isPrimary = (button === startButton)
         let isDestructive = (button === deleteButton)
         let enabled = button.isEnabled
 
-        // Primary fills with a low-alpha OD tint so it stands out from the
-        // toolbar bezel; everything else uses the standard slate button bg.
-        let baseBg: NSColor = isPrimary ? AppColors.accentOD.withAlphaComponent(0.22)
-                                        : AppColors.backgroundButton
-        let baseBorder: NSColor
-        if isDestructive {
-            baseBorder = AppColors.accentRed.withAlphaComponent(0.6)
-        } else if isPrimary {
-            baseBorder = AppColors.accentODGlow.withAlphaComponent(0.85)
-        } else {
-            baseBorder = AppColors.borderOD
-        }
+        // Background + border are owned by the parent pill — keep the
+        // button's own layer transparent so the pill's frame reads cleanly.
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.layer?.borderColor = NSColor.clear.cgColor
+
         let textColor: NSColor
         if isDestructive {
             textColor = AppColors.accentRed
         } else if isPrimary {
-            // Primary uses a brighter near-white so it pops against the OD fill
             textColor = AppColors.textPrimary
         } else {
             textColor = AppColors.textOD
         }
-
-        button.layer?.backgroundColor = baseBg.withAlphaComponent(enabled ? 1.0 : 0.35).cgColor
-        button.layer?.borderColor = baseBorder.withAlphaComponent(enabled ? 1.0 : 0.25).cgColor
-
         let fontWeight: NSFont.Weight = isPrimary ? .semibold : .medium
-        button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+        // Map each toolbar button to its mockup-spec leading glyph so the
+        // pill row reads as an icon strip even before the eye lands on
+        // the label. Falls back to plain text for anything unrecognized
+        // (other buttons that flow through this styler in the future).
+        let label = button.title
+        let glyph = Self.toolbarGlyph(for: button, label: label)
+        let displayString: String
+        if let glyph = glyph, !label.hasPrefix(glyph) {
+            displayString = "\(glyph)  \(label)"
+        } else {
+            displayString = label
+        }
+        button.attributedTitle = NSAttributedString(string: displayString, attributes: [
             .foregroundColor: textColor.withAlphaComponent(enabled ? 1.0 : 0.4),
             .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: fontWeight)
         ])
         button.alphaValue = enabled ? 1.0 : 0.7
+    }
+
+    /// Map a toolbar button to its leading glyph (mockup parity). Drives
+    /// the icon column on every pill so the toolbar reads as an icon row
+    /// at a glance. Returns nil for buttons we don't have a glyph for —
+    /// the styler leaves those as plain text.
+    ///
+    /// `applyButtonStyle` is called repeatedly (on enable changes, etc.)
+    /// and updates `attributedTitle`, which causes subsequent reads of
+    /// `button.title` to include the glyph + double-space prefix we
+    /// added. So we strip that prefix here before matching, so the
+    /// mapping is idempotent under re-styling.
+    private static func toolbarGlyph(for button: NSButton, label: String) -> String? {
+        let canonical = label.components(separatedBy: "  ").last ?? label
+        switch canonical {
+        case "Start":     return "▶"
+        case "New":       return "＋"
+        case "Import":    return "↧"
+        case "Configure": return "⚙"
+        case "Clone":     return "⎘"
+        case "Rename":    return "✎"
+        case "Delete":    return "🗑"
+        default:          return nil
+        }
+    }
+
+    /// Per-column horizontal alignment for the VM-table / outline cells.
+    /// Numeric columns right-align so the column reads as a clean stack
+    /// of right-justified values; everything else stays left-aligned.
+    /// Header cell alignment is set independently in the header-cell
+    /// styling path.
+    private static func columnAlignment(forColumnID id: String) -> NSTextAlignment {
+        switch id {
+        case "CPUColumn", "MemoryColumn", "DiskColumn": return .right
+        default: return .left
+        }
+    }
+
+    /// Whether a column's cells should use the monospaced-digit system
+    /// font instead of the proportional default. Same columns that get
+    /// right-alignment — numeric stacks read cleanest with tabular
+    /// figures so "12 GB" / "108 GB" line up exactly under each other.
+    private static func columnUsesMonospacedFont(forColumnID id: String) -> Bool {
+        switch id {
+        case "CPUColumn", "MemoryColumn", "DiskColumn", "LastUsedColumn":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Wrap a set of NSButton instances in a rounded pill container with a
+    /// shared background + border. Buttons sit edge-to-edge with thin
+    /// vertical dividers between them. Used by the top toolbar to group
+    /// related actions (Create / Modify / Destructive / Primary).
+    ///
+    /// The pill's frame is sized to fit its buttons; the caller positions
+    /// the pill's origin.
+    private func makeButtonPillContainer(_ buttons: [NSButton],
+                                         borderColor: NSColor = AppColors.borderOD,
+                                         fillColor: NSColor = AppColors.backgroundButton.withAlphaComponent(0.55)) -> NSView {
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = fillColor.cgColor
+        pill.layer?.borderColor = borderColor.cgColor
+        pill.layer?.borderWidth = LayoutConstants.borderHairline
+        pill.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+
+        let buttonW: CGFloat = 80
+        let buttonH: CGFloat = 32
+        let innerPad: CGFloat = 3            // 3pt horizontal padding inside the pill
+        let dividerInsetY: CGFloat = 6       // divider doesn't touch top/bottom
+
+        var x: CGFloat = innerPad
+        for (i, button) in buttons.enumerated() {
+            // Remove from any current superview so addSubview reparents
+            button.removeFromSuperview()
+            button.frame = NSRect(x: x, y: 1, width: buttonW, height: buttonH)
+            pill.addSubview(button)
+
+            // Divider between consecutive buttons in the same pill
+            if i > 0 {
+                let divider = NSBox(frame: NSRect(x: x - 1, y: dividerInsetY,
+                                                  width: 1,
+                                                  height: buttonH - dividerInsetY * 2))
+                divider.boxType = .custom
+                divider.borderWidth = 0
+                divider.fillColor = AppColors.borderOD.withAlphaComponent(0.5)
+                pill.addSubview(divider)
+            }
+            x += buttonW
+        }
+
+        let totalW = CGFloat(buttons.count) * buttonW + innerPad * 2
+        pill.frame = NSRect(x: 0, y: 0, width: totalW, height: buttonH + 2)
+        return pill
     }
 
     private func addSidebar() {
@@ -488,6 +763,63 @@ class VMLibraryWindowController: NSWindowController,
         statsLabel.drawsBackground = false
         statsLabel.autoresizingMask = [.minYMargin, .width]
         sidebar.addSubview(statsLabel)
+
+        // Logs section — surfaces the three log viewers from the Monitoring
+        // menu in the sidebar so the user can hop to them without diving
+        // into the menu bar. Buttons dispatch via responder chain so the
+        // AppDelegate's existing @objc handlers are called directly (no
+        // duplicate state, no new notifications needed).
+        let logsHeaderY: CGFloat = sidebar.bounds.height - 340
+        let logsHeader = NSTextField(labelWithString: "LOGS")
+        logsHeader.frame = NSRect(x: 0, y: logsHeaderY, width: sidebarWidth, height: 14)
+        logsHeader.alignment = .center
+        logsHeader.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
+        logsHeader.textColor = AppColors.textSubtle
+        logsHeader.isBordered = false
+        logsHeader.isEditable = false
+        logsHeader.drawsBackground = false
+        logsHeader.autoresizingMask = [.minYMargin, .width]
+        sidebar.addSubview(logsHeader)
+
+        let logButtonsTopY: CGFloat = logsHeaderY - 8
+        let logEntries: [(title: String, selectorName: String, tooltip: String)] = [
+            ("◆ Security",  "showSecurityLogs",
+             "Security events captured by VMSecurityMonitor (suspicious activity, resource pressure, isolation breaches). ⇧⌘1"),
+            ("◆ Network",   "showNetworkLogs",
+             "Per-VM network logs (traffic summaries, switch events, NAT activity). ⇧⌘2"),
+            ("◆ ISO Cache", "showISOCacheLogs",
+             "Distro ISO download/verify activity from ISOCacheManager."),
+        ]
+        let buttonHeight: CGFloat = 26
+        let buttonGap: CGFloat = 4
+        let buttonInset: CGFloat = 16
+        for (i, entry) in logEntries.enumerated() {
+            let btnY = logButtonsTopY - CGFloat(i + 1) * (buttonHeight + buttonGap)
+            let btn = TacticalHoverButton(title: entry.title,
+                                          target: nil,
+                                          action: NSSelectorFromString(entry.selectorName))
+            btn.frame = NSRect(x: buttonInset, y: btnY,
+                               width: sidebarWidth - buttonInset * 2,
+                               height: buttonHeight)
+            btn.isBordered = false
+            btn.bezelStyle = .regularSquare
+            btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+            btn.contentTintColor = AppColors.textPrimary
+            btn.alignment = .left
+            btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+            btn.layer?.borderColor = AppColors.borderOD.cgColor
+            btn.layer?.borderWidth = 1.0
+            btn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+            btn.attributedTitle = NSAttributedString(string: "  " + entry.title, attributes: [
+                .foregroundColor: AppColors.textPrimary,
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+            ])
+            btn.toolTip = entry.tooltip
+            btn.autoresizingMask = [.minYMargin, .width]
+            btn.setAccessibilityLabel(entry.title.replacingOccurrences(of: "◆ ", with: "") + " logs")
+            btn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
+            sidebar.addSubview(btn)
+        }
 
         // Separator line above developer info
         let separator2 = createSeparator(y: 155, width: sidebarWidth)
@@ -776,30 +1108,39 @@ class VMLibraryWindowController: NSWindowController,
         }
 
         // Empty-state overlays — one per tab. Hidden when their respective
-        // data source has rows. Centered over the table region.
+        // data source has rows. Centered over the table region. Composed
+        // TacticalEmptyStateView (icon + title + hint + optional CTA).
         if standardEmptyStateLabel == nil {
-            let label = makeEmptyStateLabel(
+            let view = TacticalEmptyStateView(
+                glyph: "🖥",
                 title: "No virtual machines yet",
-                hint: "Click ⊕ New to create your first VM,\nor Import to bring in an existing bundle.")
-            label.frame = NSRect(x: tableX, y: tableY,
-                                 width: tableWidth, height: tableHeight)
-            label.autoresizingMask = [.width, .height]
-            contentView.addSubview(label)
-            standardEmptyStateLabel = label
+                hint: "Click below to create your first VM, or use ⤓ Import in the toolbar to bring in an existing bundle.",
+                ctaTitle: "⊕  Create your first VM",
+                onCTA: { [weak self] in self?.showNewVMDialog() })
+            view.frame = NSRect(x: tableX, y: tableY,
+                                width: tableWidth, height: tableHeight)
+            view.autoresizingMask = [.width, .height]
+            contentView.addSubview(view)
+            standardEmptyStateLabel = view
         } else {
             standardEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
                                                    width: tableWidth, height: tableHeight)
         }
         if aiSandboxEmptyStateLabel == nil {
-            let label = makeEmptyStateLabel(
+            // No inline CTA — the build is a multi-step Tools-menu flow,
+            // a one-click button here would mis-set expectations.
+            let view = TacticalEmptyStateView(
+                glyph: "◇",
                 title: "No AI Sandbox VM",
-                hint: "Use Tools → Create AI Sandbox VM…\nto build the base bundle (30–60 min).")
-            label.frame = NSRect(x: tableX, y: tableY,
-                                 width: tableWidth, height: tableHeight)
-            label.autoresizingMask = [.width, .height]
-            label.isHidden = true   // Standard tab is default
-            contentView.addSubview(label)
-            aiSandboxEmptyStateLabel = label
+                hint: "Use Tools → Create AI Sandbox VM… to build the base bundle. First-time setup takes 30–60 min.",
+                ctaTitle: nil,
+                onCTA: nil)
+            view.frame = NSRect(x: tableX, y: tableY,
+                                width: tableWidth, height: tableHeight)
+            view.autoresizingMask = [.width, .height]
+            view.isHidden = true   // Standard tab is default
+            contentView.addSubview(view)
+            aiSandboxEmptyStateLabel = view
         } else {
             aiSandboxEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
                                                     width: tableWidth, height: tableHeight)
@@ -823,26 +1164,38 @@ class VMLibraryWindowController: NSWindowController,
                                               width: detailCardWidth,
                                               height: detailCardHeight))
 
-        // Top toolbar — buttons aligned LEFT (not centered) so the primary
-        // action (Start) anchors visually at the left edge of the table,
-        // matching the mockup. Logical reading order: Start → New → Import
-        // → Configure → Clone → Rename → Delete. Delete is rightmost so the
-        // destructive button is visually distant from Start.
-        let buttons: [NSButton?] = [startButton, newButton, importButton,
-                                    configureButton, cloneButton,
-                                    renameButton, deleteButton]
-        let buttonWidth: CGFloat = 80
-        let buttonSpacing: CGFloat = 8
-        var buttonX = tableX
-        for button in buttons.compactMap({ $0 }) {
-            button.frame = NSRect(x: buttonX, y: toolbarY,
-                                  width: buttonWidth, height: buttonHeight)
-            // .minYMargin keeps the bottom margin flexible so the toolbar
-            // floats with the content-view top edge on resize. .maxXMargin
-            // keeps the toolbar left-anchored so the group doesn't drift.
-            button.autoresizingMask = [.minYMargin, .maxXMargin]
-            buttonX += buttonWidth + buttonSpacing
+        // Top toolbar — pill-grouped containers matching the mockup at
+        // docs/ui-redesign-mockup.html. Each pill owns its own border + fill;
+        // the buttons inside are flat-styled (text-only). Four pills:
+        //
+        //   [▶ Start] · [+ New | ↧ Import] · [⚙ Configure | ⎘ Clone | ✎ Rename] · [🗑 Delete]
+        //
+        // Primary (Start) gets the brighter OD-glow border; destructive
+        // (Delete) gets red. Inter-pill gap = spacingMD (12pt).
+        let pillGap: CGFloat = LayoutConstants.spacingMD
+
+        toolbarPillContainers.forEach { $0.removeFromSuperview() }
+
+        let pills: [NSView] = [
+            makeButtonPillContainer([startButton].compactMap { $0 },
+                                    borderColor: AppColors.accentODGlow.withAlphaComponent(0.7),
+                                    fillColor: AppColors.accentOD.withAlphaComponent(0.18)),
+            makeButtonPillContainer([newButton, importButton].compactMap { $0 }),
+            makeButtonPillContainer([configureButton, cloneButton, renameButton].compactMap { $0 }),
+            makeButtonPillContainer([deleteButton].compactMap { $0 },
+                                    borderColor: AppColors.accentRed.withAlphaComponent(0.6)),
+        ]
+
+        var px = tableX
+        for pill in pills {
+            // Each pill is `buttonHeight + 2` tall. Center it on toolbarY by
+            // shifting up 1pt so its baseline matches button-only layouts.
+            pill.frame.origin = CGPoint(x: px, y: toolbarY - 1)
+            pill.autoresizingMask = [.minYMargin, .maxXMargin]
+            contentView.addSubview(pill)
+            px += pill.frame.width + pillGap
         }
+        toolbarPillContainers = pills
     }
 
     // MARK: - Selected VM Detail Card
@@ -883,111 +1236,268 @@ class VMLibraryWindowController: NSWindowController,
         card.layer?.addSublayer(glow)
 
         // Cell layout — every value sits on the same baseline (`valueY`),
-        // every caption sits on `captionY` directly above it. Name + pill
-        // align with the value row so the card reads as a single horizontal
-        // band, not a misaligned grid.
+        // every caption sits on `captionY` directly above it. Identity
+        // (pill + name) is LEFT-anchored; the metric grid lives in a
+        // right-anchored container so it stays glued to the right edge of
+        // the card as the window widens, instead of leaving a half-card-
+        // wide empty band in the middle.
         let cellPadding: CGFloat = LayoutConstants.spacingLG  // 16pt edge padding
-        let valueY: CGFloat = 14         // bottom of the value text row
+        let valueY: CGFloat = 14
         let valueH: CGFloat = 20
-        let captionY: CGFloat = 41       // bottom of the caption text row
+        let captionY: CGFloat = 41
         let captionH: CGFloat = 12
-        let pillW: CGFloat = 84
-        let nameW: CGFloat = 180
-        let gapIdentity: CGFloat = LayoutConstants.spacingLG  // pill → name, name → metrics
-        let gapMetric: CGFloat = LayoutConstants.spacingMD    // between metric cells
-
-        var x: CGFloat = cellPadding
-
-        // ── STATUS pill ──────────────────────────────────────────────────
-        // Pill height 22 to give visible padding around 9pt label; centered
-        // on the value baseline.
+        let pillW: CGFloat = 96       // bumped 84→96 so "◆ TEMPLATE" / "● RUNNING" have breathing room
         let pillH: CGFloat = 22
+        let nameW: CGFloat = 200
+        let gapMetric: CGFloat = LayoutConstants.spacingLG     // 16pt between metric cells (was 12)
+
+        // ── LEFT: identity (pill + name) ─────────────────────────────────
         let pill = makeStatusPill()
-        pill.frame = NSRect(x: x, y: valueY + (valueH - pillH) / 2, width: pillW, height: pillH)
+        pill.frame = NSRect(x: cellPadding,
+                            y: valueY + (valueH - pillH) / 2,
+                            width: pillW, height: pillH)
         pill.setAccessibilityLabel("Selected VM status")
         card.addSubview(pill)
         detailStatusPill = pill
-        x += pillW + LayoutConstants.spacingSM  // tight 8pt gap — pill + name read as a pair
 
-        // ── Name (monospace, prominent) ──────────────────────────────────
         let nameLabel = NSTextField(labelWithString: "")
         nameLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .semibold)
         nameLabel.textColor = AppColors.textPrimary
-        nameLabel.frame = NSRect(x: x, y: valueY, width: nameW, height: valueH)
+        nameLabel.frame = NSRect(x: cellPadding + pillW + LayoutConstants.spacingSM,
+                                 y: valueY,
+                                 width: nameW, height: valueH)
+        nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setAccessibilityLabel("Selected VM name")
         card.addSubview(nameLabel)
         detailNameLabel = nameLabel
 
-        // Vertical divider between "identity" (pill + name) and metrics — a
-        // 1pt vertical line in subtle OD, spanning roughly the value + caption
-        // rows so it visually frames the two-row metric grid.
-        let dividerX = x + nameW + LayoutConstants.spacingSM
+        // ── RIGHT: metrics container (right-anchored) ────────────────────
+        // Compute total width: 5 cells with their widths + 4 gaps + leading
+        // divider region. The container's x = card.width - totalW - cellPadding,
+        // and .minXMargin autoresizing keeps it glued to the right edge.
+        let osW: CGFloat = 120       // trimmed -10 to make room for action buttons
+        let uptimeW: CGFloat = 80    // "12h 47m" / "—"
+        let cpuW: CGFloat = 110
+        let diskW: CGFloat = 110
+        let netModeW: CGFloat = 100
+        let rateW: CGFloat = 150     // trimmed -10; "host-routed" still fits
+        let packetsW: CGFloat = 90   // "1,234,567" upper bound for a long capture
+        let dividerW: CGFloat = 1
+        let dividerGap: CGFloat = LayoutConstants.spacingLG  // gap divider → first metric cell
+        let metricsW = dividerW + dividerGap
+                       + osW + gapMetric
+                       + uptimeW + gapMetric
+                       + cpuW + gapMetric
+                       + diskW + gapMetric
+                       + netModeW + gapMetric
+                       + rateW + gapMetric
+                       + packetsW
+
+        // Quick-action buttons (Console / Capture) live in their own small
+        // container to the RIGHT of the metric grid. Icon-only with
+        // tooltips so they stay compact — wider labelled versions would
+        // eat too much horizontal space on narrower windows.
+        let actionBtnSize: CGFloat = 24
+        let actionGap: CGFloat = 6
+        let actionsW: CGFloat = actionBtnSize * 2 + actionGap
+        let actionsToMetricsGap: CGFloat = LayoutConstants.spacingMD
+
+        let actions = NSView()
+        actions.frame = NSRect(x: frame.width - actionsW - cellPadding,
+                               y: (frame.height - actionBtnSize) / 2,
+                               width: actionsW, height: actionBtnSize)
+        actions.autoresizingMask = [.minXMargin]
+        card.addSubview(actions)
+
+        let consoleBtn = makeDetailCardActionButton(
+            title: "🖥",
+            tooltip: "Bring the running VM's console window to the front (no-op when stopped).",
+            action: #selector(quickActionConsole(_:)))
+        consoleBtn.frame = NSRect(x: 0, y: 0,
+                                  width: actionBtnSize, height: actionBtnSize)
+        consoleBtn.setAccessibilityLabel("Open console window")
+        actions.addSubview(consoleBtn)
+        detailConsoleButton = consoleBtn
+
+        let captureBtn = makeDetailCardActionButton(
+            title: "⌐",
+            tooltip: "Open the Packet Analysis window (full filter / inspect view).",
+            action: #selector(quickActionCapture(_:)))
+        captureBtn.frame = NSRect(x: actionBtnSize + actionGap, y: 0,
+                                  width: actionBtnSize, height: actionBtnSize)
+        captureBtn.setAccessibilityLabel("Open packet analysis")
+        actions.addSubview(captureBtn)
+        detailCaptureButton = captureBtn
+
+        let metrics = NSView()
+        metrics.frame = NSRect(x: frame.width - metricsW - actionsW - actionsToMetricsGap - cellPadding,
+                               y: 0,
+                               width: metricsW, height: frame.height)
+        metrics.autoresizingMask = [.minXMargin]
+        card.addSubview(metrics)
+
+        // Vertical divider between identity and metrics — sits at x=0 inside
+        // the metrics container so it's flush with the metric grid's left
+        // edge regardless of card width.
         let dividerYBottom = valueY - 4
         let dividerYTop = captionY + captionH + 4
-        let divider = NSBox(frame: NSRect(x: dividerX,
+        let divider = NSBox(frame: NSRect(x: 0,
                                           y: dividerYBottom,
-                                          width: 1,
+                                          width: dividerW,
                                           height: dividerYTop - dividerYBottom))
         divider.boxType = .custom
         divider.borderWidth = 0
         divider.fillColor = AppColors.borderOD
-        card.addSubview(divider)
-        x = dividerX + 1 + gapIdentity
+        metrics.addSubview(divider)
 
-        // ── OS / distro ──────────────────────────────────────────────────
-        let osLabel = makeMetricLabel(caption: "OS", x: x,
+        // Metric cells positioned inside the container at fixed x offsets
+        var mx: CGFloat = dividerW + dividerGap
+
+        let osCell = makeMetricLabel(caption: "OS", x: mx,
+                                     valueY: valueY, valueH: valueH,
+                                     captionY: captionY, captionH: captionH,
+                                     width: osW)
+        metrics.addSubview(osCell.caption)
+        metrics.addSubview(osCell.value)
+        detailOSLabel = osCell.value
+        mx += osW + gapMetric
+
+        let uptimeCell = makeMetricLabel(caption: "UPTIME", x: mx,
+                                         valueY: valueY, valueH: valueH,
+                                         captionY: captionY, captionH: captionH,
+                                         width: uptimeW)
+        metrics.addSubview(uptimeCell.caption)
+        metrics.addSubview(uptimeCell.value)
+        detailUptimeLabel = uptimeCell.value
+        mx += uptimeW + gapMetric
+
+        let cpuCell = makeMetricLabel(caption: "CPU · RAM", x: mx,
                                       valueY: valueY, valueH: valueH,
                                       captionY: captionY, captionH: captionH,
-                                      width: 130)
-        card.addSubview(osLabel.caption)
-        card.addSubview(osLabel.value)
-        detailOSLabel = osLabel.value
-        x += 130 + gapMetric
+                                      width: cpuW)
+        metrics.addSubview(cpuCell.caption)
+        metrics.addSubview(cpuCell.value)
+        detailResourcesLabel = cpuCell.value
 
-        // ── CPU · RAM ────────────────────────────────────────────────────
-        let resourcesLabel = makeMetricLabel(caption: "CPU · RAM", x: x,
-                                             valueY: valueY, valueH: valueH,
-                                             captionY: captionY, captionH: captionH,
-                                             width: 100)
-        card.addSubview(resourcesLabel.caption)
-        card.addSubview(resourcesLabel.value)
-        detailResourcesLabel = resourcesLabel.value
-        x += 100 + gapMetric
+        // Memory allocation bar — thin track underneath the value cell.
+        // y=8 puts it 6pt below `valueY=14` (which is the value's bottom
+        // edge after layout, since labels grow upward in flipped coords —
+        // in our unflipped card the value text is at y=14..34, so y=8
+        // gives a 4pt strip with 6pt to the card bottom).
+        let barH: CGFloat = 4
+        let barY: CGFloat = max(2, valueY - barH - 2)
+        let track = NSView(frame: NSRect(x: mx, y: barY, width: cpuW, height: barH))
+        track.wantsLayer = true
+        track.layer?.backgroundColor = AppColors.borderOD.withAlphaComponent(0.45).cgColor
+        track.layer?.cornerRadius = barH / 2
+        let fill = CALayer()
+        fill.frame = NSRect(x: 0, y: 0, width: 0, height: barH)
+        fill.backgroundColor = AppColors.accentODGlow.cgColor
+        fill.cornerRadius = barH / 2
+        track.layer?.addSublayer(fill)
+        metrics.addSubview(track)
+        detailMemoryBarTrack = track
+        detailMemoryBarFill = fill
 
-        // ── Disk ─────────────────────────────────────────────────────────
-        let diskLabel = makeMetricLabel(caption: "Disk", x: x,
-                                        valueY: valueY, valueH: valueH,
-                                        captionY: captionY, captionH: captionH,
-                                        width: 90)
-        card.addSubview(diskLabel.caption)
-        card.addSubview(diskLabel.value)
-        detailDiskLabel = diskLabel.value
-        x += 90 + gapMetric
+        mx += cpuW + gapMetric
 
-        // ── Network mode ─────────────────────────────────────────────────
-        let netModeLabel = makeMetricLabel(caption: "Network", x: x,
-                                           valueY: valueY, valueH: valueH,
-                                           captionY: captionY, captionH: captionH,
-                                           width: 80)
-        card.addSubview(netModeLabel.caption)
-        card.addSubview(netModeLabel.value)
-        detailNetworkModeLabel = netModeLabel.value
-        x += 80 + gapMetric
+        let diskCell = makeMetricLabel(caption: "Disk", x: mx,
+                                       valueY: valueY, valueH: valueH,
+                                       captionY: captionY, captionH: captionH,
+                                       width: diskW)
+        metrics.addSubview(diskCell.caption)
+        metrics.addSubview(diskCell.value)
+        detailDiskLabel = diskCell.value
+        mx += diskW + gapMetric
 
-        // ── Live rate ────────────────────────────────────────────────────
-        let netRateLabel = makeMetricLabel(caption: "↓ / ↑", x: x,
-                                           valueY: valueY, valueH: valueH,
-                                           captionY: captionY, captionH: captionH,
-                                           width: 130)
-        card.addSubview(netRateLabel.caption)
-        card.addSubview(netRateLabel.value)
-        detailNetworkRateLabel = netRateLabel.value
+        let netModeCell = makeMetricLabel(caption: "Network", x: mx,
+                                          valueY: valueY, valueH: valueH,
+                                          captionY: captionY, captionH: captionH,
+                                          width: netModeW)
+        metrics.addSubview(netModeCell.caption)
+        metrics.addSubview(netModeCell.value)
+        detailNetworkModeLabel = netModeCell.value
+        mx += netModeW + gapMetric
+
+        let netRateCell = makeMetricLabel(caption: "↓ / ↑", x: mx,
+                                          valueY: valueY, valueH: valueH,
+                                          captionY: captionY, captionH: captionH,
+                                          width: rateW)
+        metrics.addSubview(netRateCell.caption)
+        metrics.addSubview(netRateCell.value)
+        detailNetworkRateLabel = netRateCell.value
+        mx += rateW + gapMetric
+
+        let packetsCell = makeMetricLabel(caption: "PACKETS", x: mx,
+                                          valueY: valueY, valueH: valueH,
+                                          captionY: captionY, captionH: captionH,
+                                          width: packetsW)
+        metrics.addSubview(packetsCell.caption)
+        metrics.addSubview(packetsCell.value)
+        detailPacketsLabel = packetsCell.value
 
         contentView.addSubview(card)
         selectedVMDetailCard = card
 
         // Populate with whatever the table currently has selected (if anything)
         updateSelectedVMDetailCard()
+    }
+
+    /// Small icon-button used by the right-edge quick-action stack in the
+    /// detail card. Square, layer-backed, OD-border tactical aesthetic
+    /// with built-in hover treatment via `TacticalHoverButton`.
+    private func makeDetailCardActionButton(title: String,
+                                            tooltip: String,
+                                            action: Selector) -> NSButton {
+        let btn = TacticalHoverButton(title: title, target: self, action: action)
+        btn.isBordered = false
+        btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        btn.layer?.borderColor = AppColors.borderOD.cgColor
+        btn.layer?.borderWidth = 1.0
+        btn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        btn.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+        ])
+        btn.toolTip = tooltip
+        btn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
+        return btn
+    }
+
+    /// Bring the selected VM's guest console window forward via the
+    /// `.focusVMConsole` notification (AppDelegate owns vmWindows).
+    /// No-op when no VM is selected or the VM isn't running.
+    @objc private func quickActionConsole(_ sender: NSButton) {
+        guard let vm = selectedStandardVM(), vm.status == .running else { return }
+        NotificationCenter.default.post(name: .focusVMConsole, object: vm.id)
+    }
+
+    /// Open the Packet Analysis window via the existing `.openPacketAnalysis`
+    /// notification (no preset — user picks once the window is up).
+    @objc private func quickActionCapture(_ sender: NSButton) {
+        NotificationCenter.default.post(name: .openPacketAnalysis, object: nil)
+    }
+
+    /// Shared selection lookup used by the quick-action buttons. Reads
+    /// the standard-tab selection through `displayedStandardVMs` so the
+    /// filter state is honored.
+    private func selectedStandardVM() -> VMConfiguration? {
+        guard currentLibraryTab == .standard else { return nil }
+        let row = tableView?.selectedRow ?? -1
+        return standardVM(at: row)
+    }
+
+    /// Enable/disable + tint quick-action buttons based on the current
+    /// selection. Console is only useful for a running VM (window must
+    /// exist); Capture is always available when any VM is selected.
+    private func refreshQuickActionButtonsState() {
+        let vm = selectedStandardVM()
+        let isRunning = vm?.status == .running
+        detailConsoleButton?.isEnabled = isRunning
+        detailConsoleButton?.alphaValue = isRunning ? 1.0 : 0.4
+        let hasAnySelection = (vm != nil) && currentLibraryTab == .standard
+        detailCaptureButton?.isEnabled = hasAnySelection
+        detailCaptureButton?.alphaValue = hasAnySelection ? 1.0 : 0.4
     }
 
     /// Build a `[CAPTION / value]` pair stacked vertically, with explicit Y
@@ -1021,22 +1531,80 @@ class VMLibraryWindowController: NSWindowController,
     }
 
     /// Status pill: pill-shaped label with a leading dot, color-coded by
-    /// `selectedVM` state. Background tinted with the same hue at 15% alpha.
+    /// `selectedVM` state. Background tinted with the same hue at ~12% alpha.
+    /// cornerRadius is half the pill height = perfect capsule. Caller sizes
+    /// the pill to ~96 × 22pt so the centered "◆ TEMPLATE" / "● RUNNING"
+    /// content has ~10pt of horizontal breathing room.
     private func makeStatusPill() -> NSTextField {
         let pill = NSTextField(labelWithString: "—")
         pill.alignment = .center
         pill.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .semibold)
         pill.wantsLayer = true
-        pill.layer?.cornerRadius = 10
+        pill.layer?.cornerRadius = 11        // half the 22pt height — proper capsule
         pill.layer?.borderWidth = LayoutConstants.borderHairline
         pill.drawsBackground = false
+        pill.isBordered = false              // no inset border around the text
+        pill.lineBreakMode = .byClipping     // never wrap the pill label
         return pill
+    }
+
+    /// Update the memory-allocation bar beneath the CPU·RAM cell.
+    /// `vmMemoryBytes == 0` clears the fill (empty state). Otherwise the
+    /// fill width is the VM's configured RAM as a fraction of total host
+    /// RAM, clamped to 100%. Color shifts green→orange→red as the share
+    /// rises so an over-provisioned guest reads as a warning at a glance.
+    ///
+    /// Honest framing: this is allocation, not live usage. We don't have
+    /// guest-tool channels for real RAM occupancy on macOS Virtualization,
+    /// so the bar tells the user "how much host RAM you've committed to
+    /// this VM" — useful when deciding whether to start a second VM.
+    private func updateMemoryAllocationBar(vmMemoryBytes: UInt64) {
+        guard let fill = detailMemoryBarFill,
+              let track = detailMemoryBarTrack else { return }
+        guard vmMemoryBytes > 0 else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fill.frame = NSRect(x: 0, y: 0, width: 0, height: fill.frame.height)
+            CATransaction.commit()
+            track.toolTip = nil
+            return
+        }
+        let hostBytes = ProcessInfo.processInfo.physicalMemory
+        let ratio = hostBytes > 0
+            ? min(1.0, Double(vmMemoryBytes) / Double(hostBytes))
+            : 0
+        let trackW = track.bounds.width
+        let fillW = CGFloat(ratio) * trackW
+
+        let color: NSColor
+        switch ratio {
+        case ..<0.25: color = AppColors.accentODGlow
+        case ..<0.50: color = AppColors.accentYellow
+        default:      color = AppColors.accentRed
+        }
+
+        // Disable implicit CALayer animations on layout updates so the
+        // bar snaps to its new width instead of slow-easing on every
+        // selection change (which feels laggy).
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fill.frame = NSRect(x: 0, y: 0, width: fillW, height: fill.frame.height)
+        fill.backgroundColor = color.cgColor
+        CATransaction.commit()
+
+        let vmGB = Double(vmMemoryBytes) / 1_073_741_824.0
+        let hostGB = Double(hostBytes) / 1_073_741_824.0
+        track.toolTip = String(
+            format: "Configured to use %.1f GB of %.0f GB host RAM (%.0f%%). This is allocation, not live usage.",
+            vmGB, hostGB, ratio * 100
+        )
     }
 
     /// Refresh the detail card from `tableView`'s current selection. Called
     /// whenever the selection changes or a VM's status changes.
     private func updateSelectedVMDetailCard() {
         guard selectedVMDetailCard != nil else { return }
+        defer { refreshQuickActionButtonsState() }
 
         // AI Sandbox tab pulls the row from the outline view, not the table.
         if currentLibraryTab == .aiSandbox {
@@ -1048,9 +1616,9 @@ class VMLibraryWindowController: NSWindowController,
 
         let selectedRow = tableView?.selectedRow ?? -1
 
-        let allVMs = vmManager.virtualMachines
+        let displayed = displayedStandardVMs
 
-        guard selectedRow >= 0, selectedRow < allVMs.count else {
+        guard selectedRow >= 0, selectedRow < displayed.count else {
             // Empty state — no VM picked
             detailNameLabel?.stringValue = "No VM selected"
             detailNameLabel?.textColor = AppColors.textMuted
@@ -1059,14 +1627,17 @@ class VMLibraryWindowController: NSWindowController,
             detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
             detailOSLabel?.stringValue = "—"
             detailResourcesLabel?.stringValue = "—"
+            updateMemoryAllocationBar(vmMemoryBytes: 0)
+            detailUptimeLabel?.stringValue = "—"
             detailDiskLabel?.stringValue = "—"
             detailNetworkModeLabel?.stringValue = "—"
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
+            detailPacketsLabel?.stringValue = "—"
             return
         }
 
-        let vm = allVMs[selectedRow]
+        let vm = displayed[selectedRow]
 
         detailNameLabel?.stringValue = vm.name
         detailNameLabel?.textColor = AppColors.textPrimary
@@ -1099,6 +1670,7 @@ class VMLibraryWindowController: NSWindowController,
         // CPU · RAM (memorySize is bytes; convert to GB)
         let ramGB = Double(vm.memorySize) / 1_073_741_824.0
         detailResourcesLabel?.stringValue = String(format: "%d · %.1f GB", vm.cpuCount, ramGB)
+        updateMemoryAllocationBar(vmMemoryBytes: vm.memorySize)
 
         // Disk — show "used / total". `onDiskBundleSize` returns the cached
         // value immediately and kicks a background re-scan if stale; the
@@ -1153,7 +1725,56 @@ class VMLibraryWindowController: NSWindowController,
             detailNetworkRateLabel?.textColor = AppColors.textMuted
             detailNetworkRateLabel?.toolTip = nil
         }
+
+        // Uptime — derived from the per-VM start stamp we capture on the
+        // .running transition. Stopped VMs show "—".
+        if vm.status == .running, let started = vmStartedAt[vm.id] {
+            let elapsed = Date().timeIntervalSince(started)
+            detailUptimeLabel?.stringValue = formatUptime(elapsed)
+        } else {
+            detailUptimeLabel?.stringValue = "—"
+        }
+
+        // Packets — cumulative rx+tx from the virtual switch port. NAT-mode
+        // VMs aren't on the switch, so they show "—" the same way the rate
+        // cell falls back to "host-routed".
+        if vm.networkConfig.mode == .virtual {
+            let total = currentPacketCount(forVMName: vm.name)
+            if let total {
+                detailPacketsLabel?.stringValue = Self.packetCountFormatter.string(
+                    from: NSNumber(value: total)) ?? "\(total)"
+            } else {
+                detailPacketsLabel?.stringValue = "—"
+            }
+        } else {
+            detailPacketsLabel?.stringValue = "—"
+        }
     }
+
+    /// Cumulative `packetsRx + packetsTx` for a VM from the virtual switch
+    /// port stats. Returns nil if the switch isn't running or no port
+    /// matches this VM name.
+    private func currentPacketCount(forVMName name: String) -> UInt64? {
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+        guard let isRunning = stats["running"] as? Bool, isRunning,
+              let ports = stats["ports"] as? [[String: Any]] else { return nil }
+        for port in ports {
+            guard let portName = port["vmName"] as? String, portName == name else { continue }
+            let rx = (port["packetsRx"] as? NSNumber)?.uint64Value ?? 0
+            let tx = (port["packetsTx"] as? NSNumber)?.uint64Value ?? 0
+            return rx + tx
+        }
+        return nil
+    }
+
+    /// Cached NumberFormatter for thousands-separated packet counts.
+    /// Reusable across every detail-card refresh.
+    private static let packetCountFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f
+    }()
 
     /// Poll the VirtualNetworkSwitch port stats and turn cumulative byte
     /// counters into a moving bytes/sec rate per VM. Called on a 1.5s timer
@@ -1200,7 +1821,33 @@ class VMLibraryWindowController: NSWindowController,
             // Update only the Traffic column to keep the sparklines fresh
             // without re-rendering every cell on every tick.
             refreshTrafficColumn()
+            // Push per-row intensities into the falling-packets overlay
+            // so the decorative cascade tracks real activity.
+            refreshTrafficFallOverlay()
         }
+    }
+
+    /// Compute per-row intensities (0..1) from the latest rate samples and
+    /// hand them to `trafficFallOverlay`. The overlay handles its own
+    /// timer / spawning / drawing — the controller just needs to publish
+    /// the activity map.
+    ///
+    /// Intensity is `min(1, totalBps / 1 MB/s)` clamped: 1 MB/s of mixed
+    /// rx+tx maps to a fully-saturated cascade, anything heavier still
+    /// caps at 1.0 so we don't burn a runaway spawn rate on busy guests.
+    private func refreshTrafficFallOverlay() {
+        guard let overlay = trafficFallOverlay,
+              currentLibraryTab == .standard else { return }
+        let vms = displayedStandardVMs
+        var intensities: [Int: Double] = [:]
+        let saturation: Double = 1_048_576.0   // 1 MB/s
+        for (i, vm) in vms.enumerated() where vm.status == .running {
+            guard let rate = liveRateBps[vm.name] else { continue }
+            let total = rate.down + rate.up
+            guard total > 0 else { continue }
+            intensities[i] = min(1.0, total / saturation)
+        }
+        overlay.setActiveRows(intensities)
     }
 
     /// Append a (down + up) bytes/sec sample to the rolling buffer for `vmName`,
@@ -1228,8 +1875,7 @@ class VMLibraryWindowController: NSWindowController,
                   let spark = cell.subviews.first(where: { $0 is SparklineView }) as? SparklineView else {
                 continue
             }
-            let vmName = vmManager.virtualMachines.indices.contains(row)
-                ? vmManager.virtualMachines[row].name : ""
+            let vmName = standardVM(at: row)?.name ?? ""
             spark.samples = trafficSamples[vmName] ?? []
         }
     }
@@ -1248,10 +1894,13 @@ class VMLibraryWindowController: NSWindowController,
             detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
             detailOSLabel?.stringValue = "—"
             detailResourcesLabel?.stringValue = "—"
+            updateMemoryAllocationBar(vmMemoryBytes: 0)
+            detailUptimeLabel?.stringValue = "—"
             detailDiskLabel?.stringValue = "—"
             detailNetworkModeLabel?.stringValue = "—"
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
+            detailPacketsLabel?.stringValue = "—"
             return
         }
 
@@ -1270,6 +1919,14 @@ class VMLibraryWindowController: NSWindowController,
 
         detailOSLabel?.stringValue = "macOS"
         detailResourcesLabel?.stringValue = "4 · 8 GB"
+        // AI Sandbox bundle is fixed at 8 GB. Drive the allocation bar
+        // with that same value so the bar matches the text.
+        updateMemoryAllocationBar(vmMemoryBytes: 8 * 1_073_741_824)
+        // Uptime + packet counters don't apply to a bundle row (the bundle
+        // isn't a runtime VM until it's booted into a session, at which
+        // point that session would be selected separately).
+        detailUptimeLabel?.stringValue = "—"
+        detailPacketsLabel?.stringValue = "—"
         detailDiskLabel?.stringValue = ByteCountFormatter.string(
             fromByteCount: bundle.diskBytes, countStyle: .binary)
 
@@ -1322,6 +1979,50 @@ class VMLibraryWindowController: NSWindowController,
         return label
     }
 
+    /// VMs that should appear as rows in the Standard tab right now,
+    /// accounting for any user-applied running-VM focus filter. When
+    /// `runningFilterIDs` is nil the master list is returned unchanged.
+    /// All table-row accessors (numberOfRows, viewFor, selection-based
+    /// action handlers) must read through this — never `vmManager.virtualMachines`
+    /// directly — so row indices stay consistent with what's on screen.
+    private var displayedStandardVMs: [VMConfiguration] {
+        let all = vmManager.virtualMachines
+        guard let ids = runningFilterIDs, !ids.isEmpty else { return all }
+        return all.filter { ids.contains($0.id) }
+    }
+
+    /// Safe row→VM lookup against the currently-displayed standard list.
+    /// Returns nil if `row` is out of bounds (e.g. table reload race).
+    private func standardVM(at row: Int) -> VMConfiguration? {
+        let list = displayedStandardVMs
+        guard row >= 0, row < list.count else { return nil }
+        return list[row]
+    }
+
+    /// Recompute the (router, guest) row pairs that the connection overlay
+    /// renders. Anchored on running router VMs so each link appears once
+    /// (router→guest, never the reverse). Called whenever a VM status
+    /// changes or the table reloads.
+    ///
+    /// Row indices are resolved against `displayedStandardVMs` (i.e. the
+    /// filtered list the table is showing), not the master list, so the
+    /// brackets stay aligned with the visible rows when a filter is on.
+    private func refreshConnectionOverlay() {
+        guard let overlay = connectionOverlay else { return }
+        let vms = displayedStandardVMs
+        var pairs: [(fromRow: Int, toRow: Int)] = []
+        for (i, vm) in vms.enumerated() {
+            guard vm.status == .running else { continue }
+            guard vm.networkConfig.isRouter else { continue }
+            for peer in vmManager.networkPeers(of: vm) where peer.status == .running {
+                if let j = vms.firstIndex(where: { $0.id == peer.id }) {
+                    pairs.append((fromRow: i, toRow: j))
+                }
+            }
+        }
+        overlay.connections = pairs
+    }
+
     /// Refresh empty-state overlay visibility from the current data sources.
     /// Called whenever rows are added / removed / on tab switch.
     private func refreshEmptyStateOverlays() {
@@ -1346,6 +2047,7 @@ class VMLibraryWindowController: NSWindowController,
     private func addLibraryTabsHeader(in contentView: NSView, frame: NSRect) {
         libraryTabControl?.removeFromSuperview()
         recoveryModeCheckbox?.removeFromSuperview()
+        runningFilterButton?.removeFromSuperview()
 
         let tabs = NSSegmentedControl(labels: ["Standard VMs", "AI Sandbox"],
                                       trackingMode: .selectOne,
@@ -1378,6 +2080,134 @@ class VMLibraryWindowController: NSWindowController,
         check.autoresizingMask = [.minYMargin]
         contentView.addSubview(check)
         recoveryModeCheckbox = check
+
+        // "▼ Focus Running" button — opens a menu of currently-running VMs
+        // with check marks. Selecting one or more focuses the table to only
+        // those rows (great when 6+ VMs are listed but you only care about
+        // the 2 that are firing right now). "Show all" clears the filter.
+        // Anchored to the right side of the tabs row.
+        let filterBtnWidth: CGFloat = 150
+        let filterBtnX = frame.origin.x + frame.width - filterBtnWidth
+        let filterBtn = TacticalHoverButton(title: "▼ Focus Running",
+                                            target: self,
+                                            action: #selector(showRunningFilterMenu(_:)))
+        filterBtn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
+        filterBtn.frame = NSRect(x: filterBtnX,
+                                 y: frame.origin.y + (frame.height - 22) / 2,
+                                 width: filterBtnWidth,
+                                 height: 22)
+        filterBtn.isBordered = false
+        filterBtn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        filterBtn.wantsLayer = true
+        filterBtn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        filterBtn.layer?.borderColor = AppColors.borderOD.cgColor
+        filterBtn.layer?.borderWidth = 1.0
+        filterBtn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        filterBtn.attributedTitle = NSAttributedString(string: "▼ Focus Running", attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+        ])
+        filterBtn.toolTip = "Focus the table on specific running VMs (multi-select). Useful when many VMs are listed but only a couple are operationally relevant right now."
+        filterBtn.autoresizingMask = [.minXMargin, .minYMargin]
+        filterBtn.setAccessibilityLabel("Focus running VMs")
+        contentView.addSubview(filterBtn)
+        runningFilterButton = filterBtn
+        updateRunningFilterButtonTitle()
+    }
+
+    /// Sync the focus-filter button title with current filter state. Shows
+    /// the count when a filter is active so the user knows the table is
+    /// trimmed without having to expand the menu.
+    private func updateRunningFilterButtonTitle() {
+        guard let btn = runningFilterButton else { return }
+        let title: String
+        if let ids = runningFilterIDs, !ids.isEmpty {
+            title = "▼ Focus: \(ids.count)"
+        } else {
+            title = "▼ Focus Running"
+        }
+        btn.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+        ])
+        let isActive = runningFilterIDs != nil && !(runningFilterIDs?.isEmpty ?? true)
+        // When the filter is active, the button stays glowing green
+        // even when not hovered — push the same color into the hover-
+        // button's idle slot so it doesn't get reset on mouse exit.
+        let activeIdleBorder = isActive ? AppColors.accentODGlow : AppColors.borderOD
+        if let hoverBtn = btn as? TacticalHoverButton {
+            hoverBtn.setHoverTreatment(idleBorder: activeIdleBorder,
+                                       hoverBorder: AppColors.accentODGlow)
+        } else {
+            btn.layer?.borderColor = activeIdleBorder.cgColor
+        }
+    }
+
+    /// Pop a menu of running VMs with check marks. Toggling an item edits
+    /// `runningFilterIDs`; the "Show all" item resets to nil. Empty list
+    /// when nothing is running so the user sees that explicitly rather
+    /// than a confusing empty menu.
+    @objc private func showRunningFilterMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let showAll = NSMenuItem(title: "Show all VMs",
+                                 action: #selector(focusClearFilter(_:)),
+                                 keyEquivalent: "")
+        showAll.target = self
+        if runningFilterIDs == nil || runningFilterIDs?.isEmpty == true {
+            showAll.state = .on
+        }
+        menu.addItem(showAll)
+        menu.addItem(.separator())
+
+        let running = vmManager.virtualMachines.filter { $0.status == .running }
+        if running.isEmpty {
+            let none = NSMenuItem(title: "— No VMs running —",
+                                  action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        } else {
+            for vm in running {
+                let item = NSMenuItem(title: vm.name,
+                                      action: #selector(focusToggleVM(_:)),
+                                      keyEquivalent: "")
+                item.target = self
+                item.representedObject = vm.id
+                if runningFilterIDs?.contains(vm.id) == true {
+                    item.state = .on
+                }
+                menu.addItem(item)
+            }
+        }
+
+        let origin = NSPoint(x: 0, y: sender.bounds.height + 2)
+        menu.popUp(positioning: nil, at: origin, in: sender)
+    }
+
+    @objc private func focusClearFilter(_ sender: NSMenuItem) {
+        runningFilterIDs = nil
+        applyRunningFilterChange()
+    }
+
+    @objc private func focusToggleVM(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        var set = runningFilterIDs ?? []
+        if set.contains(id) { set.remove(id) } else { set.insert(id) }
+        runningFilterIDs = set.isEmpty ? nil : set
+        applyRunningFilterChange()
+    }
+
+    /// Common after-edit path: refresh the table + supporting overlays so
+    /// the change is visible immediately, and update the button title so
+    /// the user sees the new active-count badge.
+    private func applyRunningFilterChange() {
+        tableView?.reloadData()
+        updateRunningFilterButtonTitle()
+        updateButtonStates()
+        updateSelectedVMDetailCard()
+        refreshEmptyStateOverlays()
+        refreshConnectionOverlay()
     }
 
     @objc private func libraryTabChanged(_ sender: NSSegmentedControl) {
@@ -1459,6 +2289,7 @@ class VMLibraryWindowController: NSWindowController,
         for spec in columnSpecs {
             let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(spec.id))
             col.title = spec.title
+            col.headerCell = TacticalTableHeaderCell(textCell: spec.title)
             col.width = spec.width
             col.minWidth = 60
             outline.addTableColumn(col)
@@ -1591,14 +2422,10 @@ class VMLibraryWindowController: NSWindowController,
         dot.frame = CGRect(x: padding, y: (height - dotSize) / 2, width: dotSize, height: dotSize)
         bar.layer?.addSublayer(dot)
         statusBarPulseDot = dot
-        // Subtle pulse animation so the dot reads as "live"
-        let pulse = CABasicAnimation(keyPath: "opacity")
-        pulse.fromValue = 1.0
-        pulse.toValue = 0.45
-        pulse.duration = 1.4
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        dot.add(pulse, forKey: "pulse")
+        // Pulse animation is managed by refreshBottomStatusBar() so the
+        // dot only pulses while at least one VM is running — a steady
+        // (paused) dot when idle stops the bar from screaming "LIVE" at
+        // the user when nothing is actually live.
 
         // Three label segments left-to-right + a right-anchored disk/version
         var x = padding + dotSize + LayoutConstants.spacingSM
@@ -1665,8 +2492,28 @@ class VMLibraryWindowController: NSWindowController,
         let runningCount = vmManager.getRunningVMsCount()
         let totalCount = vmManager.virtualMachines.count
         statusBarRunningLabel?.stringValue = "\(runningCount) of \(totalCount) running"
-        statusBarPulseDot?.fillColor = (runningCount > 0
-            ? AppColors.statusRunning : AppColors.statusStopped).cgColor
+        // Pulse + shadow are only meaningful when something is actually
+        // running — keep the dot steady (no animation, dim shadow) when
+        // idle so it doesn't send a misleading "live" signal.
+        let isActive = runningCount > 0
+        if let dot = statusBarPulseDot {
+            dot.fillColor = (isActive ? AppColors.statusRunning : AppColors.statusStopped).cgColor
+            dot.shadowOpacity = isActive ? 0.8 : 0.0
+            if isActive {
+                if dot.animation(forKey: "pulse") == nil {
+                    let pulse = CABasicAnimation(keyPath: "opacity")
+                    pulse.fromValue = 1.0
+                    pulse.toValue = 0.45
+                    pulse.duration = 1.4
+                    pulse.autoreverses = true
+                    pulse.repeatCount = .infinity
+                    dot.add(pulse, forKey: "pulse")
+                }
+            } else {
+                dot.removeAnimation(forKey: "pulse")
+                dot.opacity = 0.55
+            }
+        }
 
         // Switch state
         let stats = VirtualNetworkSwitch.shared.getStatistics()
@@ -1723,6 +2570,11 @@ class VMLibraryWindowController: NSWindowController,
                 ? "Capture · \(formatCount(totalPackets)) pkts"
                 : "Capture · idle"
             statusBarCaptureLabel?.textColor = capturing ? AppColors.accentOrangeHot : AppColors.textMuted
+
+            // Packet panel header: toggle the CAPTURING pill + repaint
+            // the rate readout from the same data source.
+            setPacketCapturingActive(capturing)
+            refreshPacketPanelRate(totalPackets: totalPackets, capturing: capturing)
         }
 
         // Disk free + version
@@ -1809,20 +2661,37 @@ class VMLibraryWindowController: NSWindowController,
         packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 140, height: 20)
         packetPanel.addSubview(packetTitle)
 
-        // Tab control (Packets / Protocols) — shifted right to clear the
-        // wider "▸ LIVE TRAFFIC" title.
-        let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 160, y: packetPanelHeight - 30, width: 140, height: 24)
-        tabControl.selectedSegment = 0
-        Self.applyTacticalStyle(to: tabControl)
-        packetPanel.addSubview(tabControl)
-        packetLogTabControl = tabControl
+        // CAPTURING pill — sits next to the title with a pulsing orange dot.
+        // Hidden when not capturing; visible (with the pulse animation) when
+        // PacketCaptureManager is actively recording.
+        let capturingPill = makeCapturingPill()
+        capturingPill.frame = NSRect(x: 160, y: packetPanelHeight - 28, width: 110, height: 20)
+        packetPanel.addSubview(capturingPill)
+        packetCapturingPill = capturingPill
 
-        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols.
+        // Live rate readout — "↓ 12.4 MB/s ↑ 0.3 MB/s · 1,284 pkts".
+        // Right-anchored so it autoresizes off the right edge of the panel.
+        let rateLabel = NSTextField(labelWithString: "")
+        rateLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        rateLabel.textColor = AppColors.textMuted
+        rateLabel.alignment = .right
+        rateLabel.isBordered = false
+        rateLabel.drawsBackground = false
+        rateLabel.isEditable = false
+        let rateW: CGFloat = 280
+        rateLabel.frame = NSRect(x: packetPanelWidth - rateW - 160,
+                                 y: packetPanelHeight - 28,
+                                 width: rateW, height: 20)
+        rateLabel.autoresizingMask = [.minXMargin]
+        packetPanel.addSubview(rateLabel)
+        packetRateLabel = rateLabel
+
+        // VM Filter tabs (macOS / Kali / All) — moved to a second header
+        // row below the rate readout so they don't fight the title bar.
         // Widened "macOS" segment from 45 → 60 so the full label fits at 11pt
         // (the previous 45pt clipped to "ma..." on Aqua's roundRect style).
         let vmFilterControl = NSSegmentedControl(labels: ["macOS", "Kali", "All"], trackingMode: .selectOne, target: self, action: #selector(vmFilterChanged(_:)))
-        vmFilterControl.frame = NSRect(x: 310, y: packetPanelHeight - 30, width: 160, height: 24)
+        vmFilterControl.frame = NSRect(x: 12, y: packetPanelHeight - 56, width: 160, height: 22)
         vmFilterControl.selectedSegment = 0  // Default to macOS
         Self.applyTacticalStyle(to: vmFilterControl)
         vmFilterControl.setWidth(60, forSegment: 0)  // macOS — was 45 (truncated)
@@ -1831,53 +2700,82 @@ class VMLibraryWindowController: NSWindowController,
         packetPanel.addSubview(vmFilterControl)
         packetVMFilterControl = vmFilterControl
 
-        // Filter ARP checkbox (checked by default) — moved right to clear
-        // the widened macOS/Kali/All segmented control.
+        // Filter ARP checkbox (checked by default) — on row 2 next to the
+        // VM filter.
         let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
-        arpCheckbox.frame = NSRect(x: 480, y: packetPanelHeight - 30, width: 90, height: 24)
+        arpCheckbox.frame = NSRect(x: 188, y: packetPanelHeight - 56, width: 90, height: 22)
         arpCheckbox.state = .on  // Checked by default
         arpCheckbox.font = NSFont.systemFont(ofSize: 11)
         arpCheckbox.contentTintColor = NSColor.white
         packetPanel.addSubview(arpCheckbox)
 
-        // ARP filtered count label — uses the amber token instead of an
-        // inline hex literal so the legend stays consistent.
+        // ARP filtered count label.
         let arpCountLabel = NSTextField(labelWithString: "(0)")
-        arpCountLabel.frame = NSRect(x: 568, y: packetPanelHeight - 28, width: 45, height: 18)
+        arpCountLabel.frame = NSRect(x: 276, y: packetPanelHeight - 54, width: 45, height: 18)
         arpCountLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
         arpCountLabel.textColor = AppColors.accentYellow
         arpCountLabel.alignment = .left
         packetPanel.addSubview(arpCountLabel)
         arpFilterCountLabel = arpCountLabel
 
-        // Open Full Analysis button - top right (styled to match toolbar)
-        let openButton = NSButton(title: "Open Full Analysis", target: self, action: #selector(openPacketAnalysisWindow(_:)))
-        openButton.frame = NSRect(x: packetPanelWidth - 140, y: packetPanelHeight - 32, width: 130, height: 26)
+        // "⌕ Filter ▾" button — pops the same malware-analysis preset menu
+        // that PacketAnalysisWindowController uses. Picking a preset opens
+        // the full Packet Analysis window with that filter pre-applied so
+        // the user can dig in. Right-anchored, sits to the left of Expand.
+        let filterButton = TacticalHoverButton(title: "⌕ Filter ▾",
+                                               target: self,
+                                               action: #selector(showPacketFilterMenu(_:)))
+        filterButton.frame = NSRect(x: packetPanelWidth - 190, y: packetPanelHeight - 56,
+                                    width: 90, height: 22)
+        filterButton.isBordered = false
+        filterButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        filterButton.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        filterButton.layer?.borderColor = AppColors.borderOD.cgColor
+        filterButton.layer?.borderWidth = 1.0
+        filterButton.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        filterButton.attributedTitle = NSAttributedString(string: "⌕ Filter ▾", attributes: [
+            .foregroundColor: AppColors.textOD,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+        ])
+        filterButton.toolTip = "Apply a malware-analysis filter preset — opens the full Packet Analysis window with the selected filter."
+        filterButton.autoresizingMask = [.minXMargin]
+        filterButton.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
+        packetPanel.addSubview(filterButton)
+
+        // "Expand →" button (was "Open Full Analysis"). Pops the dedicated
+        // Packet Analysis window. Right-anchored on row 2.
+        let openButton = NSButton(title: "Expand →", target: self, action: #selector(openPacketAnalysisWindow(_:)))
+        openButton.frame = NSRect(x: packetPanelWidth - 95, y: packetPanelHeight - 56,
+                                  width: 85, height: 22)
         openButton.isBordered = false
-        openButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        openButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         openButton.wantsLayer = true
         openButton.layer?.backgroundColor = AppColors.backgroundButton.cgColor
-        openButton.layer?.borderColor = AppColors.accentCyan.withAlphaComponent(0.5).cgColor
+        openButton.layer?.borderColor = AppColors.borderOD.cgColor
         openButton.layer?.borderWidth = 1.0
-        openButton.layer?.cornerRadius = 5
-        openButton.contentTintColor = AppColors.accentCyan
-        openButton.attributedTitle = NSAttributedString(string: "Open Full Analysis", attributes: [
-            .foregroundColor: AppColors.accentCyan,
-            .font: NSFont.systemFont(ofSize: 10, weight: .medium)
+        openButton.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        openButton.attributedTitle = NSAttributedString(string: "Expand →", attributes: [
+            .foregroundColor: AppColors.textOD,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
         ])
+        openButton.toolTip = "Open the full Packet Analysis window with deep filters and packet inspection"
         openButton.autoresizingMask = [.minXMargin]
         packetPanel.addSubview(openButton)
 
-        // Separator below header — OD hairline, matches the panel border.
-        let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 45, width: packetPanelWidth - 20, height: 1))
+        // Separator below row 2 — OD hairline.
+        let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 66,
+                                                  width: packetPanelWidth - 20, height: 1))
         packetSeparator.boxType = .custom
         packetSeparator.borderWidth = 0
         packetSeparator.fillColor = AppColors.borderOD
         packetSeparator.autoresizingMask = [.width]
         packetPanel.addSubview(packetSeparator)
 
-        // Packets list container - horizontal layout
-        let packetsScrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        // Packets list container - shifted down to clear the two-row header.
+        let listTopMargin: CGFloat = 70   // was 60
+        let packetsScrollView = NSScrollView(frame: NSRect(x: 8, y: 8,
+                                                          width: packetPanelWidth - 16,
+                                                          height: packetPanelHeight - listTopMargin))
         packetsScrollView.autoresizingMask = [.width]
         packetsScrollView.hasHorizontalScroller = false
         packetsScrollView.hasVerticalScroller = true
@@ -1885,7 +2783,9 @@ class VMLibraryWindowController: NSWindowController,
         packetsScrollView.drawsBackground = false
         packetsScrollView.borderType = .noBorder
 
-        let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0,
+                                                       width: packetPanelWidth - 16,
+                                                       height: packetPanelHeight - listTopMargin))
         packetsTextView.isEditable = false
         packetsTextView.drawsBackground = false
         packetsTextView.textColor = AppColors.textOD
@@ -1896,8 +2796,11 @@ class VMLibraryWindowController: NSWindowController,
         packetPanel.addSubview(packetsScrollView)
         packetListContainer = packetsScrollView
 
-        // Protocol stats container (hidden by default)
-        let protocolView = NSView(frame: NSRect(x: 8, y: 8, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        // Protocol stats container (hidden — Protocols tab removed; full
+        // stats live in the Packet Analysis window).
+        let protocolView = NSView(frame: NSRect(x: 8, y: 8,
+                                                width: packetPanelWidth - 16,
+                                                height: packetPanelHeight - listTopMargin))
         protocolView.wantsLayer = true
         protocolView.isHidden = true
         protocolView.autoresizingMask = [.width]
@@ -2014,6 +2917,29 @@ class VMLibraryWindowController: NSWindowController,
         // Defer to AppDelegate's singleton — avoids two analysis windows
         // rendering the same packet stream independently.
         NotificationCenter.default.post(name: .openPacketAnalysis, object: nil)
+    }
+
+    /// Pop the malware-analysis preset menu anchored to the Filter button.
+    /// Selecting a preset opens the Packet Analysis window with that filter
+    /// pre-applied (see `presetFilterChosen(_:)`).
+    @objc private func showPacketFilterMenu(_ sender: NSButton) {
+        let menu = PacketFilterPresets.buildMenu(target: self,
+                                                 action: #selector(presetFilterChosen(_:)))
+        // Anchor the menu below the button's left edge.
+        let origin = NSPoint(x: 0, y: sender.bounds.height + 4)
+        menu.popUp(positioning: nil, at: origin, in: sender)
+    }
+
+    /// Called when the user picks a preset from the library packet panel's
+    /// Filter button. Opens the full Packet Analysis window with that
+    /// preset pre-applied — the library panel is a quick preview, deep
+    /// filtering happens in the dedicated window.
+    @objc private func presetFilterChosen(_ sender: NSMenuItem) {
+        NotificationCenter.default.post(
+            name: .openPacketAnalysis,
+            object: nil,
+            userInfo: ["presetTitle": sender.title]
+        )
     }
 
     @objc private func handlePacketCaptured(_ notification: Notification) {
@@ -2581,13 +3507,11 @@ class VMLibraryWindowController: NSWindowController,
         libraryTabControl?.frame.origin.y = libraryTabsY
         recoveryModeCheckbox?.frame.origin.y = libraryTabsY + (libraryTabsHeight - 20) / 2
 
-        // Toolbar buttons re-anchor to the new top — autoresize keeps the
-        // horizontal flow, this just updates Y.
-        let topButtons: [NSButton?] = [startButton, newButton, importButton,
-                                       configureButton, cloneButton,
-                                       renameButton, deleteButton]
-        for button in topButtons.compactMap({ $0 }) {
-            button.frame.origin.y = toolbarY
+        // Toolbar pill containers re-anchor to the new top Y. Each pill's
+        // X / width stays the same (group sizes are fixed), only the Y of
+        // the row needs updating.
+        for pill in toolbarPillContainers {
+            pill.frame.origin.y = toolbarY - 1
         }
 
         // Detail card stays at fixed Y (autoresize handles its width).
@@ -2612,6 +3536,12 @@ class VMLibraryWindowController: NSWindowController,
     @objc private func handleVMStatusChanged(_ notification: Notification) {
         // Refresh the table to show updated status
         DispatchQueue.main.async {
+            // Track per-VM start time so the Uptime metric in the detail
+            // card has a reference point. We don't persist this on the
+            // VMConfiguration model — start times are intrinsically a
+            // runtime concern and reset every launch.
+            self.refreshVMStartTimes()
+
             self.tableView?.reloadData()
 
             // Update status bar with current running VMs
@@ -2619,7 +3549,46 @@ class VMLibraryWindowController: NSWindowController,
 
             // Selected VM's pill + live rate also depend on status
             self.updateSelectedVMDetailCard()
+
+            // Re-evaluate VM-VM connection brackets on running pills
+            self.refreshConnectionOverlay()
         }
+    }
+
+    /// Walk the current VM list. For each VM newly in `.running` state,
+    /// stamp `Date()` if we don't already have one. For each VM not in
+    /// `.running`, drop any stored stamp. Idempotent — safe to call on
+    /// every status-change notification.
+    private func refreshVMStartTimes() {
+        let now = Date()
+        var seen = Set<UUID>()
+        for vm in vmManager.virtualMachines {
+            seen.insert(vm.id)
+            if vm.status == .running {
+                if vmStartedAt[vm.id] == nil {
+                    vmStartedAt[vm.id] = now
+                }
+            } else {
+                vmStartedAt.removeValue(forKey: vm.id)
+            }
+        }
+        // GC entries for VMs that were deleted while running.
+        vmStartedAt = vmStartedAt.filter { seen.contains($0.key) }
+    }
+
+    /// Format a TimeInterval as compact uptime ("2h 14m", "47m 12s",
+    /// "3d 4h"). Picks the highest two non-zero units.
+    private func formatUptime(_ seconds: TimeInterval) -> String {
+        guard seconds >= 1 else { return "<1s" }
+        let total = Int(seconds)
+        let d = total / 86_400
+        let h = (total % 86_400) / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return "\(h)h \(m)m" }
+        if m > 0 { return "\(m)m \(s)s" }
+        return "\(s)s"
     }
 
     @objc private func handleVMBundleSizeUpdated(_ notification: Notification) {
@@ -2630,9 +3599,8 @@ class VMLibraryWindowController: NSWindowController,
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let selectedRow = self.tableView?.selectedRow ?? -1
-            guard selectedRow >= 0,
-                  selectedRow < self.vmManager.virtualMachines.count else { return }
-            if self.vmManager.virtualMachines[selectedRow].id == updatedId {
+            guard let vm = self.standardVM(at: selectedRow) else { return }
+            if vm.id == updatedId {
                 self.updateSelectedVMDetailCard()
             }
         }
@@ -2791,7 +3759,7 @@ class VMLibraryWindowController: NSWindowController,
 
     func numberOfRows(in tableView: NSTableView) -> Int {
         switch currentLibraryTab {
-        case .standard:  return vmManager.virtualMachines.count
+        case .standard:  return displayedStandardVMs.count
         case .aiSandbox: return aiSandboxBundles.count
         }
     }
@@ -2817,14 +3785,29 @@ class VMLibraryWindowController: NSWindowController,
         }
 
         let vmName: String? = {
-            if currentLibraryTab == .standard,
-               vmManager.virtualMachines.indices.contains(row) {
-                return vmManager.virtualMachines[row].name
+            if currentLibraryTab == .standard {
+                return standardVM(at: row)?.name
             }
             return nil
         }()
         spark.samples = vmName.flatMap { trafficSamples[$0] } ?? []
         return cell
+    }
+
+    /// Return the tactical row view so selection paints an OD-green band
+    /// with a 2pt accent stripe instead of AppKit's stock blue/grey.
+    /// Shared between the standard table and the AI Sandbox outline view
+    /// (NSOutlineView inherits this dispatch from NSTableView).
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        return TacticalTableRowView()
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let row = TacticalTableRowView()
+        // The outline view has a disclosure triangle in the leading edge,
+        // so suppress the 2pt accent stripe to avoid a visual clash.
+        row.accentStripeWidth = 0
+        return row
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -2861,6 +3844,21 @@ class VMLibraryWindowController: NSWindowController,
 
         guard let finalCell = cell else { return nil }
 
+        // Per-column alignment — numeric values right-align so column tens
+        // and units stack cleanly; text values stay leading-aligned.
+        let columnIdRaw = tableColumn?.identifier.rawValue ?? ""
+        finalCell.textField?.alignment = Self.columnAlignment(forColumnID: columnIdRaw)
+        // Numeric columns also get a monospaced font so digits have
+        // tabular widths — "12 GB" and "108 GB" line up exactly,
+        // which is impossible in a proportional font. Other columns
+        // stay with the system default for readability.
+        if Self.columnUsesMonospacedFont(forColumnID: columnIdRaw) {
+            finalCell.textField?.font = NSFont.monospacedDigitSystemFont(
+                ofSize: NSFont.systemFontSize, weight: .regular)
+        } else {
+            finalCell.textField?.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        }
+
         // AI Sandbox tab uses the same columns but filled from the bundle row
         if currentLibraryTab == .aiSandbox {
             guard row < aiSandboxBundles.count else { return nil }
@@ -2871,9 +3869,24 @@ class VMLibraryWindowController: NSWindowController,
             case "NameColumn":
                 finalCell.textField?.stringValue = bundle.displayName + (bundle.isBase ? " (base)" : "")
             case "StatusColumn":
-                finalCell.textField?.stringValue = bundle.isBase ? "Template" : "Session"
+                // Template vs Session is the AI Sandbox tab's analog of the
+                // standard tab's status pill. Use the same inline-pill
+                // pattern: leading glyph + tinted text so the user can
+                // see "this is a template" at a glance.
+                let (glyph, color, text): (String, NSColor, String) = bundle.isBase
+                    ? ("◆", AppColors.accentOrange,    "Template")
+                    : ("●", AppColors.statusRunning,   "Session")
+                let attr = NSMutableAttributedString(string: glyph + "  ", attributes: [
+                    .foregroundColor: color
+                ])
+                attr.append(NSAttributedString(string: text, attributes: [
+                    .foregroundColor: color.withAlphaComponent(0.92)
+                ]))
+                finalCell.textField?.attributedStringValue = attr
             case "OSColumn":
-                finalCell.textField?.stringValue = "macOS"
+                // Same ⌘ glyph treatment we use on the standard tab; AI
+                // Sandbox bundles are always macOS so this is constant.
+                finalCell.textField?.stringValue = "⌘  macOS"
             case "CPUColumn":
                 finalCell.textField?.stringValue = bundle.id?.uuidString.prefix(8).description ?? "—"
             case "MemoryColumn":
@@ -2897,16 +3910,41 @@ class VMLibraryWindowController: NSWindowController,
         }
 
         // Standard VMs tab — existing behavior
-        guard row < vmManager.virtualMachines.count else { return nil }
-        let vm = vmManager.virtualMachines[row]
+        guard let vm = standardVM(at: row) else { return nil }
 
         switch tableColumn?.identifier.rawValue {
         case "NameColumn":
             finalCell.textField?.stringValue = vm.name
         case "StatusColumn":
-            finalCell.textField?.stringValue = vm.statusDisplayString
+            // Inline status indicator: leading colored dot + status text in
+            // a matching tint. Same color palette as the detail-card pill so
+            // the table cell and the card read as the same vocabulary.
+            let (glyph, color): (String, NSColor) = {
+                switch vm.status {
+                case .running:  return ("●",  AppColors.statusRunning)
+                case .starting: return ("◐",  AppColors.statusPaused)
+                case .stopping: return ("◐",  AppColors.statusPaused)
+                case .stopped:  return ("○",  AppColors.statusStopped)
+                }
+            }()
+            let attr = NSMutableAttributedString(string: glyph + "  ", attributes: [
+                .foregroundColor: color
+            ])
+            attr.append(NSAttributedString(string: vm.statusDisplayString, attributes: [
+                .foregroundColor: color.withAlphaComponent(0.92)
+            ]))
+            finalCell.textField?.attributedStringValue = attr
         case "OSColumn":
-            finalCell.textField?.stringValue = vm.osType
+            // Leading glyph by OS family: 🐧 Linux, ⌘ macOS, generic ◇.
+            // Subtle visual key that lets the user spot guest OS at a
+            // glance without scanning the full string.
+            let osGlyph: String
+            switch vm.osType.lowercased() {
+            case let s where s.contains("linux"): osGlyph = "🐧"
+            case let s where s.contains("mac"):   osGlyph = "⌘"
+            default:                              osGlyph = "◇"
+            }
+            finalCell.textField?.stringValue = "\(osGlyph)  \(vm.osType)"
         case "CPUColumn":
             finalCell.textField?.stringValue = "\(vm.cpuCount) cores"
         case "MemoryColumn":
@@ -3088,7 +4126,8 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        selectedVM = vmManager.virtualMachines[selectedRow]
+        guard let vmToStart = standardVM(at: selectedRow) else { return }
+        selectedVM = vmToStart
 
         // Update last used date
         vmManager.updateLastUsedDate(selectedVM!)
@@ -3145,7 +4184,7 @@ class VMLibraryWindowController: NSWindowController,
             showAlert(message: "Please select a VM to delete")
             return
         }
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Delete VM?"
@@ -3157,6 +4196,13 @@ class VMLibraryWindowController: NSWindowController,
         if alert.runModal() == .alertFirstButtonReturn {
             do {
                 try vmManager.deleteVM(vm)
+                // Drop any focus-filter membership for the deleted VM
+                // so the set doesn't ghost a phantom UUID until the
+                // user manually clears the filter.
+                if var ids = runningFilterIDs {
+                    ids.remove(vm.id)
+                    runningFilterIDs = ids.isEmpty ? nil : ids
+                }
                 refreshTable()
             } catch {
                 showAlert(message: "Failed to delete VM: \(error.localizedDescription)")
@@ -3172,7 +4218,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Rename VM"
@@ -3204,7 +4250,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Clone VM"
@@ -3272,7 +4318,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
         showConfigureVMDialog(vm)
     }
 
@@ -3600,6 +4646,7 @@ class VMLibraryWindowController: NSWindowController,
             self.tableView?.reloadData()
             self.updateButtonStates()
             self.refreshEmptyStateOverlays()
+            self.refreshConnectionOverlay()
         }
     }
 

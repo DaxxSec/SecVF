@@ -578,6 +578,60 @@ class VMManager {
         }
     }
 
+    // MARK: - Network peers
+
+    /// Other VMs that share a virtual-switch network group with `vm`. The
+    /// group is defined by the router relationship:
+    ///   - Router VM (isRouter == true): peers = all VMs that route
+    ///     through it (routerVMId == vm.id).
+    ///   - Guest VM (routerVMId != nil): peers = the router + every
+    ///     other guest sharing the same router.
+    /// Returns empty for NAT-mode VMs (they don't share an L2 network),
+    /// and empty for virtual-mode VMs with no router assignment yet.
+    ///
+    /// The library window's table draws connector brackets between rows
+    /// of running peers so the operator can see "these two VMs are
+    /// talking to each other" at a glance.
+    func networkPeers(of vm: VMConfiguration) -> [VMConfiguration] {
+        return Self.networkPeers(of: vm, in: virtualMachines)
+    }
+
+    // Perf note: refreshConnectionOverlay() in the library window calls
+    // networkPeers(of:) inside a loop over running routers, making the
+    // overlay refresh O(routers × n). Fine at current scale (≤ a dozen
+    // VMs in a typical library), but if VM counts ever push into the
+    // hundreds, consider building a `[routerVMId: [VMConfiguration]]`
+    // index once per VM-list reload and reading from it here.
+
+    /// Pure-logic implementation of `networkPeers(of:)`. Operates on an
+    /// explicit VM list rather than the singleton's master list, so the
+    /// rules (router→guests, guest→router+siblings, NAT→none, virtual-
+    /// with-no-router→none) can be unit-tested without touching shared
+    /// state. The instance method just forwards to this with
+    /// `virtualMachines`.
+    static func networkPeers(of vm: VMConfiguration,
+                             in vms: [VMConfiguration]) -> [VMConfiguration] {
+        guard vm.networkConfig.mode == .virtual else { return [] }
+
+        if vm.networkConfig.isRouter {
+            // Router → return its guests (any VMs whose routerVMId matches us)
+            return vms.filter {
+                $0.id != vm.id &&
+                $0.networkConfig.mode == .virtual &&
+                $0.networkConfig.routerVMId == vm.id
+            }
+        }
+        if let routerId = vm.networkConfig.routerVMId {
+            // Guest → return the router + all sibling guests
+            return vms.filter {
+                $0.id != vm.id &&
+                $0.networkConfig.mode == .virtual &&
+                ($0.id == routerId || $0.networkConfig.routerVMId == routerId)
+            }
+        }
+        return []
+    }
+
     // MARK: - Disk usage
 
     /// Per-bundle on-disk size cache. Keys: bundle path. Values: (bytes, asOf).

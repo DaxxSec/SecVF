@@ -32,6 +32,14 @@
 		AVFP002AVFP002AVFP002002 /* AVFPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AVFP001AVFP001AVFP001001 /* AVFPaths.swift */; };
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
 		SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */; };
+		TUIT002TUIT002TUIT002002 /* TacticalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */; };
+		NPT002NPT002NPT002002 /* NetworkPeersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = NPT001NPT001NPT001001 /* NetworkPeersTests.swift */; };
+		PFPT002PFPT002PFPT002002 /* PacketFilterPresetsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */; };
+		OVLT002OVLT002OVLT002002 /* OverlayViewsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = OVLT001OVLT001OVLT001001 /* OverlayViewsTests.swift */; };
+		LCT002LCT002LCT002002 /* LayoutConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */; };
+		ACT002ACT002ACT002002 /* AppColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACT001ACT001ACT001001 /* AppColorsTests.swift */; };
+		VCBC002VCBC002VCBC002002 /* VMConfigurationBackwardCompatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VCBC001VCBC001VCBC001001 /* VMConfigurationBackwardCompatTests.swift */; };
+		SVET002SVET002SVET002002 /* SecVFErrorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SVET001SVET001SVET001001 /* SecVFErrorTests.swift */; };
 		AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */; };
 		BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */; };
 		VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */; };
@@ -56,6 +64,13 @@
 		NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */; };
 		SPRK002SPRK002SPRK002002 /* SparklineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPRK001SPRK001SPRK001001 /* SparklineView.swift */; };
 		BIFS002BIFS002BIFS002002 /* BridgeInterfaceStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIFS001BIFS001BIFS001001 /* BridgeInterfaceStats.swift */; };
+		PFPR002PFPR002PFPR002002 /* PacketFilterPresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = PFPR001PFPR001PFPR001001 /* PacketFilterPresets.swift */; };
+		VCOV002VCOV002VCOV002002 /* VMConnectionOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VCOV001VCOV001VCOV001001 /* VMConnectionOverlayView.swift */; };
+		VTFO002VTFO002VTFO002002 /* VMTrafficFallOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VTFO001VTFO001VTFO001001 /* VMTrafficFallOverlayView.swift */; };
+		THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = THBT001THBT001THBT001001 /* TacticalHoverButton.swift */; };
+		TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */; };
+		TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */; };
+		TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
 		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
@@ -107,6 +122,14 @@
 		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
 		SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineViewTests.swift; sourceTree = "<group>"; };
+		TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalUITests.swift; sourceTree = "<group>"; };
+		NPT001NPT001NPT001001 /* NetworkPeersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPeersTests.swift; sourceTree = "<group>"; };
+		PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketFilterPresetsTests.swift; sourceTree = "<group>"; };
+		OVLT001OVLT001OVLT001001 /* OverlayViewsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayViewsTests.swift; sourceTree = "<group>"; };
+		LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstantsTests.swift; sourceTree = "<group>"; };
+		ACT001ACT001ACT001001 /* AppColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColorsTests.swift; sourceTree = "<group>"; };
+		VCBC001VCBC001VCBC001001 /* VMConfigurationBackwardCompatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationBackwardCompatTests.swift; sourceTree = "<group>"; };
+		SVET001SVET001SVET001001 /* SecVFErrorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFErrorTests.swift; sourceTree = "<group>"; };
 		AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxNodeTests.swift; sourceTree = "<group>"; };
 		BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStatsTests.swift; sourceTree = "<group>"; };
 		VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerBundleSizeTests.swift; sourceTree = "<group>"; };
@@ -131,6 +154,13 @@
 		NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTrafficView.swift; sourceTree = "<group>"; };
 		SPRK001SPRK001SPRK001001 /* SparklineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineView.swift; sourceTree = "<group>"; };
 		BIFS001BIFS001BIFS001001 /* BridgeInterfaceStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStats.swift; sourceTree = "<group>"; };
+		PFPR001PFPR001PFPR001001 /* PacketFilterPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketFilterPresets.swift; sourceTree = "<group>"; };
+		VCOV001VCOV001VCOV001001 /* VMConnectionOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConnectionOverlayView.swift; sourceTree = "<group>"; };
+		VTFO001VTFO001VTFO001001 /* VMTrafficFallOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMTrafficFallOverlayView.swift; sourceTree = "<group>"; };
+		THBT001THBT001THBT001001 /* TacticalHoverButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalHoverButton.swift; sourceTree = "<group>"; };
+		TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableRowView.swift; sourceTree = "<group>"; };
+		TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalEmptyStateView.swift; sourceTree = "<group>"; };
+		TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableHeaderCell.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
@@ -201,6 +231,13 @@
 				NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */,
 				SPRK001SPRK001SPRK001001 /* SparklineView.swift */,
 				BIFS001BIFS001BIFS001001 /* BridgeInterfaceStats.swift */,
+				PFPR001PFPR001PFPR001001 /* PacketFilterPresets.swift */,
+				VCOV001VCOV001VCOV001001 /* VMConnectionOverlayView.swift */,
+				VTFO001VTFO001VTFO001001 /* VMTrafficFallOverlayView.swift */,
+				THBT001THBT001THBT001001 /* TacticalHoverButton.swift */,
+				TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */,
+				TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */,
+				TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */,
 				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
 				UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */,
@@ -253,6 +290,14 @@
 				DD4444DD44444444DD444DD4 /* TestHelpers.swift */,
 				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
 				SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */,
+				TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */,
+				NPT001NPT001NPT001001 /* NetworkPeersTests.swift */,
+				PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */,
+				OVLT001OVLT001OVLT001001 /* OverlayViewsTests.swift */,
+				LCT001LCT001LCT001001 /* LayoutConstantsTests.swift */,
+				ACT001ACT001ACT001001 /* AppColorsTests.swift */,
+				VCBC001VCBC001VCBC001001 /* VMConfigurationBackwardCompatTests.swift */,
+				SVET001SVET001SVET001001 /* SecVFErrorTests.swift */,
 				AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */,
 				BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */,
 				VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */,
@@ -405,6 +450,13 @@
 				NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */,
 				SPRK002SPRK002SPRK002002 /* SparklineView.swift in Sources */,
 				BIFS002BIFS002BIFS002002 /* BridgeInterfaceStats.swift in Sources */,
+				PFPR002PFPR002PFPR002002 /* PacketFilterPresets.swift in Sources */,
+				VCOV002VCOV002VCOV002002 /* VMConnectionOverlayView.swift in Sources */,
+				VTFO002VTFO002VTFO002002 /* VMTrafficFallOverlayView.swift in Sources */,
+				THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */,
+				TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */,
+				TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */,
+				TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */,
 				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
 				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
@@ -436,6 +488,14 @@
 			files = (
 				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
 				SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */,
+				TUIT002TUIT002TUIT002002 /* TacticalUITests.swift in Sources */,
+				NPT002NPT002NPT002002 /* NetworkPeersTests.swift in Sources */,
+				PFPT002PFPT002PFPT002002 /* PacketFilterPresetsTests.swift in Sources */,
+				OVLT002OVLT002OVLT002002 /* OverlayViewsTests.swift in Sources */,
+				LCT002LCT002LCT002002 /* LayoutConstantsTests.swift in Sources */,
+				ACT002ACT002ACT002002 /* AppColorsTests.swift in Sources */,
+				VCBC002VCBC002VCBC002002 /* VMConfigurationBackwardCompatTests.swift in Sources */,
+				SVET002SVET002SVET002002 /* SecVFErrorTests.swift in Sources */,
 				AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */,
 				BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */,
 				VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */,
