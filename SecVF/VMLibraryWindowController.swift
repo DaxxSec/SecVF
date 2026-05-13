@@ -690,7 +690,6 @@ class VMLibraryWindowController: NSWindowController,
     private func adjustContentForSidebar(sidebarWidth: CGFloat) {
         guard let window = window, let contentView = window.contentView else { return }
 
-        let activePanelWidth: CGFloat = 220
         let padding: CGFloat = 15
         let buttonHeight: CGFloat = 32
         let toolbarGap: CGFloat = 8                  // gap below the toolbar row
@@ -699,8 +698,10 @@ class VMLibraryWindowController: NSWindowController,
         let packetPanelHeight: CGFloat = 180
         let bottomStatusBarHeight: CGFloat = 24      // slim global status strip
 
-        // Set window to proper size
-        let minWidth: CGFloat = sidebarWidth + 680 + activePanelWidth + padding * 3
+        // Set window to proper size. Right-side "Active VMs / Tasks" panel
+        // was removed — the 680pt main content area plus the sidebar +
+        // padding gives a reasonable minimum.
+        let minWidth: CGFloat = sidebarWidth + 680 + padding * 2
         let minHeight: CGFloat = 620
         window.minSize = NSSize(width: minWidth, height: minHeight)
 
@@ -744,7 +745,9 @@ class VMLibraryWindowController: NSWindowController,
         let libraryTabsY = toolbarY - toolbarGap - libraryTabsHeight
 
         let tableX = sidebarWidth + padding
-        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
+        // Right-side panel is gone — table fills out to the right edge of
+        // the content view (minus one padding).
+        let tableWidth = contentWidth - sidebarWidth - padding * 2
 
         let detailCardHeight: CGFloat = 70
         let detailCardX = sidebarWidth + padding
@@ -1745,152 +1748,22 @@ class VMLibraryWindowController: NSWindowController,
     private func addStatusBar() {
         guard let window = window, let contentView = window.contentView else { return }
 
+        // Right-side "Active VMs / Tasks" panel and the protocol legend
+        // panel were removed in the mockup-driven cleanup so the VM table +
+        // detail card + packet panel can fill the full width. The packet
+        // flow eyecandy (NetworkTrafficView) lived in the Active VMs panel
+        // and is intentionally not relocated here — a falling-packet
+        // animation across each VM row is planned as a follow-up.
         let sidebarWidth: CGFloat = 220
-        let activePanelWidth: CGFloat = 220
         let padding: CGFloat = 15
         let packetPanelHeight: CGFloat = 180
-        // Toolbar moved to top of content view — these constants mirror
-        // adjustContentForSidebar()'s layout math so the right-side Active
-        // VMs panel and the packet panel stay aligned with the table.
-        let buttonHeight: CGFloat = 32
-        let toolbarGap: CGFloat = 8
-        let libraryTabsHeight: CGFloat = 26
-        let libraryTabsGap: CGFloat = 8
         let bottomStatusBarHeight: CGFloat = 24
 
         let contentWidth = contentView.bounds.width
-        let contentHeight = contentView.bounds.height
 
         // ═══════════════════════════════════════════════════════════════
-        // ACTIVE VMs PANEL (Right side - same height as VM table)
+        // (removed: ACTIVE VMs PANEL — right-side panel + VMs/Tasks tabs)
         // ═══════════════════════════════════════════════════════════════
-        let activePanelX = contentWidth - activePanelWidth - padding
-        // Bottom edge aligns with packet panel top (y = bottomStatusBar + padding + packetPanelHeight + padding).
-        // Top edge aligns with library tabs bottom.
-        let activePanelY = bottomStatusBarHeight + padding + packetPanelHeight + padding
-        let activePanelTop = contentHeight - padding - buttonHeight - toolbarGap - libraryTabsHeight - libraryTabsGap
-        let activePanelHeight = activePanelTop - activePanelY
-
-        let runningVMsPanel = NSView(frame: NSRect(x: activePanelX, y: activePanelY, width: activePanelWidth, height: activePanelHeight))
-        runningVMsPanel.wantsLayer = true
-        runningVMsPanel.autoresizingMask = [.minXMargin, .height]
-
-        // Dark background with cyan border
-        runningVMsPanel.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
-        runningVMsPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
-        runningVMsPanel.layer?.borderWidth = LayoutConstants.borderHairline
-        runningVMsPanel.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
-
-        // Panel title
-        let titleLabel = NSTextField(labelWithString: "● ACTIVE VMs")
-        titleLabel.frame = NSRect(x: 12, y: activePanelHeight - 28, width: activePanelWidth - 24, height: 20)
-        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
-        titleLabel.textColor = AppColors.statusRunning
-        titleLabel.autoresizingMask = [.minYMargin]
-        runningVMsPanel.addSubview(titleLabel)
-        statusLabel = titleLabel
-
-        // VMs / Tasks tab control
-        let tabCtrl = NSSegmentedControl(
-            labels: ["VMs", "Tasks"],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(rightPanelTabChanged(_:))
-        )
-        tabCtrl.frame = NSRect(x: 8, y: activePanelHeight - 56, width: activePanelWidth - 16, height: 22)
-        tabCtrl.selectedSegment = 0
-        tabCtrl.segmentStyle = .texturedSquare
-        tabCtrl.autoresizingMask = [.minYMargin]
-        runningVMsPanel.addSubview(tabCtrl)
-        rightPanelTabControl = tabCtrl
-
-        // Content area height (below tab control)
-        let contentH = activePanelHeight - 64
-
-        // ── VMs tab content ───────────────────────────────────────────────────
-        let vmsContent = NSView(frame: NSRect(x: 0, y: 0, width: activePanelWidth, height: contentH))
-        vmsContent.autoresizingMask = [.height]
-        runningVMsPanel.addSubview(vmsContent)
-        vmsTabContent = vmsContent
-
-        let scrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: contentH - 10))
-        scrollView.autoresizingMask = [.height]
-        scrollView.hasHorizontalScroller = false
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-
-        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: contentH - 10))
-        stackView.orientation = .vertical
-        stackView.spacing = 10
-        stackView.alignment = .centerX
-        stackView.distribution = .gravityAreas
-        stackView.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
-
-        scrollView.documentView = stackView
-        vmsContent.addSubview(scrollView)
-        runningVMsContainer = stackView
-
-        let placeholder = NSTextField(labelWithString: "No active VMs.\n\nSelect a VM and\nclick Start.")
-        placeholder.frame = NSRect(x: 12, y: contentH / 2 - 30, width: activePanelWidth - 24, height: 60)
-        placeholder.font = NSFont.systemFont(ofSize: 10)
-        placeholder.textColor = NSColor(white: 0.45, alpha: 1.0)
-        placeholder.alignment = .center
-        placeholder.isEditable = false
-        placeholder.isBordered = false
-        placeholder.drawsBackground = false
-        placeholder.maximumNumberOfLines = 0
-        placeholder.autoresizingMask = [.minYMargin, .maxYMargin]
-        vmsContent.addSubview(placeholder)
-        vmsPlaceholderLabel = placeholder
-
-        // ── Tasks tab content (hidden initially) ──────────────────────────────
-        let tasksContent = NSView(frame: NSRect(x: 0, y: 0, width: activePanelWidth, height: contentH))
-        tasksContent.autoresizingMask = [.height]
-        tasksContent.isHidden = true
-        runningVMsPanel.addSubview(tasksContent)
-        tasksTabContent = tasksContent
-
-        let taskStatusLbl = NSTextField(labelWithString: "No tasks running.")
-        taskStatusLbl.frame = NSRect(x: 8, y: contentH - 20, width: activePanelWidth - 16, height: 16)
-        taskStatusLbl.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        taskStatusLbl.textColor = NSColor(white: 0.5, alpha: 1.0)
-        taskStatusLbl.lineBreakMode = .byTruncatingTail
-        taskStatusLbl.autoresizingMask = [.minYMargin]
-        tasksContent.addSubview(taskStatusLbl)
-        tasksStatusLabel = taskStatusLbl
-
-        let taskProgress = NSProgressIndicator(frame: NSRect(x: 8, y: contentH - 36, width: activePanelWidth - 16, height: 8))
-        taskProgress.style = .bar
-        taskProgress.controlSize = .small
-        taskProgress.minValue = 0
-        taskProgress.maxValue = 1
-        taskProgress.isHidden = true
-        taskProgress.autoresizingMask = [.minYMargin]
-        tasksContent.addSubview(taskProgress)
-        tasksProgressBar = taskProgress
-
-        let logScrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: contentH - 48))
-        logScrollView.hasVerticalScroller = true
-        logScrollView.autohidesScrollers = true
-        logScrollView.drawsBackground = false
-        logScrollView.borderType = .noBorder
-        logScrollView.autoresizingMask = [.height]
-
-        let logText = NSTextView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: contentH - 48))
-        logText.isEditable = false
-        logText.drawsBackground = false
-        logText.textColor = NSColor(white: 0.7, alpha: 1.0)
-        logText.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
-        logText.autoresizingMask = [.width, .height]
-        logScrollView.documentView = logText
-        tasksContent.addSubview(logScrollView)
-        tasksLogTextView = logText
-
-        contentView.addSubview(runningVMsPanel)
-        statusBar = runningVMsPanel
-
         // ═══════════════════════════════════════════════════════════════
         // PACKET LOG PANEL (Horizontal - below VM Table, above the bottom)
         // ═══════════════════════════════════════════════════════════════
@@ -1898,7 +1771,9 @@ class VMLibraryWindowController: NSWindowController,
         // padding gap separates them.
         let packetPanelX = sidebarWidth + padding
         let packetPanelY = bottomStatusBarHeight + padding
-        let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5  // Reduced gap
+        // Width: full content minus sidebar minus left/right padding.
+        // Right-side panel is gone now so the packet panel stretches across.
+        let packetPanelWidth = contentWidth - sidebarWidth - padding * 2
 
         let packetPanel = NSView(frame: NSRect(x: packetPanelX, y: packetPanelY, width: packetPanelWidth, height: packetPanelHeight))
         packetPanel.wantsLayer = true
@@ -2031,39 +1906,6 @@ class VMLibraryWindowController: NSWindowController,
 
         contentView.addSubview(packetPanel)
         packetLogPanel = packetPanel
-
-        // ═══════════════════════════════════════════════════════════════
-        // PROTOCOL LEGEND PANEL (Right side - below Active VMs)
-        // ═══════════════════════════════════════════════════════════════
-        // Previously the panel was sized to match the packet panel (180pt
-        // tall), leaving a big empty band below the 95pt-tall legend
-        // content. Shrunk to fit content + 12pt vertical padding so the
-        // panel reads as a tight reference card, not a half-empty box.
-        let legendHeight: CGFloat = 95
-        let legendVerticalPad: CGFloat = 12
-        let legendPanelHeight = legendHeight + legendVerticalPad * 2  // 119pt
-        let legendPanelX = activePanelX
-        let legendPanelY = bottomStatusBarHeight + padding
-        let legendPanelWidth = activePanelWidth
-
-        let legendPanel = NSView(frame: NSRect(x: legendPanelX, y: legendPanelY, width: legendPanelWidth, height: legendPanelHeight))
-        legendPanel.wantsLayer = true
-        legendPanel.autoresizingMask = [.minXMargin]
-
-        // Dark background with OD border (matching Active VMs panel)
-        legendPanel.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
-        legendPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
-        legendPanel.layer?.borderWidth = LayoutConstants.borderHairline
-        legendPanel.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
-
-        // Legend content fills the panel minus a uniform vertical pad.
-        let legendView = createProtocolLegend(width: legendPanelWidth - 16, height: legendHeight)
-        legendView.frame = NSRect(x: 8, y: legendVerticalPad,
-                                  width: legendPanelWidth - 16,
-                                  height: legendHeight)
-        legendPanel.addSubview(legendView)
-
-        contentView.addSubview(legendPanel)
 
         // Subscribe to packet capture notifications
         NotificationCenter.default.addObserver(
@@ -2705,7 +2547,6 @@ class VMLibraryWindowController: NSWindowController,
         guard let contentView = window?.contentView else { return }
 
         let sidebarWidth: CGFloat = 220
-        let activePanelWidth: CGFloat = 220
         let padding: CGFloat = 15
         let buttonHeight: CGFloat = 32
         let toolbarGap: CGFloat = 8
@@ -2723,7 +2564,9 @@ class VMLibraryWindowController: NSWindowController,
         let libraryTabsY = toolbarY - toolbarGap - libraryTabsHeight
 
         let tableX = sidebarWidth + padding
-        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
+        // Right-side panel is gone — table fills out to the right edge of
+        // the content view (minus one padding).
+        let tableWidth = contentWidth - sidebarWidth - padding * 2
         let detailCardY = bottomStatusBarHeight + padding + packetPanelHeight + padding
         let tableY = detailCardY + detailCardHeight + padding
         let tableHeight = libraryTabsY - libraryTabsGap - tableY
@@ -2750,20 +2593,11 @@ class VMLibraryWindowController: NSWindowController,
         // Detail card stays at fixed Y (autoresize handles its width).
         selectedVMDetailCard?.frame.origin.y = detailCardY
 
-        // Active VMs panel — bottom anchored above bottom status bar +
-        // packet panel; top edge moves with the library tabs.
-        if let panel = statusBar {
-            let panelX = contentWidth - activePanelWidth - padding
-            let panelY = bottomStatusBarHeight + padding + packetPanelHeight + padding
-            let panelTop = libraryTabsY - libraryTabsGap
-            let panelHeight = panelTop - panelY
-            panel.frame = NSRect(x: panelX, y: panelY,
-                                 width: activePanelWidth, height: panelHeight)
-        }
+        // (Active VMs / Legend panels were removed; no right-side re-anchor.)
 
-        // Packet panel + legend sit just above the bottom status bar.
+        // Packet panel sits just above the bottom status bar.
         if let packetPanel = packetLogPanel {
-            let packetWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5
+            let packetWidth = contentWidth - sidebarWidth - padding * 2
             packetPanel.frame = NSRect(x: sidebarWidth + padding,
                                        y: bottomStatusBarHeight + padding,
                                        width: packetWidth, height: packetPanelHeight)
