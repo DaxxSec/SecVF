@@ -593,11 +593,22 @@ class VMManager {
     /// of running peers so the operator can see "these two VMs are
     /// talking to each other" at a glance.
     func networkPeers(of vm: VMConfiguration) -> [VMConfiguration] {
+        return Self.networkPeers(of: vm, in: virtualMachines)
+    }
+
+    /// Pure-logic implementation of `networkPeers(of:)`. Operates on an
+    /// explicit VM list rather than the singleton's master list, so the
+    /// rules (router→guests, guest→router+siblings, NAT→none, virtual-
+    /// with-no-router→none) can be unit-tested without touching shared
+    /// state. The instance method just forwards to this with
+    /// `virtualMachines`.
+    static func networkPeers(of vm: VMConfiguration,
+                             in vms: [VMConfiguration]) -> [VMConfiguration] {
         guard vm.networkConfig.mode == .virtual else { return [] }
 
         if vm.networkConfig.isRouter {
             // Router → return its guests (any VMs whose routerVMId matches us)
-            return virtualMachines.filter {
+            return vms.filter {
                 $0.id != vm.id &&
                 $0.networkConfig.mode == .virtual &&
                 $0.networkConfig.routerVMId == vm.id
@@ -605,7 +616,7 @@ class VMManager {
         }
         if let routerId = vm.networkConfig.routerVMId {
             // Guest → return the router + all sibling guests
-            return virtualMachines.filter {
+            return vms.filter {
                 $0.id != vm.id &&
                 $0.networkConfig.mode == .virtual &&
                 ($0.id == routerId || $0.networkConfig.routerVMId == routerId)

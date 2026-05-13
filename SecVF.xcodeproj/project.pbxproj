@@ -33,6 +33,7 @@
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
 		SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */; };
 		TUIT002TUIT002TUIT002002 /* TacticalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */; };
+		NPT002NPT002NPT002002 /* NetworkPeersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = NPT001NPT001NPT001001 /* NetworkPeersTests.swift */; };
 		AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */; };
 		BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */; };
 		VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */; };
@@ -116,6 +117,7 @@
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
 		SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineViewTests.swift; sourceTree = "<group>"; };
 		TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalUITests.swift; sourceTree = "<group>"; };
+		NPT001NPT001NPT001001 /* NetworkPeersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPeersTests.swift; sourceTree = "<group>"; };
 		AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxNodeTests.swift; sourceTree = "<group>"; };
 		BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStatsTests.swift; sourceTree = "<group>"; };
 		VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerBundleSizeTests.swift; sourceTree = "<group>"; };
@@ -277,6 +279,7 @@
 				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
 				SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */,
 				TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */,
+				NPT001NPT001NPT001001 /* NetworkPeersTests.swift */,
 				AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */,
 				BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */,
 				VMBT001VMBT001VMBT001001 /* VMManagerBundleSizeTests.swift */,
@@ -468,6 +471,7 @@
 				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
 				SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */,
 				TUIT002TUIT002TUIT002002 /* TacticalUITests.swift in Sources */,
+				NPT002NPT002NPT002002 /* NetworkPeersTests.swift in Sources */,
 				AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */,
 				BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */,
 				VMBT002VMBT002VMBT002002 /* VMManagerBundleSizeTests.swift in Sources */,
