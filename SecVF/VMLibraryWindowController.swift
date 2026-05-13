@@ -1109,23 +1109,32 @@ class VMLibraryWindowController: NSWindowController,
         // Live rate ↓/↑ — sampled from VirtualNetworkSwitch per-port byte
         // counters on a 1.5s cadence. Only VMs connected to the virtual
         // switch (Virtual / Router modes) get a real rate; NAT-mode VMs
-        // can't be sampled per-VM through this path. When the VM is
-        // running but no rate sample exists yet, show "0 B/s · 0 B/s"
-        // instead of "—" so the user knows the wiring is live.
+        // route through the host stack which the switch never sees, so
+        // their rate cell explicitly says so instead of leaving a blank
+        // dash that reads as "data missing".
         if vm.status == .running {
-            let rate = liveRateBps[vm.name]
-            let down = rate?.down ?? 0
-            let up = rate?.up ?? 0
-            let downStr = ByteCountFormatter.string(fromByteCount: Int64(down), countStyle: .binary)
-            let upStr = ByteCountFormatter.string(fromByteCount: Int64(up), countStyle: .binary)
-            detailNetworkRateLabel?.stringValue = "\(downStr)/s ↓  \(upStr)/s ↑"
-            // Tint hot only when there's actual traffic — keeps the cell
-            // visually quiet for idle VMs.
-            let hot = (down + up) > 1024  // anything above ~1 KiB/s reads as live
-            detailNetworkRateLabel?.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+            switch vm.networkConfig.mode {
+            case .virtual:
+                let rate = liveRateBps[vm.name]
+                let down = rate?.down ?? 0
+                let up = rate?.up ?? 0
+                let downStr = ByteCountFormatter.string(fromByteCount: Int64(down), countStyle: .binary)
+                let upStr = ByteCountFormatter.string(fromByteCount: Int64(up), countStyle: .binary)
+                detailNetworkRateLabel?.stringValue = "\(downStr)/s ↓  \(upStr)/s ↑"
+                // Tint hot only when there's actual traffic — keeps the cell
+                // visually quiet for idle VMs.
+                let hot = (down + up) > 1024  // anything above ~1 KiB/s reads as live
+                detailNetworkRateLabel?.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+                detailNetworkRateLabel?.toolTip = "Sampled every 1.5s from the virtual switch port counters."
+            case .nat:
+                detailNetworkRateLabel?.stringValue = "host-routed"
+                detailNetworkRateLabel?.textColor = AppColors.textMuted
+                detailNetworkRateLabel?.toolTip = "NAT-mode VMs route through the host's network stack — per-VM byte counters aren't surfaced through Apple's Virtualization framework."
+            }
         } else {
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
+            detailNetworkRateLabel?.toolTip = nil
         }
     }
 

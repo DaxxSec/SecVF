@@ -31,6 +31,8 @@
 		APPCO002APPCO002APPCO002 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = APPCO001APPCO001APPCO001 /* AppColors.swift */; };
 		AVFP002AVFP002AVFP002002 /* AVFPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = AVFP001AVFP001AVFP001001 /* AVFPaths.swift */; };
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
+		SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */; };
+		AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */; };
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
@@ -101,6 +103,8 @@
 		CHKF001CHKF001CHKF001001 /* ChecksumFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChecksumFetcher.swift; sourceTree = "<group>"; };
 		CSERR001CSERR001CSERR001 /* SecVFError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecVFError.swift; sourceTree = "<group>"; };
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
+		SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineViewTests.swift; sourceTree = "<group>"; };
+		AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxNodeTests.swift; sourceTree = "<group>"; };
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
@@ -241,6 +245,8 @@
 			children = (
 				DD4444DD44444444DD444DD4 /* TestHelpers.swift */,
 				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
+				SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */,
+				AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */,
 				DD2222DD22222222DD222DD2 /* VMManagerTests.swift */,
 				DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */,
 				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
@@ -419,6 +425,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
+				SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */,
+				AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */,
 				CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */,
 				CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */,
 				CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */,
