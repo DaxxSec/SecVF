@@ -28,6 +28,14 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     private var displayedPackets: [CapturedPacket] = []
     private var selectedPacket: CapturedPacket?
     private var currentFilter: String = ""
+    /// Pre-compiled form of `currentFilter`. Set once via `setCurrentFilter`
+    /// so per-packet evaluation doesn't re-parse the expression. `nil`
+    /// means "no filter" (every packet passes); a `PacketFilter` value
+    /// means "evaluate against this AST". A parse error also produces
+    /// `nil` (compileOrNil) so a malformed live-typed filter shows
+    /// everything rather than nothing — surfaces faster as obviously
+    /// wrong than a silent empty list.
+    private var compiledFilter: PacketFilter?
     private var autoScroll: Bool = true
 
     // PERFORMANCE: Batched packet updates to reduce UI redraws during high-traffic captures
@@ -449,7 +457,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
             return
         }
         filterTextField.stringValue = filter
-        currentFilter = filter.lowercased()
+        setCurrentFilter(filter)
         reloadPackets()
         updateStatus()
         showFilterInfo(for: selectedTitle)
@@ -461,7 +469,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     func applyPresetByTitle(_ title: String) {
         guard let filter = PacketFilterPresets.filter(for: title) else { return }
         filterTextField.stringValue = filter
-        currentFilter = filter.lowercased()
+        setCurrentFilter(filter)
         reloadPackets()
         updateStatus()
         showFilterInfo(for: title)
@@ -469,25 +477,32 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
     private func showFilterInfo(for filterName: String) {
         let infoMap: [String: String] = [
-            "Non-Apple DNS (Suspicious)": "DNS queries NOT to Apple/iCloud - potential C2 communication",
-            "Direct IP Connections (No DNS)": "TCP to raw IPs without DNS lookup - malware often does this",
+            "Non-Apple DNS (Suspicious)": "DNS queries NOT to Apple/iCloud — potential C2 communication",
+            "Direct IP Connections (No DNS)": "TCP to raw IPs without DNS lookup — malware often does this",
             "Suspicious TLDs (.tk/.ml/.ga/.cf)": "Free TLDs commonly used by malware for C2 domains",
-            "Non-Browser HTTP (curl/wget/python)": "HTTP from non-browser tools - may be scripted malware",
-            "DNS Tunneling (Long Queries)": "Unusually long DNS names may hide exfiltrated data",
+            "HTTP (inspect for non-browser UA manually)": "Filter shows all HTTP; check User-Agent on each row for curl/wget/python — the parser doesn't read UA headers.",
+            "Non-Standard Ports": "TCP traffic on ports other than the four well-known commodity ports (22/53/80/443)",
+            "TCP (inspect for short-connection beacons manually)": "Filter shows all TCP; look for repeated short-duration connections to the same destination.",
+            "DNS Tunneling (Long Queries)": "DNS packets >100 bytes — unusually-long names may hide exfiltrated data",
+            "Large Outbound Transfers": "TCP packets >1000 bytes — bulk data movement",
+            "ICMP with Payload (Covert Channel)": "ICMP packets >64 bytes — payload-bearing ICMP may be a covert channel",
+            "HTTP (inspect for base64 payloads manually)": "Filter shows all HTTP; inspect each row's body for base64-encoded data.",
+            "All TLS / SSL": "All TLS / SSL traffic",
+            "TLS (inspect handshake/SNI/certs manually)": "Filter shows all TLS; inspect handshake records for SNI, certificate chain, and self-signed indicators.",
+            "TCP (inspect for SYN-flood patterns manually)": "Filter shows all TCP; multiple SYN packets to different ports indicates scanning.",
             "ARP Requests (Host Discovery)": "ARP requests can indicate network reconnaissance",
-            "Port Scanning (SYN Flood)": "Multiple SYN packets to different ports = scanning",
-            "ICMP with Payload (Covert Channel)": "ICMP with data payload may be covert channel",
-            "TLS Without SNI (Hidden Dest)": "TLS without Server Name Indication hides destination",
+            "ICMP Echo (Ping Sweep)": "ICMP echo requests across many hosts indicate ping sweeping",
+            "SMB Enumeration": "SMB traffic + ports 445/139 — host/share enumeration",
             "SSH Traffic": "SSH can be used for tunneling and lateral movement"
         ]
 
         if let info = infoMap[filterName] {
-            NSLog("[PacketAnalysis] Filter applied: \(filterName) - \(info)")
+            NSLog("[PacketAnalysis] Filter applied: \(filterName) — \(info)")
         }
     }
 
     @objc private func applyFilter(_ sender: Any) {
-        currentFilter = filterTextField.stringValue.lowercased().trimmingCharacters(in: .whitespaces)
+        setCurrentFilter(filterTextField.stringValue)
         reloadPackets()
         updateStatus()
     }
@@ -560,86 +575,21 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     }
 
     private func passesFilter(_ packet: CapturedPacket) -> Bool {
-        guard !currentFilter.isEmpty else { return true }
-
-        let filter = currentFilter.lowercased()
-
-        // Handle "or" expressions - any term matching means pass
-        if filter.contains(" or ") {
-            let terms = filter.components(separatedBy: " or ")
-            for term in terms {
-                if matchesSingleTerm(packet, term: term.trimmingCharacters(in: .whitespaces)) {
-                    return true
-                }
-            }
-            return false
-        }
-
-        // Handle "and" expressions - all terms must match
-        if filter.contains(" and ") {
-            let terms = filter.components(separatedBy: " and ")
-            for term in terms {
-                if !matchesSingleTerm(packet, term: term.trimmingCharacters(in: .whitespaces)) {
-                    return false
-                }
-            }
-            return true
-        }
-
-        // Single term filter
-        return matchesSingleTerm(packet, term: filter)
+        // No filter set OR filter failed to compile (treat as no filter
+        // so a malformed live-typed expression doesn't silently empty
+        // the table — the operator sees everything pass through and
+        // can spot the parse failure faster).
+        guard let compiled = compiledFilter else { return true }
+        return compiled.matches(packet)
     }
 
-    private func matchesSingleTerm(_ packet: CapturedPacket, term: String) -> Bool {
-        let proto = packet.protocol.lowercased()
-        let info = packet.info.lowercased()
-
-        // Protocol filters
-        if term == "tcp" { return proto == "tcp" }
-        if term == "udp" { return proto == "udp" }
-        if term == "icmp" { return proto == "icmp" }
-        if term == "arp" { return proto == "arp" }
-        if term == "dns" { return proto == "dns" }
-        if term == "http" { return proto == "http" || info.contains("http") }
-        if term == "https" { return proto == "https" || info.contains("https") || info.contains(":443") }
-        if term == "ipv6" { return proto == "ipv6" }
-        if term == "ssh" { return info.contains(":22") || info.contains("ssh") }
-        if term == "smb" { return info.contains(":445") || info.contains("smb") }
-        if term == "afp" { return info.contains(":548") || info.contains("afp") }
-
-        // Port filters: "tcp 80", "tcp 443", "port 22"
-        if term.hasPrefix("tcp ") {
-            let port = term.replacingOccurrences(of: "tcp ", with: "")
-            return proto == "tcp" && (info.contains(":\(port)") || info.contains("→\(port)") || info.contains("->\(port)"))
-        }
-        if term.hasPrefix("udp ") {
-            let port = term.replacingOccurrences(of: "udp ", with: "")
-            return proto == "udp" && (info.contains(":\(port)") || info.contains("→\(port)") || info.contains("->\(port)"))
-        }
-        if term.hasPrefix("port ") {
-            let port = term.replacingOccurrences(of: "port ", with: "")
-            return info.contains(":\(port)") || info.contains("→\(port)") || info.contains("->\(port)")
-        }
-
-        // IP address filter
-        if term.contains("ip.addr") {
-            if let ipMatch = term.components(separatedBy: "==").last?.trimmingCharacters(in: .whitespaces) {
-                return packet.sourceIP == ipMatch || packet.destIP == ipMatch
-            }
-        }
-
-        // "not" prefix for exclusion
-        if term.hasPrefix("not ") {
-            let innerTerm = String(term.dropFirst(4))
-            return !matchesSingleTerm(packet, term: innerTerm)
-        }
-
-        // Text search in info field
-        if info.contains(term) || proto.contains(term) {
-            return true
-        }
-
-        return false
+    /// Update the current filter string and recompile the AST. Call this
+    /// from every site that previously set `currentFilter` directly so
+    /// the compiled cache stays in sync.
+    private func setCurrentFilter(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentFilter = trimmed
+        compiledFilter = PacketFilter.compileOrNil(trimmed)
     }
 
     // MARK: - UI Updates
