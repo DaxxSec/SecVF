@@ -44,4 +44,10 @@ extension Notification.Name {
     /// measured allocated-on-disk size. Used by the selected-VM detail
     /// card to refresh the Disk cell once a background scan completes.
     static let vmBundleSizeUpdated = Notification.Name("vmBundleSizeUpdated")
+
+    /// Bring an already-running VM's guest console window to the front.
+    /// `object` is the VMConfiguration.id (UUID). Posted by the library
+    /// window's Console quick-action button; AppDelegate looks the
+    /// window up in `vmWindows[id]` and orders it front.
+    static let focusVMConsole = Notification.Name("focusVMConsole")
 }

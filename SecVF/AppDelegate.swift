@@ -104,6 +104,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             object: nil
         )
 
+        // Bring a running VM's guest console window to the front. Posted
+        // by the library window's Console quick-action button.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleFocusVMConsole(_:)),
+            name: .focusVMConsole,
+            object: nil
+        )
+
         // Register for CLI distributed notifications (cross-process).
         //
         // Scope note (B7): DistributedNotificationCenter.default() is a
@@ -1634,6 +1643,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         }
         packetAnalysisWindow?.showWindow(nil)
         packetAnalysisWindow?.window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Bring an already-running VM's guest console window to the front.
+    /// No-op (with a log line) when the VM isn't running — the library
+    /// window's Console button is disabled in that case but a stale
+    /// notification could still arrive after a stop transition.
+    @objc private func handleFocusVMConsole(_ notification: Notification) {
+        guard let vmId = notification.object as? UUID else { return }
+        guard let window = vmWindows[vmId] else {
+            NSLog("[AppDelegate] focusVMConsole posted for VM that has no open window (id=\(vmId))")
+            return
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     @objc private func handleOpenPacketAnalysis(_ notification: Notification) {

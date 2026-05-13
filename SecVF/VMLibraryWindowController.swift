@@ -187,6 +187,11 @@ class VMLibraryWindowController: NSWindowController,
     // Packets-since-start metric cell. Reads the cumulative rx+tx packet
     // count for the VM's port on the virtual switch.
     private var detailPacketsLabel: NSTextField?
+    // Quick-action buttons on the right edge of the detail card. Disabled
+    // when no VM is selected; Console additionally disabled when the
+    // selected VM isn't running.
+    private var detailConsoleButton: NSButton?
+    private var detailCaptureButton: NSButton?
     // Per-VM run timestamps, keyed by UUID. Populated when a VM
     // transitions to .running, cleared when it transitions away.
     private var vmStartedAt: [UUID: Date] = [:]
@@ -1190,12 +1195,12 @@ class VMLibraryWindowController: NSWindowController,
         // Compute total width: 5 cells with their widths + 4 gaps + leading
         // divider region. The container's x = card.width - totalW - cellPadding,
         // and .minXMargin autoresizing keeps it glued to the right edge.
-        let osW: CGFloat = 130
+        let osW: CGFloat = 120       // trimmed -10 to make room for action buttons
         let uptimeW: CGFloat = 80    // "12h 47m" / "—"
         let cpuW: CGFloat = 110
         let diskW: CGFloat = 110
         let netModeW: CGFloat = 100
-        let rateW: CGFloat = 160     // wider so creation timestamp doesn't truncate to "5..."
+        let rateW: CGFloat = 150     // trimmed -10; "host-routed" still fits
         let packetsW: CGFloat = 90   // "1,234,567" upper bound for a long capture
         let dividerW: CGFloat = 1
         let dividerGap: CGFloat = LayoutConstants.spacingLG  // gap divider → first metric cell
@@ -1208,8 +1213,44 @@ class VMLibraryWindowController: NSWindowController,
                        + rateW + gapMetric
                        + packetsW
 
+        // Quick-action buttons (Console / Capture) live in their own small
+        // container to the RIGHT of the metric grid. Icon-only with
+        // tooltips so they stay compact — wider labelled versions would
+        // eat too much horizontal space on narrower windows.
+        let actionBtnSize: CGFloat = 24
+        let actionGap: CGFloat = 6
+        let actionsW: CGFloat = actionBtnSize * 2 + actionGap
+        let actionsToMetricsGap: CGFloat = LayoutConstants.spacingMD
+
+        let actions = NSView()
+        actions.frame = NSRect(x: frame.width - actionsW - cellPadding,
+                               y: (frame.height - actionBtnSize) / 2,
+                               width: actionsW, height: actionBtnSize)
+        actions.autoresizingMask = [.minXMargin]
+        card.addSubview(actions)
+
+        let consoleBtn = makeDetailCardActionButton(
+            title: "🖥",
+            tooltip: "Bring the running VM's console window to the front (no-op when stopped).",
+            action: #selector(quickActionConsole(_:)))
+        consoleBtn.frame = NSRect(x: 0, y: 0,
+                                  width: actionBtnSize, height: actionBtnSize)
+        consoleBtn.setAccessibilityLabel("Open console window")
+        actions.addSubview(consoleBtn)
+        detailConsoleButton = consoleBtn
+
+        let captureBtn = makeDetailCardActionButton(
+            title: "⌐",
+            tooltip: "Open the Packet Analysis window (full filter / inspect view).",
+            action: #selector(quickActionCapture(_:)))
+        captureBtn.frame = NSRect(x: actionBtnSize + actionGap, y: 0,
+                                  width: actionBtnSize, height: actionBtnSize)
+        captureBtn.setAccessibilityLabel("Open packet analysis")
+        actions.addSubview(captureBtn)
+        detailCaptureButton = captureBtn
+
         let metrics = NSView()
-        metrics.frame = NSRect(x: frame.width - metricsW - cellPadding,
+        metrics.frame = NSRect(x: frame.width - metricsW - actionsW - actionsToMetricsGap - cellPadding,
                                y: 0,
                                width: metricsW, height: frame.height)
         metrics.autoresizingMask = [.minXMargin]
@@ -1322,6 +1363,62 @@ class VMLibraryWindowController: NSWindowController,
         updateSelectedVMDetailCard()
     }
 
+    /// Small icon-button used by the right-edge quick-action stack in the
+    /// detail card. Square, layer-backed, OD-border tactical aesthetic.
+    private func makeDetailCardActionButton(title: String,
+                                            tooltip: String,
+                                            action: Selector) -> NSButton {
+        let btn = NSButton(title: title, target: self, action: action)
+        btn.isBordered = false
+        btn.wantsLayer = true
+        btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        btn.layer?.borderColor = AppColors.borderOD.cgColor
+        btn.layer?.borderWidth = 1.0
+        btn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        btn.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+        ])
+        btn.toolTip = tooltip
+        return btn
+    }
+
+    /// Bring the selected VM's guest console window forward via the
+    /// `.focusVMConsole` notification (AppDelegate owns vmWindows).
+    /// No-op when no VM is selected or the VM isn't running.
+    @objc private func quickActionConsole(_ sender: NSButton) {
+        guard let vm = selectedStandardVM(), vm.status == .running else { return }
+        NotificationCenter.default.post(name: .focusVMConsole, object: vm.id)
+    }
+
+    /// Open the Packet Analysis window via the existing `.openPacketAnalysis`
+    /// notification (no preset — user picks once the window is up).
+    @objc private func quickActionCapture(_ sender: NSButton) {
+        NotificationCenter.default.post(name: .openPacketAnalysis, object: nil)
+    }
+
+    /// Shared selection lookup used by the quick-action buttons. Reads
+    /// the standard-tab selection through `displayedStandardVMs` so the
+    /// filter state is honored.
+    private func selectedStandardVM() -> VMConfiguration? {
+        guard currentLibraryTab == .standard else { return nil }
+        let row = tableView?.selectedRow ?? -1
+        return standardVM(at: row)
+    }
+
+    /// Enable/disable + tint quick-action buttons based on the current
+    /// selection. Console is only useful for a running VM (window must
+    /// exist); Capture is always available when any VM is selected.
+    private func refreshQuickActionButtonsState() {
+        let vm = selectedStandardVM()
+        let isRunning = vm?.status == .running
+        detailConsoleButton?.isEnabled = isRunning
+        detailConsoleButton?.alphaValue = isRunning ? 1.0 : 0.4
+        let hasAnySelection = (vm != nil) && currentLibraryTab == .standard
+        detailCaptureButton?.isEnabled = hasAnySelection
+        detailCaptureButton?.alphaValue = hasAnySelection ? 1.0 : 0.4
+    }
+
     /// Build a `[CAPTION / value]` pair stacked vertically, with explicit Y
     /// positions for both rows so every cell across the card lines up.
     private func makeMetricLabel(caption: String,
@@ -1426,6 +1523,7 @@ class VMLibraryWindowController: NSWindowController,
     /// whenever the selection changes or a VM's status changes.
     private func updateSelectedVMDetailCard() {
         guard selectedVMDetailCard != nil else { return }
+        defer { refreshQuickActionButtonsState() }
 
         // AI Sandbox tab pulls the row from the outline view, not the table.
         if currentLibraryTab == .aiSandbox {
