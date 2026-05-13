@@ -132,10 +132,15 @@ class VMLibraryWindowController: NSWindowController,
     private var bottomStatusBar: NSView?
     private var statusBarRunningLabel: NSTextField?
     private var statusBarSwitchLabel: NSTextField?
+    private var statusBarNATLabel: NSTextField?
     private var statusBarCaptureLabel: NSTextField?
     private var statusBarDiskLabel: NSTextField?
     private var statusBarPulseDot: CAShapeLayer?
     private var statusBarRefreshTimer: Timer?
+
+    /// Previous NAT-bridge byte sample, used to compute a bytes/sec delta
+    /// each tick of the status bar refresh.
+    private var statusBarPreviousNATSample: BridgeSample?
 
     // Selected VM detail card (horizontal strip between table and packet panel)
     private var selectedVMDetailCard: NSView?
@@ -1592,6 +1597,11 @@ class VMLibraryWindowController: NSWindowController,
         bar.addSubview(statusBarSwitchLabel!)
         x += 200 + LayoutConstants.spacingLG
 
+        statusBarNATLabel = makeStatusBarLabel(text: "", x: x, width: 170, height: height, alignment: .left)
+        statusBarNATLabel?.toolTip = "Aggregate bytes/sec across all VZ NAT bridge interfaces. Apple's Virtualization framework doesn't expose per-VM counters in NAT mode — this is the combined total."
+        bar.addSubview(statusBarNATLabel!)
+        x += 170 + LayoutConstants.spacingLG
+
         statusBarCaptureLabel = makeStatusBarLabel(text: "—", x: x, width: 160, height: height, alignment: .left)
         bar.addSubview(statusBarCaptureLabel!)
 
@@ -1648,6 +1658,27 @@ class VMLibraryWindowController: NSWindowController,
             ? "Switch · \(ports) ports · \(formatCount(fwd)) pkts"
             : "Switch · idle"
         statusBarSwitchLabel?.textColor = switchOn ? AppColors.textOD : AppColors.textMuted
+
+        // NAT bridge bytes/sec — aggregate across all VZ NAT bridge
+        // interfaces (vmenet*, bridge1*). Hidden when no bridge interface
+        // exists on the system (no NAT VM has ever booted in this session).
+        let currentNATSample = BridgeInterfaceStats.sample()
+        let natRate = BridgeInterfaceStats.rate(from: statusBarPreviousNATSample,
+                                                to: currentNATSample)
+        statusBarPreviousNATSample = currentNATSample
+        if currentNATSample == nil {
+            statusBarNATLabel?.stringValue = ""
+        } else if let rate = natRate {
+            let down = ByteCountFormatter.string(fromByteCount: Int64(rate.down), countStyle: .binary)
+            let up   = ByteCountFormatter.string(fromByteCount: Int64(rate.up),   countStyle: .binary)
+            statusBarNATLabel?.stringValue = "NAT · \(down)/s ↓ \(up)/s ↑"
+            let hot = (rate.down + rate.up) > 1024
+            statusBarNATLabel?.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+        } else {
+            // First sample after launch — no delta yet
+            statusBarNATLabel?.stringValue = "NAT · sampling…"
+            statusBarNATLabel?.textColor = AppColors.textMuted
+        }
 
         // Capture / install state — the capture cell triple-roles:
         //   1. While an AI Sandbox install is in flight (build / provision /

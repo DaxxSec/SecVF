@@ -33,6 +33,7 @@
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
 		SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */; };
 		AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */; };
+		BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */; };
 		CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2222DD22222222DD222DD2 /* VMManagerTests.swift */; };
 		CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */; };
 		CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4444DD44444444DD444DD4 /* TestHelpers.swift */; };
@@ -53,6 +54,7 @@
 		NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTNM001NTNM001NTNM001001 /* NotificationNames.swift */; };
 		NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */; };
 		SPRK002SPRK002SPRK002002 /* SparklineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPRK001SPRK001SPRK001001 /* SparklineView.swift */; };
+		BIFS002BIFS002BIFS002002 /* BridgeInterfaceStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = BIFS001BIFS001BIFS001001 /* BridgeInterfaceStats.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
 		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
@@ -105,6 +107,7 @@
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
 		SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineViewTests.swift; sourceTree = "<group>"; };
 		AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISandboxNodeTests.swift; sourceTree = "<group>"; };
+		BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStatsTests.swift; sourceTree = "<group>"; };
 		DD2222DD22222222DD222DD2 /* VMManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMManagerTests.swift; sourceTree = "<group>"; };
 		DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VirtualNetworkSwitchTests.swift; sourceTree = "<group>"; };
 		DD4444DD44444444DD444DD4 /* TestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestHelpers.swift; sourceTree = "<group>"; };
@@ -125,6 +128,7 @@
 		NTNM001NTNM001NTNM001001 /* NotificationNames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationNames.swift; sourceTree = "<group>"; };
 		NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkTrafficView.swift; sourceTree = "<group>"; };
 		SPRK001SPRK001SPRK001001 /* SparklineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineView.swift; sourceTree = "<group>"; };
+		BIFS001BIFS001BIFS001001 /* BridgeInterfaceStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeInterfaceStats.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
@@ -194,6 +198,7 @@
 				NETPC001NETPC001NETPC001 /* NetworkProtocolColors.swift */,
 				NTVW001NTVW001NTVW001001 /* NetworkTrafficView.swift */,
 				SPRK001SPRK001SPRK001001 /* SparklineView.swift */,
+				BIFS001BIFS001BIFS001001 /* BridgeInterfaceStats.swift */,
 				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
 				UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */,
@@ -247,6 +252,7 @@
 				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
 				SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */,
 				AINT001AINT001AINT001001 /* AISandboxNodeTests.swift */,
+				BIST001BIST001BIST001001 /* BridgeInterfaceStatsTests.swift */,
 				DD2222DD22222222DD222DD2 /* VMManagerTests.swift */,
 				DD3333DD33333333DD333DD3 /* VirtualNetworkSwitchTests.swift */,
 				DD5555DD55555555DD555DD5 /* ISOCacheManagerTests.swift */,
@@ -395,6 +401,7 @@
 				NETPC002NETPC002NETPC002 /* NetworkProtocolColors.swift in Sources */,
 				NTVW002NTVW002NTVW002002 /* NetworkTrafficView.swift in Sources */,
 				SPRK002SPRK002SPRK002002 /* SparklineView.swift in Sources */,
+				BIFS002BIFS002BIFS002002 /* BridgeInterfaceStats.swift in Sources */,
 				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
 				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
@@ -427,6 +434,7 @@
 				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
 				SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */,
 				AINT002AINT002AINT002002 /* AISandboxNodeTests.swift in Sources */,
+				BIST002BIST002BIST002002 /* BridgeInterfaceStatsTests.swift in Sources */,
 				CC2222CC22222222CC222CC2 /* VMManagerTests.swift in Sources */,
 				CC3333CC33333333CC333CC3 /* VirtualNetworkSwitchTests.swift in Sources */,
 				CC4444CC44444444CC444CC4 /* TestHelpers.swift in Sources */,
