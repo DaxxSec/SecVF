@@ -17,7 +17,10 @@ import Cocoa
 final class SparklineView: NSView {
 
     var samples: [Double] = [] {
-        didSet { needsDisplay = true }
+        didSet {
+            needsDisplay = true
+            updateAccessibilityValue()
+        }
     }
 
     /// Stroke color. Defaults to OD; callers may override for protocol-
@@ -37,12 +40,42 @@ final class SparklineView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        configureAccessibility()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        configureAccessibility()
+    }
+
+    // MARK: - Accessibility
+    //
+    // VoiceOver can't read a polyline, so we expose the sparkline as an
+    // ImageView-role element with a label ("Traffic sparkline") and a
+    // dynamic value summarising the latest sample. Sighted users see the
+    // line; VoiceOver users hear "12.4 KB/s, 30 samples over 45 seconds".
+
+    private func configureAccessibility() {
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("Traffic sparkline")
+        setAccessibilityRoleDescription("Network traffic over time")
+        updateAccessibilityValue()
+    }
+
+    private func updateAccessibilityValue() {
+        guard !samples.isEmpty else {
+            setAccessibilityValue("No traffic samples")
+            return
+        }
+        let latest = samples.last ?? 0
+        let peak = samples.max() ?? 0
+        let bcf = ByteCountFormatter()
+        bcf.countStyle = .binary
+        let latestStr = bcf.string(fromByteCount: Int64(latest))
+        let peakStr = bcf.string(fromByteCount: Int64(peak))
+        setAccessibilityValue("Latest \(latestStr)/s · peak \(peakStr)/s · \(samples.count) samples")
     }
 
     override func draw(_ dirtyRect: NSRect) {

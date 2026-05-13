@@ -901,6 +901,7 @@ class VMLibraryWindowController: NSWindowController,
         let pillH: CGFloat = 22
         let pill = makeStatusPill()
         pill.frame = NSRect(x: x, y: valueY + (valueH - pillH) / 2, width: pillW, height: pillH)
+        pill.setAccessibilityLabel("Selected VM status")
         card.addSubview(pill)
         detailStatusPill = pill
         x += pillW + LayoutConstants.spacingSM  // tight 8pt gap — pill + name read as a pair
@@ -910,6 +911,7 @@ class VMLibraryWindowController: NSWindowController,
         nameLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .semibold)
         nameLabel.textColor = AppColors.textPrimary
         nameLabel.frame = NSRect(x: x, y: valueY, width: nameW, height: valueH)
+        nameLabel.setAccessibilityLabel("Selected VM name")
         card.addSubview(nameLabel)
         detailNameLabel = nameLabel
 
@@ -998,12 +1000,19 @@ class VMLibraryWindowController: NSWindowController,
         captionLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .medium)
         captionLabel.textColor = AppColors.textSubtle
         captionLabel.frame = NSRect(x: x, y: captionY, width: width, height: captionH)
+        // Caption is decorative — the value label below carries the real
+        // information. Hide the caption from accessibility to avoid
+        // VoiceOver reading both "OS:" and the OS name redundantly.
+        captionLabel.setAccessibilityElement(false)
 
         let valueLabel = NSTextField(labelWithString: "—")
         valueLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
         valueLabel.textColor = AppColors.textLight
         valueLabel.frame = NSRect(x: x, y: valueY, width: width, height: valueH)
         valueLabel.lineBreakMode = .byTruncatingTail
+        // The value label is the focusable thing; label it with the
+        // caption so VoiceOver reads "OS, Kali 2024.1".
+        valueLabel.setAccessibilityLabel(caption)
 
         return (captionLabel, valueLabel)
     }
@@ -1344,6 +1353,8 @@ class VMLibraryWindowController: NSWindowController,
         tabs.selectedSegment = currentLibraryTab.rawValue
         Self.applyTacticalStyle(to: tabs)
         tabs.autoresizingMask = [.minYMargin]  // stick to top of content view
+        tabs.setAccessibilityLabel("Library view")
+        tabs.toolTip = "Switch between standard VMs and the AI Sandbox tree view"
         contentView.addSubview(tabs)
         libraryTabControl = tabs
 
@@ -1590,19 +1601,23 @@ class VMLibraryWindowController: NSWindowController,
         var x = padding + dotSize + LayoutConstants.spacingSM
 
         statusBarRunningLabel = makeStatusBarLabel(text: "—", x: x, width: 140, height: height, alignment: .left)
+        statusBarRunningLabel?.setAccessibilityLabel("Running VM count")
         bar.addSubview(statusBarRunningLabel!)
         x += 140 + LayoutConstants.spacingLG
 
         statusBarSwitchLabel = makeStatusBarLabel(text: "—", x: x, width: 200, height: height, alignment: .left)
+        statusBarSwitchLabel?.setAccessibilityLabel("Virtual switch state")
         bar.addSubview(statusBarSwitchLabel!)
         x += 200 + LayoutConstants.spacingLG
 
         statusBarNATLabel = makeStatusBarLabel(text: "", x: x, width: 170, height: height, alignment: .left)
         statusBarNATLabel?.toolTip = "Aggregate bytes/sec across all VZ NAT bridge interfaces. Apple's Virtualization framework doesn't expose per-VM counters in NAT mode — this is the combined total."
+        statusBarNATLabel?.setAccessibilityLabel("Aggregate NAT bridge bytes per second")
         bar.addSubview(statusBarNATLabel!)
         x += 170 + LayoutConstants.spacingLG
 
         statusBarCaptureLabel = makeStatusBarLabel(text: "—", x: x, width: 160, height: height, alignment: .left)
+        statusBarCaptureLabel?.setAccessibilityLabel("Packet capture state")
         bar.addSubview(statusBarCaptureLabel!)
 
         // Right-anchored: disk free + build. Single label, autoresizes off
@@ -1613,6 +1628,7 @@ class VMLibraryWindowController: NSWindowController,
                                                 width: rightW, height: height,
                                                 alignment: .right)
         statusBarDiskLabel?.autoresizingMask = [.minXMargin]
+        statusBarDiskLabel?.setAccessibilityLabel("Disk free and build version")
         bar.addSubview(statusBarDiskLabel!)
 
         contentView.addSubview(bar)
