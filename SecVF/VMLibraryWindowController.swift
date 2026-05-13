@@ -127,6 +127,10 @@ class VMLibraryWindowController: NSWindowController,
     private var standardEmptyStateLabel: NSTextField?
     private var aiSandboxEmptyStateLabel: NSTextField?
 
+    // Top toolbar pill containers (Primary / Create / Modify / Destructive).
+    // Tracked so windowDidResize can re-anchor them.
+    private var toolbarPillContainers: [NSView] = []
+
     // Bottom status bar — slim global-state strip pinned to the bottom of
     // the content view, under the packet panel.
     private var bottomStatusBar: NSView?
@@ -345,51 +349,87 @@ class VMLibraryWindowController: NSWindowController,
         }
     }
 
-    /// Apply the tactical-theme button styling. Buttons use a custom layer
-    /// instead of the system bezel, so we must visually depress when
-    /// disabled — otherwise `isEnabled = false` reads as "active but
-    /// unresponsive."
+    /// Apply the tactical-theme button styling. Buttons now live INSIDE pill
+    /// containers (see `makeButtonPillContainer`) which supply the visual
+    /// frame, so each button's own border + fill are transparent — only the
+    /// text styling stays. The pill itself color-codes the group (OD-glow
+    /// for primary, red for destructive, plain OD for the rest).
     ///
     /// Tactical conventions:
-    /// - **Primary** (Start) — OD green border + brighter background. "Go".
-    /// - **Destructive** (Delete) — red border + red text. "Stop".
-    /// - **Secondary** — slate background + OD-text. Neutral operations.
+    /// - **Primary** (Start) — semibold near-white text in an OD-glow pill.
+    /// - **Destructive** (Delete) — red text in a red-bordered pill.
+    /// - **Secondary** — OD text in a plain OD-bordered pill.
     private func applyButtonStyle(_ button: NSButton) {
         let isPrimary = (button === startButton)
         let isDestructive = (button === deleteButton)
         let enabled = button.isEnabled
 
-        // Primary fills with a low-alpha OD tint so it stands out from the
-        // toolbar bezel; everything else uses the standard slate button bg.
-        let baseBg: NSColor = isPrimary ? AppColors.accentOD.withAlphaComponent(0.22)
-                                        : AppColors.backgroundButton
-        let baseBorder: NSColor
-        if isDestructive {
-            baseBorder = AppColors.accentRed.withAlphaComponent(0.6)
-        } else if isPrimary {
-            baseBorder = AppColors.accentODGlow.withAlphaComponent(0.85)
-        } else {
-            baseBorder = AppColors.borderOD
-        }
+        // Background + border are owned by the parent pill — keep the
+        // button's own layer transparent so the pill's frame reads cleanly.
+        button.layer?.backgroundColor = NSColor.clear.cgColor
+        button.layer?.borderColor = NSColor.clear.cgColor
+
         let textColor: NSColor
         if isDestructive {
             textColor = AppColors.accentRed
         } else if isPrimary {
-            // Primary uses a brighter near-white so it pops against the OD fill
             textColor = AppColors.textPrimary
         } else {
             textColor = AppColors.textOD
         }
-
-        button.layer?.backgroundColor = baseBg.withAlphaComponent(enabled ? 1.0 : 0.35).cgColor
-        button.layer?.borderColor = baseBorder.withAlphaComponent(enabled ? 1.0 : 0.25).cgColor
-
         let fontWeight: NSFont.Weight = isPrimary ? .semibold : .medium
         button.attributedTitle = NSAttributedString(string: button.title, attributes: [
             .foregroundColor: textColor.withAlphaComponent(enabled ? 1.0 : 0.4),
             .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: fontWeight)
         ])
         button.alphaValue = enabled ? 1.0 : 0.7
+    }
+
+    /// Wrap a set of NSButton instances in a rounded pill container with a
+    /// shared background + border. Buttons sit edge-to-edge with thin
+    /// vertical dividers between them. Used by the top toolbar to group
+    /// related actions (Create / Modify / Destructive / Primary).
+    ///
+    /// The pill's frame is sized to fit its buttons; the caller positions
+    /// the pill's origin.
+    private func makeButtonPillContainer(_ buttons: [NSButton],
+                                         borderColor: NSColor = AppColors.borderOD,
+                                         fillColor: NSColor = AppColors.backgroundButton.withAlphaComponent(0.55)) -> NSView {
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = fillColor.cgColor
+        pill.layer?.borderColor = borderColor.cgColor
+        pill.layer?.borderWidth = LayoutConstants.borderHairline
+        pill.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+
+        let buttonW: CGFloat = 80
+        let buttonH: CGFloat = 32
+        let innerPad: CGFloat = 3            // 3pt horizontal padding inside the pill
+        let dividerInsetY: CGFloat = 6       // divider doesn't touch top/bottom
+
+        var x: CGFloat = innerPad
+        for (i, button) in buttons.enumerated() {
+            // Remove from any current superview so addSubview reparents
+            button.removeFromSuperview()
+            button.frame = NSRect(x: x, y: 1, width: buttonW, height: buttonH)
+            pill.addSubview(button)
+
+            // Divider between consecutive buttons in the same pill
+            if i > 0 {
+                let divider = NSBox(frame: NSRect(x: x - 1, y: dividerInsetY,
+                                                  width: 1,
+                                                  height: buttonH - dividerInsetY * 2))
+                divider.boxType = .custom
+                divider.borderWidth = 0
+                divider.fillColor = AppColors.borderOD.withAlphaComponent(0.5)
+                pill.addSubview(divider)
+            }
+            x += buttonW
+        }
+
+        let totalW = CGFloat(buttons.count) * buttonW + innerPad * 2
+        pill.frame = NSRect(x: 0, y: 0, width: totalW, height: buttonH + 2)
+        return pill
     }
 
     private func addSidebar() {
@@ -823,26 +863,38 @@ class VMLibraryWindowController: NSWindowController,
                                               width: detailCardWidth,
                                               height: detailCardHeight))
 
-        // Top toolbar — buttons aligned LEFT (not centered) so the primary
-        // action (Start) anchors visually at the left edge of the table,
-        // matching the mockup. Logical reading order: Start → New → Import
-        // → Configure → Clone → Rename → Delete. Delete is rightmost so the
-        // destructive button is visually distant from Start.
-        let buttons: [NSButton?] = [startButton, newButton, importButton,
-                                    configureButton, cloneButton,
-                                    renameButton, deleteButton]
-        let buttonWidth: CGFloat = 80
-        let buttonSpacing: CGFloat = 8
-        var buttonX = tableX
-        for button in buttons.compactMap({ $0 }) {
-            button.frame = NSRect(x: buttonX, y: toolbarY,
-                                  width: buttonWidth, height: buttonHeight)
-            // .minYMargin keeps the bottom margin flexible so the toolbar
-            // floats with the content-view top edge on resize. .maxXMargin
-            // keeps the toolbar left-anchored so the group doesn't drift.
-            button.autoresizingMask = [.minYMargin, .maxXMargin]
-            buttonX += buttonWidth + buttonSpacing
+        // Top toolbar — pill-grouped containers matching the mockup at
+        // docs/ui-redesign-mockup.html. Each pill owns its own border + fill;
+        // the buttons inside are flat-styled (text-only). Four pills:
+        //
+        //   [▶ Start] · [+ New | ↧ Import] · [⚙ Configure | ⎘ Clone | ✎ Rename] · [🗑 Delete]
+        //
+        // Primary (Start) gets the brighter OD-glow border; destructive
+        // (Delete) gets red. Inter-pill gap = spacingMD (12pt).
+        let pillGap: CGFloat = LayoutConstants.spacingMD
+
+        toolbarPillContainers.forEach { $0.removeFromSuperview() }
+
+        let pills: [NSView] = [
+            makeButtonPillContainer([startButton].compactMap { $0 },
+                                    borderColor: AppColors.accentODGlow.withAlphaComponent(0.7),
+                                    fillColor: AppColors.accentOD.withAlphaComponent(0.18)),
+            makeButtonPillContainer([newButton, importButton].compactMap { $0 }),
+            makeButtonPillContainer([configureButton, cloneButton, renameButton].compactMap { $0 }),
+            makeButtonPillContainer([deleteButton].compactMap { $0 },
+                                    borderColor: AppColors.accentRed.withAlphaComponent(0.6)),
+        ]
+
+        var px = tableX
+        for pill in pills {
+            // Each pill is `buttonHeight + 2` tall. Center it on toolbarY by
+            // shifting up 1pt so its baseline matches button-only layouts.
+            pill.frame.origin = CGPoint(x: px, y: toolbarY - 1)
+            pill.autoresizingMask = [.minYMargin, .maxXMargin]
+            contentView.addSubview(pill)
+            px += pill.frame.width + pillGap
         }
+        toolbarPillContainers = pills
     }
 
     // MARK: - Selected VM Detail Card
@@ -2581,13 +2633,11 @@ class VMLibraryWindowController: NSWindowController,
         libraryTabControl?.frame.origin.y = libraryTabsY
         recoveryModeCheckbox?.frame.origin.y = libraryTabsY + (libraryTabsHeight - 20) / 2
 
-        // Toolbar buttons re-anchor to the new top — autoresize keeps the
-        // horizontal flow, this just updates Y.
-        let topButtons: [NSButton?] = [startButton, newButton, importButton,
-                                       configureButton, cloneButton,
-                                       renameButton, deleteButton]
-        for button in topButtons.compactMap({ $0 }) {
-            button.frame.origin.y = toolbarY
+        // Toolbar pill containers re-anchor to the new top Y. Each pill's
+        // X / width stays the same (group sizes are fixed), only the Y of
+        // the row needs updating.
+        for pill in toolbarPillContainers {
+            pill.frame.origin.y = toolbarY - 1
         }
 
         // Detail card stays at fixed Y (autoresize handles its width).
