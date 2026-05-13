@@ -33,6 +33,7 @@
 		CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */; };
 		SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */; };
 		TUIT002TUIT002TUIT002002 /* TacticalUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */; };
+		SBFT002SBFT002SBFT002002 /* SidebarFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SBFT001SBFT001SBFT001001 /* SidebarFilterTests.swift */; };
 		NPT002NPT002NPT002002 /* NetworkPeersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = NPT001NPT001NPT001001 /* NetworkPeersTests.swift */; };
 		PFPT002PFPT002PFPT002002 /* PacketFilterPresetsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */; };
 		PFTT002PFTT002PFTT002002 /* PacketFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PFTT001PFTT001PFTT001001 /* PacketFilterTests.swift */; };
@@ -72,6 +73,7 @@
 		THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = THBT001THBT001THBT001001 /* TacticalHoverButton.swift */; };
 		TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */; };
 		TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */; };
+		TSSC002TSSC002TSSC002002 /* TacticalSidebarSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = TSSC001TSSC001TSSC001001 /* TacticalSidebarSection.swift */; };
 		TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
@@ -125,6 +127,7 @@
 		DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConfigurationTests.swift; sourceTree = "<group>"; };
 		SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineViewTests.swift; sourceTree = "<group>"; };
 		TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalUITests.swift; sourceTree = "<group>"; };
+		SBFT001SBFT001SBFT001001 /* SidebarFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarFilterTests.swift; sourceTree = "<group>"; };
 		NPT001NPT001NPT001001 /* NetworkPeersTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPeersTests.swift; sourceTree = "<group>"; };
 		PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketFilterPresetsTests.swift; sourceTree = "<group>"; };
 		PFTT001PFTT001PFTT001001 /* PacketFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketFilterTests.swift; sourceTree = "<group>"; };
@@ -164,6 +167,7 @@
 		THBT001THBT001THBT001001 /* TacticalHoverButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalHoverButton.swift; sourceTree = "<group>"; };
 		TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableRowView.swift; sourceTree = "<group>"; };
 		TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalEmptyStateView.swift; sourceTree = "<group>"; };
+		TSSC001TSSC001TSSC001001 /* TacticalSidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalSidebarSection.swift; sourceTree = "<group>"; };
 		TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableHeaderCell.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
@@ -242,6 +246,7 @@
 				THBT001THBT001THBT001001 /* TacticalHoverButton.swift */,
 				TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */,
 				TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */,
+				TSSC001TSSC001TSSC001001 /* TacticalSidebarSection.swift */,
 				TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */,
 				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
@@ -296,6 +301,7 @@
 				DD1111DD11111111DD111DD1 /* VMConfigurationTests.swift */,
 				SPKT001SPKT001SPKT001001 /* SparklineViewTests.swift */,
 				TUIT001TUIT001TUIT001001 /* TacticalUITests.swift */,
+				SBFT001SBFT001SBFT001001 /* SidebarFilterTests.swift */,
 				NPT001NPT001NPT001001 /* NetworkPeersTests.swift */,
 				PFPT001PFPT001PFPT001001 /* PacketFilterPresetsTests.swift */,
 				PFTT001PFTT001PFTT001001 /* PacketFilterTests.swift */,
@@ -463,6 +469,7 @@
 				THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */,
 				TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */,
 				TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */,
+				TSSC002TSSC002TSSC002002 /* TacticalSidebarSection.swift in Sources */,
 				TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */,
 				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
 				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
@@ -496,6 +503,7 @@
 				CC1111CC11111111CC111CC1 /* VMConfigurationTests.swift in Sources */,
 				SPKT002SPKT002SPKT002002 /* SparklineViewTests.swift in Sources */,
 				TUIT002TUIT002TUIT002002 /* TacticalUITests.swift in Sources */,
+				SBFT002SBFT002SBFT002002 /* SidebarFilterTests.swift in Sources */,
 				NPT002NPT002NPT002002 /* NetworkPeersTests.swift in Sources */,
 				PFPT002PFPT002PFPT002002 /* PacketFilterPresetsTests.swift in Sources */,
 				PFTT002PFTT002PFTT002002 /* PacketFilterTests.swift in Sources */,
