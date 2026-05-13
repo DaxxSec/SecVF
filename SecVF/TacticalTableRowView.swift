@@ -55,8 +55,10 @@ final class TacticalTableRowView: NSTableRowView {
 
     override func drawSeparator(in dirtyRect: NSRect) {
         // Soft OD separator at ~25% opacity. Hairline at the bottom of
-        // the row, full width. Skip when this is the last visible row
-        // to avoid a redundant line above the next section.
+        // the row, full width. The host NSTableView decides whether to
+        // call drawSeparator at all for the last row (via its own
+        // gridStyleMask / intercellSpacing logic), so we always draw
+        // when called — no own-row trailing-edge skip needed here.
         AppColors.borderOD.withAlphaComponent(0.45).setFill()
         let separatorRect = NSRect(x: 0, y: bounds.maxY - 0.5,
                                    width: bounds.width, height: 0.5)

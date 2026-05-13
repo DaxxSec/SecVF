@@ -1652,7 +1652,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
     @objc private func handleFocusVMConsole(_ notification: Notification) {
         guard let vmId = notification.object as? UUID else { return }
         guard let window = vmWindows[vmId] else {
-            NSLog("[AppDelegate] focusVMConsole posted for VM that has no open window (id=\(vmId))")
+            NSLog("[AppDelegate] focusVMConsole posted for VM that has no open window (id=%@)",
+                  vmId.uuidString as NSString)
             return
         }
         NSApp.activate(ignoringOtherApps: true)

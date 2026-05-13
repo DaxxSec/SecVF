@@ -92,7 +92,17 @@ enum PacketFilterPresets {
     ///   look up the filter via `PacketFilterPresets.filter(for:)`.
     static func buildMenu(target: AnyObject?, action: Selector) -> NSMenu {
         let menu = NSMenu(title: "Malware Analysis Filters")
+        populateMenu(menu, target: target, action: action)
+        return menu
+    }
 
+    /// Append preset items onto an existing menu (e.g. an NSPopUpButton's
+    /// own menu so the popup's title item is preserved). Avoids the
+    /// allocate-a-fresh-menu-and-copy-every-item dance that buildMenu
+    /// callers used to do.
+    static func populateMenu(_ menu: NSMenu,
+                             target: AnyObject?,
+                             action: Selector) {
         for (index, section) in sections.enumerated() {
             if index > 0 {
                 menu.addItem(NSMenuItem.separator())
@@ -107,6 +117,5 @@ enum PacketFilterPresets {
                 menu.addItem(item)
             }
         }
-        return menu
     }
 }

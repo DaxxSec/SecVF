@@ -122,22 +122,37 @@ final class SecVFErrorTests: XCTestCase {
 
     // MARK: - Audit logging
 
-    func testLogToAuditTokenizesHomeDirectoryInPaths() {
-        // The audit log writes a "safe" version of the description that
-        // replaces NSHomeDirectory() with "~" so logs shared with
-        // vendors / IR partners don't leak the operator's username.
-        //
-        // We can't easily intercept the actual write, but the
-        // tokenization happens in-place in logToAudit. Verify the
-        // replacement logic indirectly: a path that *contains* the
-        // home dir, after the same .replacingOccurrences call the
-        // logger uses, should not contain the original prefix.
-        let homePath = NSHomeDirectory()
-        let dirty = "Error reading \(homePath)/.avf/Linux/X.bundle"
-        let safe = dirty.replacingOccurrences(of: homePath, with: "~")
-        XCTAssertFalse(safe.contains(homePath),
-                       "Home tokenization must scrub the absolute home path")
+    func testTokenizeHomePathScrubsTheAbsoluteHomePrefix() {
+        // Exercises the production helper directly. A regression that
+        // forgets to call tokenizeHomePath inside logToAudit would still
+        // pass this test — that gap is acceptable because mocking the
+        // audit-log file write is more fragile than asserting the
+        // helper's contract; the helper is the load-bearing piece.
+        let fakeHome = "/Users/operator"
+        let dirty = "Error reading \(fakeHome)/.avf/Linux/X.bundle"
+        let safe = SecVFError.tokenizeHomePath(dirty, home: fakeHome)
+        XCTAssertFalse(safe.contains(fakeHome),
+                       "tokenizeHomePath must scrub the absolute home prefix")
         XCTAssertTrue(safe.contains("~/.avf"),
-                      "Home tokenization must replace with the ~ shorthand")
+                      "tokenizeHomePath must replace the home prefix with ~")
+    }
+
+    func testTokenizeHomePathLeavesNonHomePathsAlone() {
+        let untouched = "/etc/hosts is not in home"
+        XCTAssertEqual(SecVFError.tokenizeHomePath(untouched, home: "/Users/operator"),
+                       untouched)
+    }
+
+    func testTokenizeHomePathReplacesEveryOccurrence() {
+        // Multiple home references in one log line (e.g. "moved
+        // /Users/x/a.bundle to /Users/x/Quarantine/a.bundle") must
+        // all get redacted — leaving even one absolute path defeats
+        // the redaction.
+        let home = "/Users/operator"
+        let dirty = "moved \(home)/a.bundle to \(home)/Quarantine/a.bundle"
+        let safe = SecVFError.tokenizeHomePath(dirty, home: home)
+        XCTAssertFalse(safe.contains(home))
+        XCTAssertEqual(safe.components(separatedBy: "~").count - 1, 2,
+                       "Both occurrences must be replaced")
     }
 }

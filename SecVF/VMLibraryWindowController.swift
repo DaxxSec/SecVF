@@ -4196,6 +4196,13 @@ class VMLibraryWindowController: NSWindowController,
         if alert.runModal() == .alertFirstButtonReturn {
             do {
                 try vmManager.deleteVM(vm)
+                // Drop any focus-filter membership for the deleted VM
+                // so the set doesn't ghost a phantom UUID until the
+                // user manually clears the filter.
+                if var ids = runningFilterIDs {
+                    ids.remove(vm.id)
+                    runningFilterIDs = ids.isEmpty ? nil : ids
+                }
                 refreshTable()
             } catch {
                 showAlert(message: "Failed to delete VM: \(error.localizedDescription)")

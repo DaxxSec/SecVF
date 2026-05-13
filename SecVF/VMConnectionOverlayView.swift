@@ -54,7 +54,16 @@ final class VMConnectionOverlayView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let table = tableView, !connections.isEmpty else { return }
 
-        // Bracket sits in the right gutter, 8pt from the right edge.
+        // Bracket sits in the right gutter, 8pt from the right edge of
+        // the overlay's own bounds (== table content width, since the
+        // overlay is the table's subview).
+        //
+        // Latent caveat: if the VM library table ever gains a horizontal
+        // scroller, `bounds.maxX` will follow the full content width and
+        // the gutter will scroll off the visible viewport. Today the
+        // table has no horizontal scroller so the visible width equals
+        // the content width and this is fine; when that changes, anchor
+        // off the enclosing clip view's visibleRect.maxX instead.
         let gutterX = bounds.maxX - 8
         let stubLen: CGFloat = 6
 

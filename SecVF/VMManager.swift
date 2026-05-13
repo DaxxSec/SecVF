@@ -596,6 +596,13 @@ class VMManager {
         return Self.networkPeers(of: vm, in: virtualMachines)
     }
 
+    // Perf note: refreshConnectionOverlay() in the library window calls
+    // networkPeers(of:) inside a loop over running routers, making the
+    // overlay refresh O(routers × n). Fine at current scale (≤ a dozen
+    // VMs in a typical library), but if VM counts ever push into the
+    // hundreds, consider building a `[routerVMId: [VMConfiguration]]`
+    // index once per VM-list reload and reading from it here.
+
     /// Pure-logic implementation of `networkPeers(of:)`. Operates on an
     /// explicit VM list rather than the singleton's master list, so the
     /// rules (router→guests, guest→router+siblings, NAT→none, virtual-

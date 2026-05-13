@@ -152,9 +152,13 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         let presetPopup = NSPopUpButton(frame: NSRect(x: 60, y: 10, width: 180, height: 24), pullsDown: true)
         presetPopup.font = NSFont.systemFont(ofSize: 10)
         presetPopup.addItem(withTitle: "⚡ Malware Analysis Filters")
-        let presetMenu = PacketFilterPresets.buildMenu(target: self,
-                                                      action: #selector(presetFilterSelected(_:)))
-        presetMenu.items.forEach { presetPopup.menu?.addItem($0.copy() as! NSMenuItem) }
+        // Append directly onto the popup's existing menu so the title
+        // item created above is preserved — no allocate-then-copy.
+        if let popupMenu = presetPopup.menu {
+            PacketFilterPresets.populateMenu(popupMenu,
+                                             target: self,
+                                             action: #selector(presetFilterSelected(_:)))
+        }
         toolbarView.addSubview(presetPopup)
 
         filterTextField = NSTextField(frame: NSRect(x: 250, y: 10, width: width - 365, height: 24))

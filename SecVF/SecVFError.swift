@@ -202,13 +202,20 @@ enum SecVFError: LocalizedError {
 // MARK: - Error Logging Extension
 
 extension SecVFError {
+    /// Tokenize the operator's home directory in a log string so reports
+    /// shared with vendors / IR partners don't leak the username via
+    /// `/Users/<name>/…` paths. Lives as a static helper rather than
+    /// inline in `logToAudit` so the redaction logic is independently
+    /// testable.
+    static func tokenizeHomePath(_ message: String,
+                                 home: String = NSHomeDirectory()) -> String {
+        return message.replacingOccurrences(of: home, with: "~")
+    }
+
     /// Log error to security audit log
     func logToAudit() {
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        // Tokenize the home prefix so logs shared with vendors / IR partners
-        // don't leak the operator's identity via `/Users/<name>/...` paths.
-        let safeDesc = self.localizedDescription
-            .replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        let safeDesc = Self.tokenizeHomePath(self.localizedDescription)
         let logEntry = "[\(timestamp)] ERROR: \(safeDesc)\n"
 
         // Route through AVFAuditLog so concurrent producers stay line-coherent

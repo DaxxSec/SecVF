@@ -19,15 +19,45 @@ final class AppColorsTests: XCTestCase {
     func testCyanAliasesPointToODGreen() {
         // The redesign renamed the cyan tokens to OD but kept the cyan
         // names as aliases so existing callers compile. The aliases
-        // must resolve to the SAME instance — not a re-color that
-        // happens to look similar — so any future "drop the alias"
-        // refactor is a single-grep operation, not a hunt.
-        XCTAssertEqual(AppColors.accentOD, AppColors.accentCyan,
-                       "accentOD must alias accentCyan")
-        XCTAssertEqual(AppColors.accentODGlow, AppColors.accentNeonCyan,
-                       "accentODGlow must alias accentNeonCyan")
-        XCTAssertEqual(AppColors.borderOD, AppColors.borderCyan)
-        XCTAssertEqual(AppColors.borderODEmphasis, AppColors.borderCyanEmphasis)
+        // must resolve to colors with identical components — not a
+        // re-color that happens to look similar — so any future "drop
+        // the alias" refactor is a single-grep operation, not a hunt.
+        //
+        // Asserting on RGBA components rather than NSColor instance
+        // equality so the test still passes if the alias is later
+        // expressed as two independently-defined NSColor literals with
+        // matching values; what we care about is the *visible* color
+        // contract, not the Swift-level reference equality.
+        assertSameColor(AppColors.accentOD, AppColors.accentCyan,
+                        "accentOD must alias accentCyan")
+        assertSameColor(AppColors.accentODGlow, AppColors.accentNeonCyan,
+                        "accentODGlow must alias accentNeonCyan")
+        assertSameColor(AppColors.borderOD, AppColors.borderCyan,
+                        "borderOD must alias borderCyan")
+        assertSameColor(AppColors.borderODEmphasis, AppColors.borderCyanEmphasis,
+                        "borderODEmphasis must alias borderCyanEmphasis")
+    }
+
+    /// Compare two colors by their device-RGB components rather than by
+    /// NSColor instance equality. Two `static let` aliases like
+    /// `static let accentOD = accentCyan` produce instance-equal values
+    /// today, but a future refactor to independently-defined NSColors
+    /// would break instance equality even when the components match.
+    /// Use a small per-channel tolerance to ride out floating-point
+    /// representation drift from explicit-literal restatements.
+    private func assertSameColor(_ a: NSColor, _ b: NSColor,
+                                 _ message: String,
+                                 tolerance: CGFloat = 0.001,
+                                 file: StaticString = #file, line: UInt = #line) {
+        guard let aRGB = a.usingColorSpace(.deviceRGB),
+              let bRGB = b.usingColorSpace(.deviceRGB) else {
+            XCTFail("Color components unavailable for comparison", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(aRGB.redComponent,   bRGB.redComponent,   accuracy: tolerance, message, file: file, line: line)
+        XCTAssertEqual(aRGB.greenComponent, bRGB.greenComponent, accuracy: tolerance, message, file: file, line: line)
+        XCTAssertEqual(aRGB.blueComponent,  bRGB.blueComponent,  accuracy: tolerance, message, file: file, line: line)
+        XCTAssertEqual(aRGB.alphaComponent, bRGB.alphaComponent, accuracy: tolerance, message, file: file, line: line)
     }
 
     func testTacticalAccentsAreActuallyGreen() {
