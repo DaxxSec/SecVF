@@ -312,20 +312,15 @@ class VMLibraryWindowController: NSWindowController,
             trafficFallOverlay = overlay
         }
 
-        // Programmatically append a Traffic column at the end of whatever
-        // the XIB defined. Done in code (not the XIB) so the column can
-        // host a custom NSView (SparklineView) rather than the default
-        // NSTextField cell. The column is non-resizable and ~80pt wide —
-        // enough for a glanceable line, not so wide it eats other columns.
-        if let tableView = tableView,
-           !tableView.tableColumns.contains(where: { $0.identifier.rawValue == "TrafficColumn" }) {
-            let trafficCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TrafficColumn"))
-            trafficCol.title = "Traffic"
-            trafficCol.headerCell = TacticalTableHeaderCell(textCell: "Traffic")
-            trafficCol.width = 80
-            trafficCol.minWidth = 60
-            trafficCol.maxWidth = 120
-            tableView.addTableColumn(trafficCol)
+        // Convert the XIB's column-based table layout into a single
+        // full-width "VM" column that hosts a custom multi-line card
+        // cell. The XIB still defines the per-field columns (Name /
+        // Status / OS / CPU / Memory / Disk / LastUsed) but we drop
+        // them at runtime in favor of the new card view — the user
+        // explicitly asked for 2–3 line rows and a clickable
+        // network-mode cycle that doesn't fit the column grid.
+        if let tableView = tableView {
+            switchTableToCardMode(tableView)
         }
 
         // Apply tactical header styling to every XIB-defined column, too.
@@ -4012,6 +4007,107 @@ class VMLibraryWindowController: NSWindowController,
     // MARK: - NSTableViewDelegate
 
     /// Dequeue (or build) the cell for the Traffic column. The cell hosts a
+    /// Switch the NSTableView into single-column card mode. Drops the
+    /// XIB-defined per-field columns (Name/Status/OS/CPU/Memory/Disk/
+    /// LastUsed) and replaces them with one full-width "VMCardColumn"
+    /// that hosts the multi-line VMCardCellView. Idempotent — safe to
+    /// call repeatedly; subsequent calls no-op.
+    ///
+    /// Why a runtime swap instead of editing the XIB: the existing
+    /// columns are referenced by tests (column id strings appear in
+    /// columnAlignment/columnUsesMonospacedFont helpers) and by the
+    /// AI Sandbox path. Pruning them at runtime keeps both paths
+    /// converging on the same cell type without forcing a XIB edit.
+    private func switchTableToCardMode(_ tableView: NSTableView) {
+        // Bail if already in card mode.
+        if tableView.tableColumns.contains(where: { $0.identifier.rawValue == "VMCardColumn" }) {
+            return
+        }
+
+        // Drop every existing column (XIB-defined + any programmatic
+        // additions like the old TrafficColumn).
+        for column in Array(tableView.tableColumns) {
+            tableView.removeTableColumn(column)
+        }
+
+        let cardCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("VMCardColumn"))
+        cardCol.title = ""
+        cardCol.headerCell = TacticalTableHeaderCell(textCell: "")
+        cardCol.minWidth = 360
+        cardCol.resizingMask = .autoresizingMask
+        tableView.addTableColumn(cardCol)
+
+        // Card height drives the row height. Tweak rowHeight on the
+        // table itself — NSTableView reads this for every row without
+        // a heightOfRow delegate method.
+        tableView.rowHeight = VMCardCellView.rowHeight
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
+        tableView.headerView = nil   // single-column card has no useful header
+    }
+
+    /// Dequeue / build the multi-line card cell for the given row.
+    /// Routes through `standardVM(at:)` for the Standard tab and the
+    /// AI Sandbox bundle list for the Sandbox tab, configuring the
+    /// cell with the right state for each.
+    private func vmCardCellView(tableView: NSTableView, row: Int) -> NSView? {
+        let id = VMCardCellView.identifier
+        var cell = tableView.makeView(withIdentifier: id, owner: self) as? VMCardCellView
+        if cell == nil {
+            cell = VMCardCellView(frame: NSRect(x: 0, y: 0,
+                                                width: tableView.bounds.width,
+                                                height: VMCardCellView.rowHeight))
+            cell?.identifier = id
+        }
+        guard let cell = cell else { return nil }
+
+        // Network-mode click → ask the controller to cycle the mode
+        // for the VM bound to this row. Configuring the closure once
+        // per dequeue is cheap and avoids retain cycles since the cell
+        // captures self weakly through the closure capture list.
+        cell.onCycleNetworkMode = { [weak self] vmID in
+            self?.handleCycleNetworkMode(forVMID: vmID)
+        }
+
+        switch currentLibraryTab {
+        case .aiSandbox:
+            guard row < aiSandboxBundles.count else { return nil }
+            cell.configureForSandbox(bundle: aiSandboxBundles[row])
+        case .standard:
+            guard let vm = standardVM(at: row) else { return nil }
+            let rate = liveRateBps[vm.name]
+            cell.configure(with: vm,
+                           liveDownBps: rate?.down,
+                           liveUpBps:   rate?.up,
+                           trafficSamples: trafficSamples[vm.name] ?? [],
+                           packetCount: currentPacketCount(forVMName: vm.name))
+        }
+        return cell
+    }
+
+    /// Network-mode chip tapped on a VM card. Looks the VM up, asks
+    /// the manager to cycle the mode (NAT → Virtual → Router → NAT),
+    /// surfaces the standard "stop the VM first" alert on the failure
+    /// path, and reloads the row to reflect the new state.
+    private func handleCycleNetworkMode(forVMID vmID: UUID) {
+        guard let vm = vmManager.virtualMachines.first(where: { $0.id == vmID }) else { return }
+        do {
+            _ = try vmManager.cycleNetworkMode(vm)
+            // Refresh table + sidebar so the new mode + count badges
+            // reflect immediately. Connection overlay also refreshes
+            // because router/guest relationships changed.
+            tableView?.reloadData()
+            refreshConnectionOverlay()
+            updateSelectedVMDetailCard()
+            // Sidebar Network section's count badges (Isolated /
+            // Virtual / NAT) bucketize by `networkConfig.mode` and
+            // router relationships — cycling changes both, so the
+            // counts need to refresh.
+            refreshSidebarCounts()
+        } catch {
+            showAlert(message: error.localizedDescription)
+        }
+    }
+
     /// `SparklineView` configured from the per-VM rolling buffer in
     /// `trafficSamples`. AI Sandbox tab gets an empty sparkline because we
     /// don't sample those bundles through the virtual switch.
@@ -4056,6 +4152,12 @@ class VMLibraryWindowController: NSWindowController,
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        // Card column path: switchTableToCardMode collapsed the per-field
+        // columns down to a single full-width "VMCardColumn" hosting a
+        // multi-line VMCardCellView. Every row goes through this branch.
+        if tableColumn?.identifier.rawValue == "VMCardColumn" {
+            return vmCardCellView(tableView: tableView, row: row)
+        }
         // Traffic column gets a custom SparklineView cell instead of the
         // shared NSTextField cell used by every other column. We intercept
         // here before the text-cell construction below.

@@ -596,6 +596,68 @@ class VMManager {
         return Self.networkPeers(of: vm, in: virtualMachines)
     }
 
+    // MARK: - Network mode cycle
+
+    /// Advance the VM's network mode by one step in the cycle:
+    ///
+    ///     NAT  →  Virtual (isolated)  →  Router  →  NAT
+    ///
+    /// Persists the change to the VM's metadata.json and updates the
+    /// in-memory `virtualMachines` array. Throws if the VM isn't found
+    /// or the metadata write fails. Throws if the VM is currently
+    /// running — the network mode can't change live (the underlying
+    /// VZ network attachment is set once at VM-start time and isn't
+    /// hot-swappable in Apple's Virtualization framework).
+    ///
+    /// Pure step logic lives in `nextNetworkConfig(after:)` so it can
+    /// be tested without touching disk.
+    @discardableResult
+    func cycleNetworkMode(_ vmConfig: VMConfiguration) throws -> VMConfiguration {
+        guard vmConfig.status == .stopped else {
+            throw VMError.networkModeChangeWhileRunning
+        }
+        guard let index = virtualMachines.firstIndex(where: { $0.id == vmConfig.id }) else {
+            throw VMError.vmNotFound
+        }
+        var updated = virtualMachines[index]
+        updated.networkConfig = Self.nextNetworkConfig(after: updated.networkConfig)
+        virtualMachines[index] = updated
+        try saveVMMetadata(updated)
+        return updated
+    }
+
+    /// Pure step function for the network-mode cycle. NAT loops back
+    /// to NAT after Router, and the `routerVMId` / `isRouter` flags
+    /// reset along the way (a VM that was a guest of someone becomes
+    /// truly isolated when we cycle past NAT, not a stranded guest
+    /// pointing at a router relationship from a previous mode).
+    static func nextNetworkConfig(after current: VirtualNetworkConfig) -> VirtualNetworkConfig {
+        switch (current.mode, current.isRouter) {
+        case (.nat, _):
+            // NAT → Virtual (isolated). Clear any stale router relationships.
+            return VirtualNetworkConfig(mode: .virtual,
+                                        routerVMId: nil,
+                                        isRouter: false)
+        case (.virtual, false) where current.routerVMId == nil:
+            // Pure isolated → Router
+            return VirtualNetworkConfig(mode: .virtual,
+                                        routerVMId: nil,
+                                        isRouter: true)
+        case (.virtual, true):
+            // Router → NAT
+            return VirtualNetworkConfig(mode: .nat,
+                                        routerVMId: nil,
+                                        isRouter: false)
+        case (.virtual, false):
+            // Virtual guest (routerVMId set) → NAT (drops the guest
+            // relationship; cleaner cycle than dragging it through
+            // multiple steps).
+            return VirtualNetworkConfig(mode: .nat,
+                                        routerVMId: nil,
+                                        isRouter: false)
+        }
+    }
+
     // Perf note: refreshConnectionOverlay() in the library window calls
     // networkPeers(of:) inside a loop over running routers, making the
     // overlay refresh O(routers × n). Fine at current scale (≤ a dozen
@@ -753,6 +815,8 @@ enum VMError: LocalizedError {
     case bundleExists
     case diskCreationFailed
     case importSourceNotFound
+    case vmNotFound
+    case networkModeChangeWhileRunning
 
     var errorDescription: String? {
         switch self {
@@ -766,6 +830,10 @@ enum VMError: LocalizedError {
             return "Failed to create disk image"
         case .importSourceNotFound:
             return "Import source not found"
+        case .vmNotFound:
+            return "VM not found in the library"
+        case .networkModeChangeWhileRunning:
+            return "Stop the VM before changing its network mode — Apple's Virtualization framework attaches the network device once at boot and can't hot-swap it."
         }
     }
 }
