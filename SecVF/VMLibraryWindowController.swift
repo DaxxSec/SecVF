@@ -175,6 +175,12 @@ class VMLibraryWindowController: NSWindowController,
     private var detailStatusPill: NSTextField?
     private var detailOSLabel: NSTextField?
     private var detailResourcesLabel: NSTextField?
+    // Thin progress bar that sits just below the CPU · RAM value cell in
+    // the detail card. Shows VM's configured RAM as a fraction of total
+    // host RAM — an honest "is this allocation heavy?" indicator since
+    // live guest RAM usage isn't available without guest tools.
+    private var detailMemoryBarTrack: NSView?
+    private var detailMemoryBarFill: CALayer?
     private var detailDiskLabel: NSTextField?
     private var detailNetworkModeLabel: NSTextField?
     private var detailNetworkRateLabel: NSTextField?
@@ -1229,6 +1235,27 @@ class VMLibraryWindowController: NSWindowController,
         metrics.addSubview(cpuCell.caption)
         metrics.addSubview(cpuCell.value)
         detailResourcesLabel = cpuCell.value
+
+        // Memory allocation bar — thin track underneath the value cell.
+        // y=8 puts it 6pt below `valueY=14` (which is the value's bottom
+        // edge after layout, since labels grow upward in flipped coords —
+        // in our unflipped card the value text is at y=14..34, so y=8
+        // gives a 4pt strip with 6pt to the card bottom).
+        let barH: CGFloat = 4
+        let barY: CGFloat = max(2, valueY - barH - 2)
+        let track = NSView(frame: NSRect(x: mx, y: barY, width: cpuW, height: barH))
+        track.wantsLayer = true
+        track.layer?.backgroundColor = AppColors.borderOD.withAlphaComponent(0.45).cgColor
+        track.layer?.cornerRadius = barH / 2
+        let fill = CALayer()
+        fill.frame = NSRect(x: 0, y: 0, width: 0, height: barH)
+        fill.backgroundColor = AppColors.accentODGlow.cgColor
+        fill.cornerRadius = barH / 2
+        track.layer?.addSublayer(fill)
+        metrics.addSubview(track)
+        detailMemoryBarTrack = track
+        detailMemoryBarFill = fill
+
         mx += cpuW + gapMetric
 
         let diskCell = makeMetricLabel(caption: "Disk", x: mx,
@@ -1312,6 +1339,58 @@ class VMLibraryWindowController: NSWindowController,
         return pill
     }
 
+    /// Update the memory-allocation bar beneath the CPU·RAM cell.
+    /// `vmMemoryBytes == 0` clears the fill (empty state). Otherwise the
+    /// fill width is the VM's configured RAM as a fraction of total host
+    /// RAM, clamped to 100%. Color shifts green→orange→red as the share
+    /// rises so an over-provisioned guest reads as a warning at a glance.
+    ///
+    /// Honest framing: this is allocation, not live usage. We don't have
+    /// guest-tool channels for real RAM occupancy on macOS Virtualization,
+    /// so the bar tells the user "how much host RAM you've committed to
+    /// this VM" — useful when deciding whether to start a second VM.
+    private func updateMemoryAllocationBar(vmMemoryBytes: UInt64) {
+        guard let fill = detailMemoryBarFill,
+              let track = detailMemoryBarTrack else { return }
+        guard vmMemoryBytes > 0 else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            fill.frame = NSRect(x: 0, y: 0, width: 0, height: fill.frame.height)
+            CATransaction.commit()
+            track.toolTip = nil
+            return
+        }
+        let hostBytes = ProcessInfo.processInfo.physicalMemory
+        let ratio = hostBytes > 0
+            ? min(1.0, Double(vmMemoryBytes) / Double(hostBytes))
+            : 0
+        let trackW = track.bounds.width
+        let fillW = CGFloat(ratio) * trackW
+
+        let color: NSColor
+        switch ratio {
+        case ..<0.25: color = AppColors.accentODGlow
+        case ..<0.50: color = AppColors.accentYellow
+        default:      color = AppColors.accentRed
+        }
+
+        // Disable implicit CALayer animations on layout updates so the
+        // bar snaps to its new width instead of slow-easing on every
+        // selection change (which feels laggy).
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        fill.frame = NSRect(x: 0, y: 0, width: fillW, height: fill.frame.height)
+        fill.backgroundColor = color.cgColor
+        CATransaction.commit()
+
+        let vmGB = Double(vmMemoryBytes) / 1_073_741_824.0
+        let hostGB = Double(hostBytes) / 1_073_741_824.0
+        track.toolTip = String(
+            format: "Configured to use %.1f GB of %.0f GB host RAM (%.0f%%). This is allocation, not live usage.",
+            vmGB, hostGB, ratio * 100
+        )
+    }
+
     /// Refresh the detail card from `tableView`'s current selection. Called
     /// whenever the selection changes or a VM's status changes.
     private func updateSelectedVMDetailCard() {
@@ -1338,6 +1417,7 @@ class VMLibraryWindowController: NSWindowController,
             detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
             detailOSLabel?.stringValue = "—"
             detailResourcesLabel?.stringValue = "—"
+            updateMemoryAllocationBar(vmMemoryBytes: 0)
             detailDiskLabel?.stringValue = "—"
             detailNetworkModeLabel?.stringValue = "—"
             detailNetworkRateLabel?.stringValue = "—"
@@ -1378,6 +1458,7 @@ class VMLibraryWindowController: NSWindowController,
         // CPU · RAM (memorySize is bytes; convert to GB)
         let ramGB = Double(vm.memorySize) / 1_073_741_824.0
         detailResourcesLabel?.stringValue = String(format: "%d · %.1f GB", vm.cpuCount, ramGB)
+        updateMemoryAllocationBar(vmMemoryBytes: vm.memorySize)
 
         // Disk — show "used / total". `onDiskBundleSize` returns the cached
         // value immediately and kicks a background re-scan if stale; the
@@ -1552,6 +1633,7 @@ class VMLibraryWindowController: NSWindowController,
             detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
             detailOSLabel?.stringValue = "—"
             detailResourcesLabel?.stringValue = "—"
+            updateMemoryAllocationBar(vmMemoryBytes: 0)
             detailDiskLabel?.stringValue = "—"
             detailNetworkModeLabel?.stringValue = "—"
             detailNetworkRateLabel?.stringValue = "—"
@@ -1574,6 +1656,9 @@ class VMLibraryWindowController: NSWindowController,
 
         detailOSLabel?.stringValue = "macOS"
         detailResourcesLabel?.stringValue = "4 · 8 GB"
+        // AI Sandbox bundle is fixed at 8 GB. Drive the allocation bar
+        // with that same value so the bar matches the text.
+        updateMemoryAllocationBar(vmMemoryBytes: 8 * 1_073_741_824)
         detailDiskLabel?.stringValue = ByteCountFormatter.string(
             fromByteCount: bundle.diskBytes, countStyle: .binary)
 
