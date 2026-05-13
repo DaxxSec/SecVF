@@ -1829,7 +1829,13 @@ class VMLibraryWindowController: NSWindowController,
         detailNameLabel?.stringValue = vm.name
         detailNameLabel?.textColor = AppColors.textPrimary
 
-        // Status pill (uses VMStatus from VMConfiguration)
+        // Status pill (uses VMStatus from VMConfiguration). Setting the
+        // text via attributedStringValue with an explicit centered
+        // paragraph style — NSTextField's plain `alignment = .center`
+        // can drift inside a layer-backed, border-less label depending
+        // on the macOS revision, so the explicit paragraph-style
+        // centering guarantees the dot + text sit center-aligned
+        // inside the 80pt pill regardless.
         let (pillText, pillColor): (String, NSColor) = {
             switch vm.status {
             case .running:  return ("● RUNNING",  AppColors.statusRunning)
@@ -1838,8 +1844,16 @@ class VMLibraryWindowController: NSWindowController,
             case .stopped:  return ("○ STOPPED",  AppColors.statusStopped)
             }
         }()
-        detailStatusPill?.stringValue = pillText
-        detailStatusPill?.textColor = pillColor
+        let pillPara = NSMutableParagraphStyle()
+        pillPara.alignment = .center
+        detailStatusPill?.attributedStringValue = NSAttributedString(
+            string: pillText,
+            attributes: [
+                .foregroundColor: pillColor,
+                .font: NSFont.monospacedSystemFont(
+                    ofSize: LayoutConstants.fontSizeCaption, weight: .semibold),
+                .paragraphStyle: pillPara,
+            ])
         detailStatusPill?.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
         detailStatusPill?.layer?.borderColor = pillColor.withAlphaComponent(0.45).cgColor
 
@@ -4152,6 +4166,20 @@ class VMLibraryWindowController: NSWindowController,
         // so suppress the 2pt accent stripe to avoid a visual clash.
         row.accentStripeWidth = 0
         return row
+    }
+
+    /// Explicit row height delegate. `tableView.rowHeight = 62` set
+    /// inside `switchTableToCardMode` should be authoritative, but
+    /// returning the value through the delegate too defends against
+    /// "the XIB's rowHeight=20 latched before our card-mode swap" — a
+    /// regression that surfaced visually as cards rendering as a
+    /// single squished 20pt line with the row-3 chips spilling into
+    /// the row-1 name area. heightOfRow:_ is queried on every reload
+    /// so the value can't be stale.
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        // AI Sandbox outline view uses its own delegate-less row sizing;
+        // this method only fires for the main VM table.
+        return VMCardCellView.rowHeight
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
