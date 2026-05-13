@@ -159,6 +159,11 @@ class VMLibraryWindowController: NSWindowController,
     // Packet Log Panel
     private var packetLogPanel: NSView?
     private var packetLogTabControl: NSSegmentedControl?
+    // CAPTURING pill + live rate readout (replaces the old Packets/Protocols
+    // tab in the panel header; matches the mockup).
+    private var packetCapturingPill: NSView?
+    private var packetCapturingPillDot: CAShapeLayer?
+    private var packetRateLabel: NSTextField?
     private var packetVMFilterControl: NSSegmentedControl?
     private var packetListContainer: NSScrollView?
     private var protocolStatsContainer: NSView?
@@ -334,6 +339,94 @@ class VMLibraryWindowController: NSWindowController,
         importButton?.keyEquivalentModifierMask = [.command, .shift]
         deleteButton?.keyEquivalent = String(Character(UnicodeScalar(NSDeleteCharacter)!))
         deleteButton?.keyEquivalentModifierMask = .command
+    }
+
+    /// Build the "● CAPTURING" pill for the packet panel header. Orange dot
+    /// pulses while capture is active; the whole pill is hidden when capture
+    /// is idle. Animation is opt-in via `setPacketCapturingActive(_:)`.
+    private func makeCapturingPill() -> NSView {
+        let pill = NSView()
+        pill.wantsLayer = true
+        pill.layer?.backgroundColor = AppColors.accentOrange.withAlphaComponent(0.10).cgColor
+        pill.layer?.borderColor = AppColors.borderOrange.cgColor
+        pill.layer?.borderWidth = LayoutConstants.borderHairline
+        pill.layer?.cornerRadius = 10
+        pill.isHidden = true   // shown when capture starts
+
+        // Pulse dot — same idiom as the bottom status bar.
+        let dotSize: CGFloat = 6
+        let dot = CAShapeLayer()
+        dot.path = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: dotSize, height: dotSize), transform: nil)
+        dot.fillColor = AppColors.accentOrangeHot.cgColor
+        dot.shadowColor = AppColors.accentOrangeHot.cgColor
+        dot.shadowOpacity = 0.8
+        dot.shadowRadius = 4
+        dot.shadowOffset = .zero
+        dot.frame = CGRect(x: 8, y: (20 - dotSize) / 2, width: dotSize, height: dotSize)
+        pill.layer?.addSublayer(dot)
+        packetCapturingPillDot = dot
+
+        let label = NSTextField(labelWithString: "CAPTURING")
+        label.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+        label.textColor = AppColors.accentOrangeHot
+        label.frame = NSRect(x: 22, y: 3, width: 80, height: 14)
+        label.isBordered = false
+        label.drawsBackground = false
+        label.isEditable = false
+        pill.addSubview(label)
+
+        return pill
+    }
+
+    /// Repaint the "↓ X/s ↑ Y/s · N pkts" rate readout in the packet panel
+    /// header. Combines the aggregate switch + NAT bridge rates so the user
+    /// sees one number that represents "all VM traffic flowing through the
+    /// host", matching the panel's role as the multi-VM live preview.
+    private func refreshPacketPanelRate(totalPackets: Int, capturing: Bool) {
+        guard let rateLabel = packetRateLabel else { return }
+        guard capturing else {
+            rateLabel.stringValue = "capture idle"
+            rateLabel.textColor = AppColors.textMuted
+            return
+        }
+        // Sum the per-VM virtual switch rates (already in liveRateBps).
+        var totalDown: Double = 0
+        var totalUp: Double = 0
+        for (_, rate) in liveRateBps {
+            totalDown += rate.down
+            totalUp += rate.up
+        }
+        // Add the aggregate NAT bridge sample if available — uses the
+        // status bar's existing previous-sample state, so we recompute
+        // from the latest pair to stay consistent.
+        let natSample = BridgeInterfaceStats.sample()
+        if let natRate = BridgeInterfaceStats.rate(from: statusBarPreviousNATSample,
+                                                   to: natSample) {
+            totalDown += natRate.down
+            totalUp += natRate.up
+        }
+        let down = ByteCountFormatter.string(fromByteCount: Int64(totalDown), countStyle: .binary)
+        let up = ByteCountFormatter.string(fromByteCount: Int64(totalUp), countStyle: .binary)
+        rateLabel.stringValue = "↓ \(down)/s  ↑ \(up)/s  ·  \(formatCount(totalPackets)) pkts"
+        // Hot tint when there's real traffic (>1 KiB/s combined)
+        let hot = (totalDown + totalUp) > 1024
+        rateLabel.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+    }
+
+    /// Toggle the packet-capturing pill's visibility + pulse animation.
+    private func setPacketCapturingActive(_ active: Bool) {
+        packetCapturingPill?.isHidden = !active
+        if active, packetCapturingPillDot?.animation(forKey: "pulse") == nil {
+            let pulse = CABasicAnimation(keyPath: "opacity")
+            pulse.fromValue = 1.0
+            pulse.toValue = 0.4
+            pulse.duration = 1.2
+            pulse.autoreverses = true
+            pulse.repeatCount = .infinity
+            packetCapturingPillDot?.add(pulse, forKey: "pulse")
+        } else if !active {
+            packetCapturingPillDot?.removeAnimation(forKey: "pulse")
+        }
     }
 
     /// Tactical-themed `NSSegmentedControl`. Uses `.roundRect` (cleaner than
@@ -1775,6 +1868,11 @@ class VMLibraryWindowController: NSWindowController,
                 ? "Capture · \(formatCount(totalPackets)) pkts"
                 : "Capture · idle"
             statusBarCaptureLabel?.textColor = capturing ? AppColors.accentOrangeHot : AppColors.textMuted
+
+            // Packet panel header: toggle the CAPTURING pill + repaint
+            // the rate readout from the same data source.
+            setPacketCapturingActive(capturing)
+            refreshPacketPanelRate(totalPackets: totalPackets, capturing: capturing)
         }
 
         // Disk free + version
@@ -1861,20 +1959,37 @@ class VMLibraryWindowController: NSWindowController,
         packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 140, height: 20)
         packetPanel.addSubview(packetTitle)
 
-        // Tab control (Packets / Protocols) — shifted right to clear the
-        // wider "▸ LIVE TRAFFIC" title.
-        let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 160, y: packetPanelHeight - 30, width: 140, height: 24)
-        tabControl.selectedSegment = 0
-        Self.applyTacticalStyle(to: tabControl)
-        packetPanel.addSubview(tabControl)
-        packetLogTabControl = tabControl
+        // CAPTURING pill — sits next to the title with a pulsing orange dot.
+        // Hidden when not capturing; visible (with the pulse animation) when
+        // PacketCaptureManager is actively recording.
+        let capturingPill = makeCapturingPill()
+        capturingPill.frame = NSRect(x: 160, y: packetPanelHeight - 28, width: 110, height: 20)
+        packetPanel.addSubview(capturingPill)
+        packetCapturingPill = capturingPill
 
-        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols.
+        // Live rate readout — "↓ 12.4 MB/s ↑ 0.3 MB/s · 1,284 pkts".
+        // Right-anchored so it autoresizes off the right edge of the panel.
+        let rateLabel = NSTextField(labelWithString: "")
+        rateLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        rateLabel.textColor = AppColors.textMuted
+        rateLabel.alignment = .right
+        rateLabel.isBordered = false
+        rateLabel.drawsBackground = false
+        rateLabel.isEditable = false
+        let rateW: CGFloat = 280
+        rateLabel.frame = NSRect(x: packetPanelWidth - rateW - 160,
+                                 y: packetPanelHeight - 28,
+                                 width: rateW, height: 20)
+        rateLabel.autoresizingMask = [.minXMargin]
+        packetPanel.addSubview(rateLabel)
+        packetRateLabel = rateLabel
+
+        // VM Filter tabs (macOS / Kali / All) — moved to a second header
+        // row below the rate readout so they don't fight the title bar.
         // Widened "macOS" segment from 45 → 60 so the full label fits at 11pt
         // (the previous 45pt clipped to "ma..." on Aqua's roundRect style).
         let vmFilterControl = NSSegmentedControl(labels: ["macOS", "Kali", "All"], trackingMode: .selectOne, target: self, action: #selector(vmFilterChanged(_:)))
-        vmFilterControl.frame = NSRect(x: 310, y: packetPanelHeight - 30, width: 160, height: 24)
+        vmFilterControl.frame = NSRect(x: 12, y: packetPanelHeight - 56, width: 160, height: 22)
         vmFilterControl.selectedSegment = 0  // Default to macOS
         Self.applyTacticalStyle(to: vmFilterControl)
         vmFilterControl.setWidth(60, forSegment: 0)  // macOS — was 45 (truncated)
@@ -1883,53 +1998,58 @@ class VMLibraryWindowController: NSWindowController,
         packetPanel.addSubview(vmFilterControl)
         packetVMFilterControl = vmFilterControl
 
-        // Filter ARP checkbox (checked by default) — moved right to clear
-        // the widened macOS/Kali/All segmented control.
+        // Filter ARP checkbox (checked by default) — on row 2 next to the
+        // VM filter.
         let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
-        arpCheckbox.frame = NSRect(x: 480, y: packetPanelHeight - 30, width: 90, height: 24)
+        arpCheckbox.frame = NSRect(x: 188, y: packetPanelHeight - 56, width: 90, height: 22)
         arpCheckbox.state = .on  // Checked by default
         arpCheckbox.font = NSFont.systemFont(ofSize: 11)
         arpCheckbox.contentTintColor = NSColor.white
         packetPanel.addSubview(arpCheckbox)
 
-        // ARP filtered count label — uses the amber token instead of an
-        // inline hex literal so the legend stays consistent.
+        // ARP filtered count label.
         let arpCountLabel = NSTextField(labelWithString: "(0)")
-        arpCountLabel.frame = NSRect(x: 568, y: packetPanelHeight - 28, width: 45, height: 18)
+        arpCountLabel.frame = NSRect(x: 276, y: packetPanelHeight - 54, width: 45, height: 18)
         arpCountLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
         arpCountLabel.textColor = AppColors.accentYellow
         arpCountLabel.alignment = .left
         packetPanel.addSubview(arpCountLabel)
         arpFilterCountLabel = arpCountLabel
 
-        // Open Full Analysis button - top right (styled to match toolbar)
-        let openButton = NSButton(title: "Open Full Analysis", target: self, action: #selector(openPacketAnalysisWindow(_:)))
-        openButton.frame = NSRect(x: packetPanelWidth - 140, y: packetPanelHeight - 32, width: 130, height: 26)
+        // "Expand →" button (was "Open Full Analysis"). Pops the dedicated
+        // Packet Analysis window. Right-anchored on row 2.
+        let openButton = NSButton(title: "Expand →", target: self, action: #selector(openPacketAnalysisWindow(_:)))
+        openButton.frame = NSRect(x: packetPanelWidth - 95, y: packetPanelHeight - 56,
+                                  width: 85, height: 22)
         openButton.isBordered = false
-        openButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        openButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         openButton.wantsLayer = true
         openButton.layer?.backgroundColor = AppColors.backgroundButton.cgColor
-        openButton.layer?.borderColor = AppColors.accentCyan.withAlphaComponent(0.5).cgColor
+        openButton.layer?.borderColor = AppColors.borderOD.cgColor
         openButton.layer?.borderWidth = 1.0
-        openButton.layer?.cornerRadius = 5
-        openButton.contentTintColor = AppColors.accentCyan
-        openButton.attributedTitle = NSAttributedString(string: "Open Full Analysis", attributes: [
-            .foregroundColor: AppColors.accentCyan,
-            .font: NSFont.systemFont(ofSize: 10, weight: .medium)
+        openButton.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        openButton.attributedTitle = NSAttributedString(string: "Expand →", attributes: [
+            .foregroundColor: AppColors.textOD,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
         ])
+        openButton.toolTip = "Open the full Packet Analysis window with deep filters and packet inspection"
         openButton.autoresizingMask = [.minXMargin]
         packetPanel.addSubview(openButton)
 
-        // Separator below header — OD hairline, matches the panel border.
-        let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 45, width: packetPanelWidth - 20, height: 1))
+        // Separator below row 2 — OD hairline.
+        let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 66,
+                                                  width: packetPanelWidth - 20, height: 1))
         packetSeparator.boxType = .custom
         packetSeparator.borderWidth = 0
         packetSeparator.fillColor = AppColors.borderOD
         packetSeparator.autoresizingMask = [.width]
         packetPanel.addSubview(packetSeparator)
 
-        // Packets list container - horizontal layout
-        let packetsScrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        // Packets list container - shifted down to clear the two-row header.
+        let listTopMargin: CGFloat = 70   // was 60
+        let packetsScrollView = NSScrollView(frame: NSRect(x: 8, y: 8,
+                                                          width: packetPanelWidth - 16,
+                                                          height: packetPanelHeight - listTopMargin))
         packetsScrollView.autoresizingMask = [.width]
         packetsScrollView.hasHorizontalScroller = false
         packetsScrollView.hasVerticalScroller = true
@@ -1937,7 +2057,9 @@ class VMLibraryWindowController: NSWindowController,
         packetsScrollView.drawsBackground = false
         packetsScrollView.borderType = .noBorder
 
-        let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0,
+                                                       width: packetPanelWidth - 16,
+                                                       height: packetPanelHeight - listTopMargin))
         packetsTextView.isEditable = false
         packetsTextView.drawsBackground = false
         packetsTextView.textColor = AppColors.textOD
@@ -1948,8 +2070,11 @@ class VMLibraryWindowController: NSWindowController,
         packetPanel.addSubview(packetsScrollView)
         packetListContainer = packetsScrollView
 
-        // Protocol stats container (hidden by default)
-        let protocolView = NSView(frame: NSRect(x: 8, y: 8, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
+        // Protocol stats container (hidden — Protocols tab removed; full
+        // stats live in the Packet Analysis window).
+        let protocolView = NSView(frame: NSRect(x: 8, y: 8,
+                                                width: packetPanelWidth - 16,
+                                                height: packetPanelHeight - listTopMargin))
         protocolView.wantsLayer = true
         protocolView.isHidden = true
         protocolView.autoresizingMask = [.width]
