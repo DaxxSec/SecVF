@@ -578,6 +578,42 @@ class VMManager {
         }
     }
 
+    // MARK: - Network peers
+
+    /// Other VMs that share a virtual-switch network group with `vm`. The
+    /// group is defined by the router relationship:
+    ///   - Router VM (isRouter == true): peers = all VMs that route
+    ///     through it (routerVMId == vm.id).
+    ///   - Guest VM (routerVMId != nil): peers = the router + every
+    ///     other guest sharing the same router.
+    /// Returns empty for NAT-mode VMs (they don't share an L2 network),
+    /// and empty for virtual-mode VMs with no router assignment yet.
+    ///
+    /// The library window's table draws connector brackets between rows
+    /// of running peers so the operator can see "these two VMs are
+    /// talking to each other" at a glance.
+    func networkPeers(of vm: VMConfiguration) -> [VMConfiguration] {
+        guard vm.networkConfig.mode == .virtual else { return [] }
+
+        if vm.networkConfig.isRouter {
+            // Router → return its guests (any VMs whose routerVMId matches us)
+            return virtualMachines.filter {
+                $0.id != vm.id &&
+                $0.networkConfig.mode == .virtual &&
+                $0.networkConfig.routerVMId == vm.id
+            }
+        }
+        if let routerId = vm.networkConfig.routerVMId {
+            // Guest → return the router + all sibling guests
+            return virtualMachines.filter {
+                $0.id != vm.id &&
+                $0.networkConfig.mode == .virtual &&
+                ($0.id == routerId || $0.networkConfig.routerVMId == routerId)
+            }
+        }
+        return []
+    }
+
     // MARK: - Disk usage
 
     /// Per-bundle on-disk size cache. Keys: bundle path. Values: (bytes, asOf).

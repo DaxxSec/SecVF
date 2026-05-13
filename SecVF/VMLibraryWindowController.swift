@@ -131,6 +131,12 @@ class VMLibraryWindowController: NSWindowController,
     // Tracked so windowDidResize can re-anchor them.
     private var toolbarPillContainers: [NSView] = []
 
+    // Right-gutter overlay that draws bracket connectors between rows of
+    // running VMs that share a virtual-switch network group (router and
+    // guests). Refreshed whenever the table reloads or any VM status
+    // changes.
+    private var connectionOverlay: VMConnectionOverlayView?
+
     // Bottom status bar — slim global-state strip pinned to the bottom of
     // the content view, under the packet panel.
     private var bottomStatusBar: NSView?
@@ -219,6 +225,20 @@ class VMLibraryWindowController: NSWindowController,
         tableView?.target = self
         tableView?.doubleAction = #selector(startVM(_:))
 
+        // Connection overlay — draws bracket connectors in the table's
+        // right gutter between rows of running VMs that share a virtual-
+        // switch network group (router + its guests). Added as a SUBVIEW
+        // of the table so its coords match `tableView.rect(ofRow:)` 1:1
+        // and it scrolls with the content automatically. Mouse events
+        // pass through (hitTest returns nil) so table selection works.
+        if let tableView = tableView, connectionOverlay == nil {
+            let overlay = VMConnectionOverlayView(frame: tableView.bounds)
+            overlay.tableView = tableView
+            overlay.autoresizingMask = [.width, .height]
+            tableView.addSubview(overlay)
+            connectionOverlay = overlay
+        }
+
         // Programmatically append a Traffic column at the end of whatever
         // the XIB defined. Done in code (not the XIB) so the column can
         // host a custom NSView (SparklineView) rather than the default
@@ -241,6 +261,7 @@ class VMLibraryWindowController: NSWindowController,
             self.tableView?.reloadData()
             self.refreshStatusBar()
             self.refreshEmptyStateOverlays()
+            self.refreshConnectionOverlay()
         }
 
         // Force the table to use view-based mode
@@ -1491,6 +1512,26 @@ class VMLibraryWindowController: NSWindowController,
         ]))
         label.attributedStringValue = attr
         return label
+    }
+
+    /// Recompute the (router, guest) row pairs that the connection overlay
+    /// renders. Anchored on running router VMs so each link appears once
+    /// (router→guest, never the reverse). Called whenever a VM status
+    /// changes or the table reloads.
+    private func refreshConnectionOverlay() {
+        guard let overlay = connectionOverlay else { return }
+        let vms = vmManager.virtualMachines
+        var pairs: [(fromRow: Int, toRow: Int)] = []
+        for (i, vm) in vms.enumerated() {
+            guard vm.status == .running else { continue }
+            guard vm.networkConfig.isRouter else { continue }
+            for peer in vmManager.networkPeers(of: vm) where peer.status == .running {
+                if let j = vms.firstIndex(where: { $0.id == peer.id }) {
+                    pairs.append((fromRow: i, toRow: j))
+                }
+            }
+        }
+        overlay.connections = pairs
     }
 
     /// Refresh empty-state overlay visibility from the current data sources.
@@ -2867,6 +2908,9 @@ class VMLibraryWindowController: NSWindowController,
 
             // Selected VM's pill + live rate also depend on status
             self.updateSelectedVMDetailCard()
+
+            // Re-evaluate VM-VM connection brackets on running pills
+            self.refreshConnectionOverlay()
         }
     }
 
@@ -3848,6 +3892,7 @@ class VMLibraryWindowController: NSWindowController,
             self.tableView?.reloadData()
             self.updateButtonStates()
             self.refreshEmptyStateOverlays()
+            self.refreshConnectionOverlay()
         }
     }
 
