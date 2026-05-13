@@ -654,6 +654,63 @@ class VMLibraryWindowController: NSWindowController,
         statsLabel.autoresizingMask = [.minYMargin, .width]
         sidebar.addSubview(statsLabel)
 
+        // Logs section — surfaces the three log viewers from the Monitoring
+        // menu in the sidebar so the user can hop to them without diving
+        // into the menu bar. Buttons dispatch via responder chain so the
+        // AppDelegate's existing @objc handlers are called directly (no
+        // duplicate state, no new notifications needed).
+        let logsHeaderY: CGFloat = sidebar.bounds.height - 340
+        let logsHeader = NSTextField(labelWithString: "LOGS")
+        logsHeader.frame = NSRect(x: 0, y: logsHeaderY, width: sidebarWidth, height: 14)
+        logsHeader.alignment = .center
+        logsHeader.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
+        logsHeader.textColor = AppColors.textSubtle
+        logsHeader.isBordered = false
+        logsHeader.isEditable = false
+        logsHeader.drawsBackground = false
+        logsHeader.autoresizingMask = [.minYMargin, .width]
+        sidebar.addSubview(logsHeader)
+
+        let logButtonsTopY: CGFloat = logsHeaderY - 8
+        let logEntries: [(title: String, selectorName: String, tooltip: String)] = [
+            ("◆ Security",  "showSecurityLogs",
+             "Security events captured by VMSecurityMonitor (suspicious activity, resource pressure, isolation breaches). ⇧⌘1"),
+            ("◆ Network",   "showNetworkLogs",
+             "Per-VM network logs (traffic summaries, switch events, NAT activity). ⇧⌘2"),
+            ("◆ ISO Cache", "showISOCacheLogs",
+             "Distro ISO download/verify activity from ISOCacheManager."),
+        ]
+        let buttonHeight: CGFloat = 26
+        let buttonGap: CGFloat = 4
+        let buttonInset: CGFloat = 16
+        for (i, entry) in logEntries.enumerated() {
+            let btnY = logButtonsTopY - CGFloat(i + 1) * (buttonHeight + buttonGap)
+            let btn = NSButton(title: entry.title,
+                               target: nil,
+                               action: NSSelectorFromString(entry.selectorName))
+            btn.frame = NSRect(x: buttonInset, y: btnY,
+                               width: sidebarWidth - buttonInset * 2,
+                               height: buttonHeight)
+            btn.isBordered = false
+            btn.bezelStyle = .regularSquare
+            btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+            btn.contentTintColor = AppColors.textPrimary
+            btn.alignment = .left
+            btn.wantsLayer = true
+            btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+            btn.layer?.borderColor = AppColors.borderOD.cgColor
+            btn.layer?.borderWidth = 1.0
+            btn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+            btn.attributedTitle = NSAttributedString(string: "  " + entry.title, attributes: [
+                .foregroundColor: AppColors.textPrimary,
+                .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+            ])
+            btn.toolTip = entry.tooltip
+            btn.autoresizingMask = [.minYMargin, .width]
+            btn.setAccessibilityLabel(entry.title.replacingOccurrences(of: "◆ ", with: "") + " logs")
+            sidebar.addSubview(btn)
+        }
+
         // Separator line above developer info
         let separator2 = createSeparator(y: 155, width: sidebarWidth)
         separator2.autoresizingMask = [.maxYMargin, .width]
