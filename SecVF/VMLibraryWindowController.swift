@@ -209,6 +209,12 @@ class VMLibraryWindowController: NSWindowController,
     // selected VM isn't running.
     private var detailConsoleButton: NSButton?
     private var detailCaptureButton: NSButton?
+    // Right-anchored container that holds the metric grid (OS / Uptime /
+    // CPU·RAM / Disk / Network / Rate / Packets). Tracked so
+    // windowDidResize can use its actual minX to clamp the name label's
+    // right edge — without that clamp, long VM names overrun past the
+    // metrics on narrow windows.
+    private var detailMetricsContainer: NSView?
     // Per-VM run timestamps, keyed by UUID. Populated when a VM
     // transitions to .running, cleared when it transitions away.
     private var vmStartedAt: [UUID: Date] = [:]
@@ -1321,8 +1327,13 @@ class VMLibraryWindowController: NSWindowController,
         let valueH: CGFloat = 20
         let captionY: CGFloat = 41
         let captionH: CGFloat = 12
-        let pillW: CGFloat = 96       // bumped 84→96 so "◆ TEMPLATE" / "● RUNNING" have breathing room
+        let pillW: CGFloat = 80       // tight to longest content ("◆ TEMPLATE" ~70pt); centered text reads clean without dead space
         let pillH: CGFloat = 22
+        // Initial name-label width — actual width is recomputed in
+        // windowDidResize to fill the gap between the pill and the
+        // right-anchored metrics container, so the name truncates
+        // gracefully on narrow windows instead of overrunning into
+        // the metric grid.
         let nameW: CGFloat = 200
         let gapMetric: CGFloat = LayoutConstants.spacingLG     // 16pt between metric cells (was 12)
 
@@ -1342,6 +1353,10 @@ class VMLibraryWindowController: NSWindowController,
                                  y: valueY,
                                  width: nameW, height: valueH)
         nameLabel.lineBreakMode = .byTruncatingTail
+        // Width is recomputed in windowDidResize to fill the gap between
+        // the pill and the right-anchored metrics container. Pin the
+        // label's left edge so it doesn't drift with the card's resize.
+        nameLabel.autoresizingMask = [.width]
         nameLabel.setAccessibilityLabel("Selected VM name")
         card.addSubview(nameLabel)
         detailNameLabel = nameLabel
@@ -1350,12 +1365,18 @@ class VMLibraryWindowController: NSWindowController,
         // Compute total width: 5 cells with their widths + 4 gaps + leading
         // divider region. The container's x = card.width - totalW - cellPadding,
         // and .minXMargin autoresizing keeps it glued to the right edge.
-        let osW: CGFloat = 120       // trimmed -10 to make room for action buttons
-        let uptimeW: CGFloat = 80    // "12h 47m" / "—"
-        let cpuW: CGFloat = 110
-        let diskW: CGFloat = 110
-        let netModeW: CGFloat = 100
-        let rateW: CGFloat = 150     // trimmed -10; "host-routed" still fits
+        // Metric widths sized to fit the longest realistic value at the
+        // monospaced body font (~7.5pt per char). Tighter than the first
+        // pass — the original widths overflowed the card at the default
+        // 1200pt window width, which is what was pushing the VM-name
+        // label past its visible area before windowDidResize ran the
+        // dynamic-truncation logic.
+        let osW: CGFloat = 100       // "Kali 2024.1" / "macOS 15.2" / "Linux"
+        let uptimeW: CGFloat = 70    // "12h 47m" / "3d 4h" / "—"
+        let cpuW: CGFloat = 95       // "4 · 4.0 GB"
+        let diskW: CGFloat = 110     // "108 / 256 GB" — keep generous for big drives
+        let netModeW: CGFloat = 80   // "VIRTUAL" / "ROUTER" / "NAT"
+        let rateW: CGFloat = 150     // "100 kB/s ↓  50 kB/s ↑"
         let packetsW: CGFloat = 90   // "1,234,567" upper bound for a long capture
         let dividerW: CGFloat = 1
         let dividerGap: CGFloat = LayoutConstants.spacingLG  // gap divider → first metric cell
@@ -1410,6 +1431,7 @@ class VMLibraryWindowController: NSWindowController,
                                width: metricsW, height: frame.height)
         metrics.autoresizingMask = [.minXMargin]
         card.addSubview(metrics)
+        detailMetricsContainer = metrics
 
         // Vertical divider between identity and metrics — sits at x=0 inside
         // the metrics container so it's flush with the metric grid's left
@@ -1514,6 +1536,14 @@ class VMLibraryWindowController: NSWindowController,
         contentView.addSubview(card)
         selectedVMDetailCard = card
 
+        // Initial sizing pass for the name label. Without this the first
+        // paint uses the static 200pt width set above and the label can
+        // overrun into the metrics container at the default window
+        // width (the metrics+actions cluster needs more horizontal room
+        // than the card has at minWindowWidth). windowDidResize fires
+        // it again on every resize.
+        resizeDetailNameLabelToFit()
+
         // Populate with whatever the table currently has selected (if anything)
         updateSelectedVMDetailCard()
     }
@@ -1610,6 +1640,24 @@ class VMLibraryWindowController: NSWindowController,
     /// cornerRadius is half the pill height = perfect capsule. Caller sizes
     /// the pill to ~96 × 22pt so the centered "◆ TEMPLATE" / "● RUNNING"
     /// content has ~10pt of horizontal breathing room.
+    /// Clamp the detail-card name label's width so its right edge sits
+    /// just inside the metrics container's left edge. Without this, a
+    /// long VM name on a narrow window overruns the card's identity
+    /// area and visually collides with the OS / Uptime cells. The label
+    /// uses `.byTruncatingTail`, so the right behavior is "shrink the
+    /// frame and let AppKit ellipsize" — never let the frame extend
+    /// past the metrics container.
+    private func resizeDetailNameLabelToFit() {
+        guard let name = detailNameLabel,
+              let metrics = detailMetricsContainer else { return }
+        let gap: CGFloat = LayoutConstants.spacingSM
+        let rightLimit = metrics.frame.minX - gap
+        let available = max(40, rightLimit - name.frame.minX)
+        var f = name.frame
+        f.size.width = available
+        name.frame = f
+    }
+
     private func makeStatusPill() -> NSTextField {
         let pill = NSTextField(labelWithString: "—")
         pill.alignment = .center
@@ -3636,6 +3684,13 @@ class VMLibraryWindowController: NSWindowController,
 
         // Detail card stays at fixed Y (autoresize handles its width).
         selectedVMDetailCard?.frame.origin.y = detailCardY
+
+        // Detail card's name label is fixed-width by default but
+        // gets resized here to fill the gap between the pill and the
+        // right-anchored metrics container — without this, narrow
+        // windows let a long VM name overrun past the metrics into
+        // the void on the right of the card.
+        resizeDetailNameLabelToFit()
 
         // (Active VMs / Legend panels were removed; no right-side re-anchor.)
 
