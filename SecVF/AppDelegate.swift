@@ -9,7 +9,7 @@ The app delegate that sets up and starts the virtual machine.
 
 @main
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NSWindowDelegate {
 
     // Multi-VM architecture - manage separate windows for each running VM
     private var vmWindows: [UUID: NSWindow] = [:]
