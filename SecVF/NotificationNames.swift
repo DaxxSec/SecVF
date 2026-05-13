@@ -28,4 +28,16 @@ extension Notification.Name {
     /// menu items) post this notification instead of creating their own — two
     /// independent windows confused the operator and split packet rendering.
     static let openPacketAnalysis = Notification.Name("openPacketAnalysis")
+
+    /// Request booting the AI Sandbox session VM. Posted by the library
+    /// window's AI Sandbox tab when the user clicks Start; AppDelegate
+    /// reads `userInfo["inRecoveryMode"]: Bool` to decide which boot
+    /// path to dispatch (normal vs. macOS Recovery).
+    static let bootAISandbox = Notification.Name("bootAISandbox")
+
+    /// Background bundle-size measurement finished. `object` is the
+    /// VMConfiguration.id (UUID); `userInfo["bytes"]: Int64` is the
+    /// measured allocated-on-disk size. Used by the selected-VM detail
+    /// card to refresh the Disk cell once a background scan completes.
+    static let vmBundleSizeUpdated = Notification.Name("vmBundleSizeUpdated")
 }

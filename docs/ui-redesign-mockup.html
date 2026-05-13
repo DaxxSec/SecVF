@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SecVF — UI Redesign Mockup</title>
+<style>
+  /* ─────────────────────────────────────────────────────────────────────
+     SecVF UI redesign mockup
+     Pure HTML/CSS, single file. Open in any modern browser.
+     ───────────────────────────────────────────────────────────────────── */
+
+  :root {
+    /* Shared structural tokens (same for both themes) */
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, monospace;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+  }
+
+  /* ─────────────  THEME: TACTICAL (default)  ─────────────
+     Dark gun-metal grey + OD (olive drab) green + safety orange.
+     Reads like SOC / red-team tooling (Burp Suite, Metasploit, terminals),
+     not consumer cyberpunk. OD = "go / operational"; orange = "attention /
+     primary action"; red = "destructive". */
+  :root, :root[data-theme="tactical"] {
+    --bg-app:           #15181f;
+    --bg-chrome:        #1b1f27;
+    --bg-panel:         #181c24;
+    --bg-panel-2:       #212631;
+    --bg-row-hover:     #262c38;
+    --bg-row-selected:  #2a3424;  /* OD-tinted, signals "selected & operational" */
+
+    --border-hairline:  #252a33;
+    --border-emphasis:  #2d333e;
+    --border-cyan:      rgba(143, 166, 83, 0.35);   /* re-aliased to OD */
+    --border-cyan-em:   rgba(168, 196, 110, 0.55);
+    --border-red:       rgba(255, 92, 92, 0.40);
+    --border-orange:    rgba(233, 117, 32, 0.45);
+
+    --text-primary:     #e8ebf0;
+    --text-secondary:   #9da3ae;
+    --text-muted:       #5d626d;
+    --text-cyan:        #b5c97a;   /* re-aliased: OD-tinted text accent */
+    --text-cyan-strong: #cadc92;
+
+    --accent-cyan:      #8fa653;   /* re-aliased: OD primary */
+    --accent-cyan-neon: #a8c46e;   /* re-aliased: OD highlight/glow */
+    --accent-green:     #7ab05e;   /* RUNNING pill — slightly more saturated OD */
+    --accent-yellow:    #f5b544;   /* paused/caution amber */
+    --accent-red:       #ff5c5c;
+    --accent-orange:    #e97520;   /* safety orange — secondary primary, alerts */
+    --accent-orange-hot:#ff9d3c;   /* used for hot/active accents (sparklines) */
+    --accent-magenta:   #c558f3;
+    --accent-purple:    #a78bff;
+
+    /* Protocol legend — re-tuned so cool/cyan disappears entirely. */
+    --proto-tcp:   #a8c46e;        /* OD */
+    --proto-udp:   #cadc92;        /* light OD */
+    --proto-dns:   #f5b544;        /* amber */
+    --proto-http:  #ff9d3c;        /* hot orange */
+    --proto-arp:   #aab2c0;        /* slate */
+    --proto-icmp:  #ff5c5c;        /* red */
+    --proto-ipv6:  #c558f3;        /* magenta */
+    --proto-tls:   #e97520;        /* safety orange */
+  }
+
+  /* ─────────────  THEME: CYBER (original cyan palette)  ───────────── */
+  :root[data-theme="cyber"] {
+    --bg-app:           #0a0d14;
+    --bg-chrome:        #11151f;
+    --bg-panel:         #0d1119;
+    --bg-panel-2:       #141926;
+    --bg-row-hover:     #1a2030;
+    --bg-row-selected:  #142537;
+
+    --border-hairline:  #1f2638;
+    --border-emphasis:  #283044;
+    --border-cyan:      rgba(0, 178, 230, 0.35);
+    --border-cyan-em:   rgba(0, 200, 255, 0.55);
+    --border-red:       rgba(255, 92, 92, 0.40);
+    --border-orange:    rgba(255, 157, 92, 0.40);
+
+    --text-primary:     #e6ebf2;
+    --text-secondary:   #9aa3b3;
+    --text-muted:       #5e6678;
+    --text-cyan:        #4ec8ff;
+    --text-cyan-strong: #6fd9ff;
+
+    --accent-cyan:      #00b6e6;
+    --accent-cyan-neon: #00d2ff;
+    --accent-green:     #2ee08a;
+    --accent-yellow:    #f5c34a;
+    --accent-red:       #ff5c5c;
+    --accent-orange:    #ff9d5c;
+    --accent-orange-hot:#ffb37a;
+    --accent-magenta:   #c558f3;
+    --accent-purple:    #a78bff;
+
+    --proto-tcp:   #66c8ff;
+    --proto-udp:   #6cf2a0;
+    --proto-dns:   #f5e078;
+    --proto-http:  #ffa166;
+    --proto-arp:   #aab2c0;
+    --proto-icmp:  #ff8a8a;
+    --proto-ipv6:  #c9a8ff;
+    --proto-tls:   #6cf2c8;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #1c1f26;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    padding: 32px;
+    min-height: 100vh;
+  }
+
+  /* ───────── Page header / annotations ───────── */
+  .page-head {
+    max-width: 1300px;
+    margin: 0 auto 28px;
+  }
+  .page-head h1 {
+    font-size: 22px;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .page-head .subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin: 0 0 14px;
+  }
+  .legend {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    align-items: center;
+  }
+  .theme-switch {
+    margin-left: auto;
+    display: inline-flex;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-emphasis);
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .theme-switch button {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font: 500 11px var(--font-sans);
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .theme-switch button.on {
+    background: var(--accent-cyan);
+    color: #0a0d14;
+  }
+  .theme-switch button:hover:not(.on) {
+    color: var(--text-primary);
+    background: var(--bg-row-hover);
+  }
+  .legend .dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: 1px;
+  }
+  .legend .new   .dot { background: var(--accent-cyan-neon); box-shadow: 0 0 8px var(--accent-cyan-neon); }
+  .legend .moved .dot { background: var(--accent-yellow); }
+  .legend .gone  .dot { background: var(--accent-red); }
+
+  /* ───────── macOS window frame ───────── */
+  .window {
+    max-width: 1300px;
+    margin: 0 auto;
+    background: var(--bg-app);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow:
+      0 30px 90px rgba(0, 0, 0, 0.55),
+      0 4px 16px rgba(0, 0, 0, 0.4),
+      0 0 0 1px rgba(255, 255, 255, 0.04);
+    border: 1px solid #0a0d14;
+  }
+
+  .titlebar {
+    height: 38px;
+    background: linear-gradient(180deg, #1a1f2b 0%, #131722 100%);
+    border-bottom: 1px solid var(--border-emphasis);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    position: relative;
+  }
+  .traffic {
+    display: flex; gap: 8px;
+    margin-right: 16px;
+  }
+  .traffic span {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .traffic span.close    { background: #ff5f56; }
+  .traffic span.minimize { background: #ffbd2e; }
+  .traffic span.expand   { background: #27c93f; }
+
+  .titlebar .title {
+    position: absolute;
+    left: 0; right: 0;
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+    pointer-events: none;
+  }
+  .titlebar .badge {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--bg-panel-2);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border-emphasis);
+  }
+
+  /* ───────── Toolbar (top, native NSToolbar style) ───────── */
+  .toolbar {
+    background: linear-gradient(180deg, #131826 0%, #0e1320 100%);
+    border-bottom: 1px solid var(--border-emphasis);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .toolbar .group {
+    display: flex;
+    gap: 4px;
+    padding: 2px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.20);
+    border: 1px solid var(--border-emphasis);
+  }
+  .toolbar .group.spacer-left { margin-left: 12px; }
+  .toolbar .group.spacer-right { margin-left: auto; }
+
+  .tb-btn {
+    min-width: 64px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-cyan);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+  .tb-btn:hover {
+    background: rgba(0, 200, 255, 0.08);
+    border-color: var(--border-cyan);
+  }
+  .tb-btn.primary {
+    background: linear-gradient(180deg, rgba(0, 210, 255, 0.30), rgba(0, 178, 230, 0.18));
+    border-color: var(--border-cyan-em);
+    color: #eafbff;
+    font-weight: 600;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 12px rgba(0, 200, 255, 0.18);
+  }
+  .tb-btn.primary:hover {
+    background: linear-gradient(180deg, rgba(0, 220, 255, 0.40), rgba(0, 178, 230, 0.25));
+  }
+  .tb-btn.danger {
+    color: var(--accent-red);
+  }
+  .tb-btn.danger:hover {
+    background: rgba(255, 92, 92, 0.08);
+    border-color: var(--border-red);
+  }
+  .tb-btn[disabled] {
+    color: var(--text-muted);
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+  .tb-btn[disabled]:hover {
+    background: transparent;
+    border-color: transparent;
+  }
+  .tb-btn .icon { font-size: 13px; line-height: 1; }
+  .tb-btn .kbd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 4px;
+  }
+
+  .toolbar .search {
+    flex: 0 0 240px;
+    margin-left: 12px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-emphasis);
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .toolbar .search .icon { color: var(--text-muted); }
+  .toolbar .search input {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font: inherit;
+    flex: 1;
+  }
+
+  /* ───────── Main content (split view) ───────── */
+  .content {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: 560px;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: linear-gradient(180deg, #0a0d15 0%, #0d1320 100%);
+    border-right: 1px solid var(--border-emphasis);
+    padding: 20px 0 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .brand {
+    padding: 0 16px 18px;
+    border-bottom: 1px solid var(--border-emphasis);
+    text-align: center;
+  }
+  .brand .mark {
+    width: 56px; height: 56px;
+    margin: 0 auto 8px;
+    display: grid;
+    place-items: center;
+    background: radial-gradient(circle at 30% 30%, rgba(0, 210, 255, 0.20), transparent 70%);
+    border-radius: 50%;
+    position: relative;
+  }
+  .brand .mark::before {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border: 1.5px solid var(--accent-cyan);
+    border-radius: 50%;
+    opacity: 0.65;
+  }
+  .brand .mark::after {
+    content: "";
+    position: absolute;
+    inset: 14px;
+    background: var(--accent-cyan-neon);
+    border-radius: 50%;
+    opacity: 0.18;
+  }
+  /* Crosshair tick on the brand mark — only visible in tactical theme, adds
+     a subtle "scope/reticle" cue that complements the OD aesthetic. */
+  :root[data-theme="tactical"] .brand .mark,
+  :root:not([data-theme]) .brand .mark {
+    background:
+      radial-gradient(circle at 30% 30%, rgba(168, 196, 110, 0.25), transparent 70%),
+      radial-gradient(circle at 70% 70%, rgba(233, 117, 32, 0.18), transparent 65%);
+  }
+  .brand .name {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--text-primary);
+  }
+  .brand .name .v { color: var(--text-cyan-strong); }
+  .brand .tag {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+    letter-spacing: 0.10em;
+    margin-top: 4px;
+    text-transform: uppercase;
+  }
+
+  .sb-section {
+    padding: 16px 8px 6px;
+  }
+  .sb-label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    padding: 0 10px 6px;
+    position: relative;
+  }
+  /* Small orange tick before each section label — tactical/instrumentation cue */
+  :root[data-theme="tactical"] .sb-label::before,
+  :root:not([data-theme]) .sb-label::before {
+    content: "▸";
+    color: var(--accent-orange);
+    margin-right: 6px;
+    font-size: 10px;
+    vertical-align: 1px;
+  }
+  .sb-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    margin: 0 4px;
+    border-radius: 5px;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .sb-item .count {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+  }
+  .sb-item:hover {
+    background: var(--bg-row-hover);
+    color: var(--text-primary);
+  }
+  .sb-item.active {
+    background: var(--bg-row-selected);
+    color: var(--text-cyan-strong);
+    box-shadow: inset 2px 0 0 var(--accent-cyan);
+  }
+  .sb-item.active .count { color: var(--text-cyan); }
+  .sb-item .glyph {
+    width: 14px; text-align: center;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .sb-item.active .glyph { color: var(--accent-cyan); }
+
+  /* ── Right pane (table + detail card + packets) ── */
+  .pane {
+    display: grid;
+    grid-template-rows: 1fr auto auto;
+    background: var(--bg-app);
+    min-height: 560px;
+  }
+
+  /* Table */
+  .table-wrap {
+    overflow: auto;
+    border-bottom: 1px solid var(--border-emphasis);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+  }
+  thead th {
+    text-align: left;
+    background: linear-gradient(180deg, #11151e 0%, #0c1018 100%);
+    border-bottom: 1px solid var(--border-emphasis);
+    padding: 8px 14px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    position: sticky; top: 0;
+    font-size: 11.5px;
+    letter-spacing: 0.02em;
+  }
+  thead th .sort {
+    color: var(--text-cyan);
+    margin-left: 4px;
+    font-size: 10px;
+  }
+  tbody tr {
+    border-bottom: 1px solid #0f1320;
+    transition: background 0.10s;
+  }
+  tbody tr:hover { background: var(--bg-row-hover); }
+  tbody tr.selected {
+    background: var(--bg-row-selected);
+    box-shadow: inset 2px 0 0 var(--accent-cyan);
+  }
+  td {
+    padding: 9px 14px;
+    color: var(--text-primary);
+    vertical-align: middle;
+  }
+  td.name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: -0.01em;
+  }
+  td.muted { color: var(--text-secondary); font-family: var(--font-mono); font-size: 11.5px; }
+  td.num   { color: var(--text-secondary); font-family: var(--font-mono); font-size: 11.5px; text-align: right; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10.5px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    border: 1px solid transparent;
+  }
+  .pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .pill.running { background: rgba(46, 224, 138, 0.10); color: var(--accent-green); border-color: rgba(46, 224, 138, 0.30); }
+  .pill.running .dot { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
+  .pill.paused  { background: rgba(245, 195, 74, 0.10); color: var(--accent-yellow); border-color: rgba(245, 195, 74, 0.30); }
+  .pill.paused  .dot { background: var(--accent-yellow); }
+  .pill.stopped { background: rgba(94, 102, 120, 0.16); color: var(--text-secondary); border-color: rgba(94, 102, 120, 0.30); }
+  .pill.stopped .dot { background: var(--text-muted); }
+
+  .net-tag { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em; }
+  .net-tag.nat       { color: var(--accent-red); }
+  .net-tag.virtual   { color: var(--accent-green); }
+  .net-tag.bridged   { color: var(--accent-yellow); }
+
+  /* Sparkline (inline SVG-like) */
+  .spark {
+    width: 60px; height: 18px;
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  /* Selected VM detail card */
+  .detail {
+    background: linear-gradient(180deg, #0c1019 0%, #0a0d14 100%);
+    padding: 14px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    border-top: 1px solid var(--border-cyan);
+    position: relative;
+  }
+  .detail::before {
+    content: "";
+    position: absolute;
+    top: -1px; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent 0%, var(--accent-cyan) 50%, transparent 100%);
+    opacity: 0.5;
+  }
+  .detail .label {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    margin-bottom: 4px;
+  }
+  .detail .value {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+  .detail .row-1 {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+  }
+  .detail .stat .value.cyan  { color: var(--text-cyan-strong); }
+  .detail .stat .value.green { color: var(--accent-green); }
+  .detail .stat .value.red   { color: var(--accent-red); }
+  .detail .stat {
+    min-width: 80px;
+  }
+
+  /* Mini bar visualisation for disk usage */
+  .bar {
+    width: 96px; height: 4px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 2px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .bar .fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-cyan) 0%, var(--accent-cyan-neon) 100%);
+  }
+
+  /* ── Live packet monitor strip ── */
+  .packets {
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border-emphasis);
+    display: flex;
+    flex-direction: column;
+    max-height: 180px;
+  }
+  .packets-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-hairline);
+    background: linear-gradient(180deg, #1a1f29 0%, #161a22 100%);
+  }
+  .packets-head .title {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .packets-head .title::before {
+    content: "▸";
+    color: var(--accent-orange);
+    font-size: 11px;
+  }
+  .packets-head .title b {
+    color: var(--text-primary);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  .packets-head .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--accent-orange-hot);
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: rgba(233, 117, 32, 0.10);
+    border: 1px solid var(--border-orange);
+  }
+  .packets-head .live .dot {
+    width: 6px; height: 6px;
+    background: var(--accent-orange-hot);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent-orange-hot);
+    animation: pulse 1.2s infinite;
+  }
+  .packets-head .rate {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--text-secondary);
+  }
+  .packets-head .rate .arrow { color: var(--accent-orange); }
+  .packets-head .actions {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+  }
+  .packets-head .actions button {
+    background: transparent;
+    border: 1px solid var(--border-emphasis);
+    color: var(--text-secondary);
+    font: 500 11px var(--font-sans);
+    padding: 3px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .packets-head .actions button:hover {
+    color: var(--text-primary);
+    border-color: var(--border-cyan-em);
+  }
+  .packets-head .actions button.primary {
+    color: var(--accent-orange-hot);
+    border-color: var(--border-orange);
+  }
+  .packets-head .actions button.primary:hover {
+    background: rgba(233, 117, 32, 0.10);
+  }
+
+  .packets-list {
+    overflow: auto;
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  .packets-list .row {
+    display: grid;
+    grid-template-columns: 60px 1fr 70px 60px 1fr;
+    gap: 12px;
+    padding: 3px 14px 3px 10px;
+    border-left: 3px solid transparent;
+    color: var(--text-primary);
+    line-height: 1.6;
+    border-bottom: 1px solid rgba(255,255,255,0.02);
+  }
+  .packets-list .row:hover { background: var(--bg-row-hover); }
+  .packets-list .row .t      { color: var(--text-muted); }
+  .packets-list .row .pp     { color: var(--text-secondary); }
+  .packets-list .row .len    { color: var(--text-secondary); text-align: right; }
+  .packets-list .row .info   { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .packets-list .row .proto  {
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  /* Per-protocol left-border tint + proto text color (uses --proto-* tokens) */
+  .packets-list .row.tcp  { border-left-color: var(--proto-tcp);  } .row.tcp  .proto { color: var(--proto-tcp);  }
+  .packets-list .row.udp  { border-left-color: var(--proto-udp);  } .row.udp  .proto { color: var(--proto-udp);  }
+  .packets-list .row.dns  { border-left-color: var(--proto-dns);  } .row.dns  .proto { color: var(--proto-dns);  }
+  .packets-list .row.http { border-left-color: var(--proto-http); } .row.http .proto { color: var(--proto-http); }
+  .packets-list .row.tls  { border-left-color: var(--proto-tls);  } .row.tls  .proto { color: var(--proto-tls);  }
+  .packets-list .row.arp  { border-left-color: var(--proto-arp);  } .row.arp  .proto { color: var(--proto-arp);  }
+  .packets-list .row.icmp { border-left-color: var(--proto-icmp); } .row.icmp .proto { color: var(--proto-icmp); }
+
+  /* Status bar */
+  .statusbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    background: var(--bg-chrome);
+    border-top: 1px solid var(--border-emphasis);
+    padding: 5px 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .statusbar .left { display: flex; gap: 16px; align-items: center; }
+  .statusbar .right { display: flex; gap: 12px; align-items: center; color: var(--text-muted); }
+  .statusbar .live-dot {
+    width: 6px; height: 6px;
+    background: var(--accent-green);
+    border-radius: 50%;
+    box-shadow: 0 0 6px var(--accent-green);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+  /* ───────── Annotations panel (right of window) ───────── */
+  .annot {
+    max-width: 1300px;
+    margin: 28px auto 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  .annot .card {
+    background: #11141c;
+    border: 1px solid var(--border-emphasis);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .annot h3 {
+    font-size: 13px;
+    margin: 0 0 10px;
+    color: var(--text-primary);
+    letter-spacing: 0.01em;
+  }
+  .annot ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 12.5px; }
+  .annot li { margin-bottom: 6px; }
+  .annot li b { color: var(--text-primary); font-weight: 500; }
+  .annot .tag {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent-cyan-neon);
+    border: 1px solid var(--border-cyan);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: 1px;
+  }
+  .annot .tag.warn { color: var(--accent-yellow); border-color: rgba(245, 195, 74, 0.4); }
+  .annot .tag.gone { color: var(--accent-red); border-color: rgba(255, 92, 92, 0.4); }
+
+  /* Spotlight highlight ring around proposed-new elements */
+  .ring {
+    position: relative;
+  }
+  .ring::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border: 1.5px dashed var(--accent-cyan-neon);
+    border-radius: 8px;
+    opacity: 0.35;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>SecVF — Proposed UI Redesign</h1>
+  <p class="subtitle">
+    Native macOS conventions + tighter information density.
+    Same dark/cyan identity, fewer competing surfaces. Click any row in the
+    mockup to see how selection updates the detail card.
+  </p>
+  <div class="legend">
+    <span class="new"><span class="dot"></span>New / promoted</span>
+    <span class="moved"><span class="dot"></span>Reorganized</span>
+    <span class="gone"><span class="dot"></span>Removed / demoted</span>
+    <div class="theme-switch" role="tablist" aria-label="Color theme">
+      <button data-theme-btn="tactical" class="on" title="Dark grey + OD green + orange — SOC / red-team aesthetic">Tactical</button>
+      <button data-theme-btn="cyber" title="Original deep black + cyan palette">Cyber</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────  WINDOW  ───────────── -->
+<div class="window">
+
+  <!-- macOS titlebar -->
+  <div class="titlebar">
+    <div class="traffic">
+      <span class="close"></span>
+      <span class="minimize"></span>
+      <span class="expand"></span>
+    </div>
+    <div class="title">Virtual Machine Library</div>
+    <div class="badge">v1.0 · arm64</div>
+  </div>
+
+  <!-- Top toolbar (replaces bottom button strip) -->
+  <div class="toolbar">
+    <div class="group">
+      <button class="tb-btn primary" title="Start the selected VM (⏎)">
+        <span class="icon">▶</span>Start<span class="kbd">⏎</span>
+      </button>
+    </div>
+
+    <div class="group spacer-left">
+      <button class="tb-btn" title="Create a new VM (⌘N)">
+        <span class="icon">＋</span>New<span class="kbd">⌘N</span>
+      </button>
+      <button class="tb-btn" title="Import an existing VM bundle (⇧⌘I)">
+        <span class="icon">↧</span>Import
+      </button>
+    </div>
+
+    <div class="group spacer-left">
+      <button class="tb-btn" title="Edit configuration">
+        <span class="icon">⚙</span>Configure
+      </button>
+      <button class="tb-btn" title="Duplicate this VM">
+        <span class="icon">⎘</span>Clone
+      </button>
+      <button class="tb-btn" title="Rename this VM">
+        <span class="icon">✎</span>Rename
+      </button>
+    </div>
+
+    <div class="group spacer-right">
+      <button class="tb-btn danger" title="Delete this VM (⌘⌫)">
+        <span class="icon">🗑</span>Delete<span class="kbd">⌘⌫</span>
+      </button>
+    </div>
+
+    <div class="search">
+      <span class="icon">⌕</span>
+      <input placeholder="Filter VMs…" />
+    </div>
+  </div>
+
+  <!-- Main split: sidebar + content -->
+  <div class="content">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="mark"></div>
+        <div class="name">Sec<span class="v">VF</span></div>
+        <div class="tag">Security Virtualization</div>
+      </div>
+
+      <div class="sb-section">
+        <div class="sb-label">Filters</div>
+        <div class="sb-item active">
+          <span class="glyph">▣</span>All VMs<span class="count">5</span>
+        </div>
+        <div class="sb-item">
+          <span class="glyph">●</span>Running<span class="count">2</span>
+        </div>
+        <div class="sb-item">
+          <span class="glyph">◐</span>Paused<span class="count">0</span>
+        </div>
+        <div class="sb-item">
+          <span class="glyph">○</span>Stopped<span class="count">3</span>
+        </div>
+      </div>
+
+      <div class="sb-section">
+        <div class="sb-label">Operating System</div>
+        <div class="sb-item"><span class="glyph">🐧</span>Linux<span class="count">3</span></div>
+        <div class="sb-item"><span class="glyph">🍎</span>macOS<span class="count">1</span></div>
+        <div class="sb-item"><span class="glyph">▩</span>Windows<span class="count">1</span></div>
+      </div>
+
+      <div class="sb-section">
+        <div class="sb-label">Network</div>
+        <div class="sb-item"><span class="glyph">⊘</span>Isolated<span class="count">2</span></div>
+        <div class="sb-item"><span class="glyph">⇄</span>Virtual<span class="count">2</span></div>
+        <div class="sb-item"><span class="glyph">🌐</span>NAT<span class="count">1</span></div>
+      </div>
+    </aside>
+
+    <!-- Right pane -->
+    <section class="pane">
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name<span class="sort">▲</span></th>
+              <th>Status</th>
+              <th>OS</th>
+              <th>Network</th>
+              <th style="text-align:right">CPU · RAM</th>
+              <th style="text-align:right">Disk</th>
+              <th style="text-align:right">Traffic</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="selected">
+              <td class="name">kali-router</td>
+              <td><span class="pill running"><span class="dot"></span>RUNNING</span></td>
+              <td class="muted">Kali 2025.1</td>
+              <td><span class="net-tag virtual">VIRTUAL</span></td>
+              <td class="num">4 · 4 GB</td>
+              <td class="num">12 / 32 GB</td>
+              <td class="num">
+                <svg class="spark" viewBox="0 0 60 18" preserveAspectRatio="none">
+                  <polyline fill="none" stroke="#2ee08a" stroke-width="1.4"
+                            points="0,12 6,9 12,11 18,4 24,8 30,5 36,9 42,3 48,7 54,5 60,8"/>
+                </svg>
+              </td>
+            </tr>
+            <tr>
+              <td class="name">win10-sample-a</td>
+              <td><span class="pill stopped"><span class="dot"></span>STOPPED</span></td>
+              <td class="muted">Windows 10</td>
+              <td><span class="net-tag virtual">ISOLATED</span></td>
+              <td class="num">2 · 4 GB</td>
+              <td class="num">28 / 64 GB</td>
+              <td class="num">—</td>
+            </tr>
+            <tr>
+              <td class="name">macos-15.1-test</td>
+              <td><span class="pill running"><span class="dot"></span>RUNNING</span></td>
+              <td class="muted">macOS 15.1</td>
+              <td><span class="net-tag nat">NAT</span></td>
+              <td class="num">4 · 8 GB</td>
+              <td class="num">42 / 128 GB</td>
+              <td class="num">
+                <svg class="spark" viewBox="0 0 60 18" preserveAspectRatio="none">
+                  <polyline fill="none" stroke="#4ec8ff" stroke-width="1.4"
+                            points="0,14 6,12 12,8 18,11 24,6 30,9 36,4 42,7 48,3 54,6 60,5"/>
+                </svg>
+              </td>
+            </tr>
+            <tr>
+              <td class="name">ubuntu-server-24</td>
+              <td><span class="pill stopped"><span class="dot"></span>STOPPED</span></td>
+              <td class="muted">Ubuntu 24.04</td>
+              <td><span class="net-tag virtual">VIRTUAL</span></td>
+              <td class="num">2 · 2 GB</td>
+              <td class="num">8 / 32 GB</td>
+              <td class="num">—</td>
+            </tr>
+            <tr>
+              <td class="name">parrot-os-6</td>
+              <td><span class="pill stopped"><span class="dot"></span>STOPPED</span></td>
+              <td class="muted">Parrot 6.0</td>
+              <td><span class="net-tag virtual">ISOLATED</span></td>
+              <td class="num">2 · 4 GB</td>
+              <td class="num">15 / 32 GB</td>
+              <td class="num">—</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Selected VM detail card -->
+      <div class="detail ring">
+        <div class="row-1">
+          <div class="stat">
+            <div class="label">Name</div>
+            <div class="value">kali-router</div>
+          </div>
+          <div class="stat">
+            <div class="label">Uptime</div>
+            <div class="value">2h 14m</div>
+          </div>
+          <div class="stat">
+            <div class="label">CPU</div>
+            <div class="value cyan">23%</div>
+          </div>
+          <div class="stat">
+            <div class="label">Memory</div>
+            <div class="value">2.1 / 4 GB</div>
+            <div class="bar"><div class="fill" style="width:53%"></div></div>
+          </div>
+          <div class="stat">
+            <div class="label">Net ↓ / ↑</div>
+            <div class="value green">12.4 / 0.3 MB/s</div>
+          </div>
+          <div class="stat">
+            <div class="label">Packets</div>
+            <div class="value">1,284</div>
+          </div>
+          <div class="stat">
+            <div class="label">Mode</div>
+            <div class="value" style="color: var(--accent-green)">ROUTER</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <button class="tb-btn" title="Open console window">
+            <span class="icon">🖥</span>Console
+          </button>
+          <button class="tb-btn" title="Open full Packet Analysis for this VM">
+            <span class="icon">⌥</span>Capture
+          </button>
+        </div>
+      </div>
+
+      <!-- Live packet monitor strip ─ at-a-glance situational awareness.
+           The dedicated Packet Analysis window is still for deep filter/inspect
+           work; this strip is a heads-up display for whichever VM is selected. -->
+      <div class="packets ring">
+        <div class="packets-head">
+          <div class="title">LIVE TRAFFIC · <b>kali-router</b></div>
+          <div class="live"><span class="dot"></span>CAPTURING</div>
+          <div class="rate"><span class="arrow">↓</span> 12.4 MB/s &nbsp;·&nbsp; <span class="arrow">↑</span> 0.3 MB/s &nbsp;·&nbsp; 1,284 pkts</div>
+          <div class="actions">
+            <button title="Pause the live feed">⏸ Pause</button>
+            <button title="Apply a quick protocol filter">⌕ Filter</button>
+            <button class="primary" title="Open full Packet Analysis window">Expand →</button>
+          </div>
+        </div>
+        <div class="packets-list">
+          <div class="row tls">
+            <span class="t">12:04:18.221</span>
+            <span class="pp">10.0.100.42 → 142.250.190.46:443</span>
+            <span class="proto">TLS</span>
+            <span class="len">1,420</span>
+            <span class="info">Application Data · TLS 1.3 · SNI=googleapis.com</span>
+          </div>
+          <div class="row dns">
+            <span class="t">12:04:18.198</span>
+            <span class="pp">10.0.100.42:53412 → 1.1.1.1:53</span>
+            <span class="proto">DNS</span>
+            <span class="len">76</span>
+            <span class="info">A? cdn.discordapp.com</span>
+          </div>
+          <div class="row http">
+            <span class="t">12:04:18.114</span>
+            <span class="pp">10.0.100.42 → 185.199.108.153:80</span>
+            <span class="proto">HTTP</span>
+            <span class="len">512</span>
+            <span class="info">GET /payload.bin HTTP/1.1 · User-Agent: curl/8.4.0</span>
+          </div>
+          <div class="row tcp">
+            <span class="t">12:04:18.087</span>
+            <span class="pp">10.0.100.42:48922 → 185.199.108.153:80</span>
+            <span class="proto">TCP</span>
+            <span class="len">66</span>
+            <span class="info">[SYN] Seq=0 Win=65535</span>
+          </div>
+          <div class="row icmp">
+            <span class="t">12:04:18.041</span>
+            <span class="pp">10.0.100.42 → 8.8.8.8</span>
+            <span class="proto">ICMP</span>
+            <span class="len">98</span>
+            <span class="info">Echo (ping) request · id=0x1a2b seq=4</span>
+          </div>
+          <div class="row arp">
+            <span class="t">12:04:17.992</span>
+            <span class="pp">aa:bb:cc:11:22:33 → ff:ff:ff:ff:ff:ff</span>
+            <span class="proto">ARP</span>
+            <span class="len">42</span>
+            <span class="info">Who has 10.0.100.1? Tell 10.0.100.42</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Status bar -->
+  <div class="statusbar">
+    <div class="left">
+      <span><span class="live-dot"></span>&nbsp; 2 of 5 running</span>
+      <span>Switch · 4 ports · 1,284 pkts</span>
+      <span>Capture · idle</span>
+    </div>
+    <div class="right">
+      <span>~/.avf · 84 GB free</span>
+      <span>v1.0 (build 314)</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ─────────────  ANNOTATIONS  ───────────── -->
+<div class="annot">
+  <div class="card">
+    <h3>What changed (and why)</h3>
+    <ul>
+      <li>
+        <span class="tag">moved</span>
+        <b>Toolbar to the top.</b> macOS apps put primary actions in
+        <code>NSToolbar</code>; bottom button-strips read as "modal dialog,"
+        not "library window."
+      </li>
+      <li>
+        <span class="tag">moved</span>
+        <b>Buttons grouped logically.</b> Primary (Start) on the left, creation
+        cluster, modification cluster, destructive (Delete) on the right with
+        a red tint and a clear visual gap.
+      </li>
+      <li>
+        <span class="tag">new</span>
+        <b>Sidebar = navigation, not status.</b> Filters (state, OS, network)
+        replace the "Active VMs" status panel — selection lives in the table
+        instead of being duplicated in the sidebar.
+      </li>
+      <li>
+        <span class="tag">new</span>
+        <b>Selected VM detail card.</b> Below the table, shows uptime / CPU /
+        memory / network / mode for the highlighted row. Currently the only
+        feedback for selection is button enablement.
+      </li>
+      <li>
+        <span class="tag">new</span>
+        <b>Traffic sparkline column.</b> Per-row glimpse of network activity
+        without opening Packet Analysis.
+      </li>
+      <li>
+        <span class="tag">gone</span>
+        <b>Bottom packet log strip.</b> Demoted — Packet Analysis already has
+        a dedicated window, and the strip was a cramped duplicate. The
+        protocol legend lives there instead.
+      </li>
+      <li>
+        <span class="tag">gone</span>
+        <b>Right-side VMs/Tasks tab panel.</b> The VMs tab duplicated the main
+        table; Tasks moves to a slide-out drawer triggered from the status bar.
+      </li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Color &amp; typography</h3>
+    <ul>
+      <li>
+        <span class="tag">moved</span>
+        <b>Cyan warmed ~10° toward azure</b> (<code>#00b6e6</code> vs current
+        <code>#00b3e6</code>). Reads less arcade-neon, more
+        instrumentation-cluster.
+      </li>
+      <li>
+        <span class="tag">gone</span>
+        <b>Chartreuse "VF" green dropped.</b> It clashed with the cyan and
+        looked unintentional. Branding stays single-tone with subtle weight
+        contrast.
+      </li>
+      <li>
+        <span class="tag">new</span>
+        <b>SF Mono for VM names + numerics.</b> Tactical aesthetic, easier to
+        scan IPs/MACs/byte counts, matches what a malware analyst expects.
+      </li>
+      <li>
+        <span class="tag">new</span>
+        <b>Status pills replace inline text.</b> Compact, color-coded, easier
+        to spot at a glance than "● Running" mixed into a sentence.
+      </li>
+      <li>
+        <span class="tag warn">tighter</span>
+        <b>Single source for status colors.</b> Running = green, paused =
+        yellow, stopped = grey, danger = red. Same hue in pills, dots,
+        sparklines, status bar.
+      </li>
+      <li>
+        <span class="tag">new</span>
+        <b>One spacing scale (4-pt grid).</b> Token names already landed in
+        <code>LayoutConstants.swift</code> — spacingXS/SM/MD/LG/XL/XXL.
+        Mockup uses them throughout.
+      </li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Information density wins</h3>
+    <ul>
+      <li><b>Table grew 2 columns</b> (CPU·RAM, Disk, Traffic) without scrolling, because the sidebar shrunk from a "status panel" to filters.</li>
+      <li><b>Disk usage in-line.</b> "12 / 32 GB" tells the story; no need to open Configure to check.</li>
+      <li><b>Live status pulse in the status bar</b> reflects whether the virtual switch + capture pipeline are healthy. Currently spread across three places.</li>
+      <li><b>No more "right-panel Tasks tab"</b> for long-running operations — moved to a status-bar-triggered drawer, freeing horizontal space.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Migration cost (rough)</h3>
+    <ul>
+      <li><b>Top toolbar:</b> swap XIB layout, wire <code>NSToolbar</code>. ~half a day.</li>
+      <li><b>Sidebar filter list:</b> new <code>NSOutlineView</code> data source. ~1 day; mostly state plumbing.</li>
+      <li><b>Detail card:</b> new view, bind to <code>tableViewSelectionDidChange</code>. ~half a day.</li>
+      <li><b>Sparklines:</b> a custom <code>NSView</code> subclass, ~2 hrs (data already flows through <code>PacketCaptureManager</code>).</li>
+      <li><b>Color migration:</b> already half-done — tokens exist in <code>AppColors</code>; remaining literals can be mopped up incrementally.</li>
+      <li><b>Status bar:</b> small reorg of <code>VMLibraryWindowController.statusBar</code>; mostly wiring existing publishers.</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  // Make rows clickable to demonstrate selection updates.
+  document.querySelectorAll('tbody tr').forEach((row, idx) => {
+    row.addEventListener('click', () => {
+      document.querySelectorAll('tbody tr').forEach(r => r.classList.remove('selected'));
+      row.classList.add('selected');
+
+      const cells = row.querySelectorAll('td');
+      const name = cells[0].textContent;
+      const isRunning = cells[1].textContent.includes('RUNNING');
+      const cpuRam = cells[4].textContent.split('·').map(s => s.trim());
+      const disk = cells[5].textContent;
+
+      const detail = document.querySelector('.detail .row-1');
+      const memUsedMatch = disk.match(/(\d+)\s*\/\s*(\d+)/);
+      const pct = memUsedMatch ? Math.round(parseInt(memUsedMatch[1]) / parseInt(memUsedMatch[2]) * 100) : 0;
+
+      detail.innerHTML = `
+        <div class="stat"><div class="label">Name</div><div class="value">${name}</div></div>
+        <div class="stat"><div class="label">Uptime</div><div class="value">${isRunning ? '2h 14m' : '—'}</div></div>
+        <div class="stat"><div class="label">CPU</div><div class="value ${isRunning ? 'cyan' : ''}">${isRunning ? '23%' : 'idle'}</div></div>
+        <div class="stat"><div class="label">Memory</div><div class="value">${cpuRam[1]}</div></div>
+        <div class="stat"><div class="label">Disk</div><div class="value">${disk}</div><div class="bar"><div class="fill" style="width:${pct}%"></div></div></div>
+        <div class="stat"><div class="label">Net ↓ / ↑</div><div class="value ${isRunning ? 'green' : ''}">${isRunning ? '12.4 / 0.3 MB/s' : '—'}</div></div>
+        <div class="stat"><div class="label">Mode</div><div class="value" style="color:${isRunning ? 'var(--accent-green)' : 'var(--text-muted)'}">${isRunning ? 'ACTIVE' : 'OFFLINE'}</div></div>
+      `;
+    });
+  });
+
+  // Sidebar toggle behaviour
+  document.querySelectorAll('.sb-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const section = item.parentElement;
+      section.querySelectorAll('.sb-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+    });
+  });
+
+  // Theme switcher — flips between Tactical (OD/orange) and Cyber (cyan).
+  // Uses the data-theme attribute on <html>; CSS variables cascade from there.
+  const themeButtons = document.querySelectorAll('[data-theme-btn]');
+  themeButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const theme = btn.dataset.themeBtn;
+      document.documentElement.dataset.theme = theme;
+      themeButtons.forEach(b => b.classList.toggle('on', b === btn));
+
+      // Re-tint sparklines + the page subtitle accent to match the active theme.
+      const sparkColor = theme === 'tactical' ? '#ff9d3c' : '#2ee08a';
+      document.querySelectorAll('.spark polyline').forEach((p, idx) => {
+        // Alternate strokes so multi-VM tables stay visually distinguishable.
+        p.setAttribute('stroke', idx % 2 === 0 ? sparkColor : (theme === 'tactical' ? '#a8c46e' : '#4ec8ff'));
+      });
+    });
+  });
+  // Apply the default-theme sparkline colors on first paint.
+  document.querySelectorAll('.spark polyline').forEach((p, idx) => {
+    p.setAttribute('stroke', idx % 2 === 0 ? '#ff9d3c' : '#a8c46e');
+  });
+</script>
+
+</body>
+</html>

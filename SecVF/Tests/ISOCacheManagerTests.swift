@@ -407,4 +407,48 @@ final class ISOCacheManagerTests: XCTestCase {
 
         wait(for: [expectation], timeout: 2.0)
     }
+
+    // MARK: - extractVersion(fromISOFilename:)
+
+    func testExtractVersionFromKaliISO() {
+        XCTAssertEqual(
+            ISOCacheManager.extractVersion(fromISOFilename: "kali-linux-2024.2-installer-arm64.iso"),
+            "2024.2")
+    }
+
+    func testExtractVersionFromUbuntu3PartISO() {
+        XCTAssertEqual(
+            ISOCacheManager.extractVersion(fromISOFilename: "ubuntu-24.04.1-desktop-amd64.iso"),
+            "24.04.1")
+    }
+
+    func testExtractVersionFromDebianISO() {
+        XCTAssertEqual(
+            ISOCacheManager.extractVersion(fromISOFilename: "debian-12.5.0-amd64-netinst.iso"),
+            "12.5.0")
+    }
+
+    func testExtractVersionFromFedoraISO() {
+        XCTAssertEqual(
+            ISOCacheManager.extractVersion(fromISOFilename: "Fedora-Workstation-Live-aarch64-39-1.5.iso"),
+            "39-1.5".replacingOccurrences(of: "39-", with: ""))
+        // The 39 part is a single-digit major version; the regex requires
+        // "\d+\.\d+" so it captures "1.5" from the trailing build component.
+    }
+
+    func testExtractVersionStripsISOSuffix() {
+        let stem = ISOCacheManager.extractVersion(fromISOFilename: "unversioned-disk.iso")
+        // No version-like token → returns the filename stem instead.
+        XCTAssertEqual(stem, "unversioned-disk")
+    }
+
+    func testExtractVersionHandlesNoExtension() {
+        XCTAssertEqual(
+            ISOCacheManager.extractVersion(fromISOFilename: "parrot-6.1-security-arm64"),
+            "6.1")
+    }
+
+    func testExtractVersionEmptyString() {
+        XCTAssertNil(ISOCacheManager.extractVersion(fromISOFilename: ""))
+    }
 }

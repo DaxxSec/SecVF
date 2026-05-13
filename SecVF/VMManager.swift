@@ -578,6 +578,85 @@ class VMManager {
         }
     }
 
+    // MARK: - Disk usage
+
+    /// Per-bundle on-disk size cache. Keys: bundle path. Values: (bytes, asOf).
+    /// Background-refreshed by `onDiskBundleSize(for:)`. Walking a 64 GB sparse
+    /// disk.img to sum its physical size can take 100–300 ms even with
+    /// `URLResourceKey.totalFileAllocatedSizeKey`, so we never block the main
+    /// thread on it — the UI reads the cached value and a background task
+    /// updates the cache + posts a notification when it's done.
+    private var bundleSizeCache: [String: (bytes: Int64, asOf: Date)] = [:]
+    private let bundleSizeCacheLock = NSLock()
+    private static let bundleSizeStaleAfter: TimeInterval = 30  // seconds
+
+    /// Returns the cached on-disk size for a VM bundle (bytes). Triggers a
+    /// background refresh if the cache entry is missing or older than 30s.
+    /// Callers should observe `.vmBundleSizeUpdated` on the main run loop
+    /// and re-read this value when it fires.
+    func onDiskBundleSize(for vm: VMConfiguration) -> Int64? {
+        let path = vm.bundlePath
+        let now = Date()
+
+        bundleSizeCacheLock.lock()
+        let cached = bundleSizeCache[path]
+        bundleSizeCacheLock.unlock()
+
+        let isStale = cached.map { now.timeIntervalSince($0.asOf) > Self.bundleSizeStaleAfter } ?? true
+        if isStale {
+            refreshBundleSize(forBundleAt: path, vmId: vm.id)
+        }
+        return cached?.bytes
+    }
+
+    private func refreshBundleSize(forBundleAt path: String, vmId: UUID) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let size = Self.measureBundleSize(at: path)
+
+            self.bundleSizeCacheLock.lock()
+            self.bundleSizeCache[path] = (size, Date())
+            self.bundleSizeCacheLock.unlock()
+
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .vmBundleSizeUpdated,
+                    object: vmId,
+                    userInfo: ["bytes": size]
+                )
+            }
+        }
+    }
+
+    /// Sum the allocated-on-disk size of every file inside the bundle.
+    /// Uses `totalFileAllocatedSize` so we count the physical disk usage of
+    /// sparse files (a 64 GB disk.img with 12 GB written returns ~12 GB,
+    /// not 64 GB).
+    private static func measureBundleSize(at path: String) -> Int64 {
+        let url = URL(fileURLWithPath: path)
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .isRegularFileKey],
+            options: [.skipsPackageDescendants]
+        ) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey,
+                                                                     .totalFileAllocatedSizeKey,
+                                                                     .fileAllocatedSizeKey]),
+                  values.isRegularFile == true else {
+                continue
+            }
+            if let allocated = values.totalFileAllocatedSize ?? values.fileAllocatedSize {
+                total += Int64(allocated)
+            }
+        }
+        return total
+    }
+
     // MARK: - Helper Methods
 
     private func copyVMBundle(from sourcePath: String, to destinationPath: String) throws {

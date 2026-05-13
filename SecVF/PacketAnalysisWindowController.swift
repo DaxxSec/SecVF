@@ -16,6 +16,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
     private var detailTextView: NSTextView!
     private var filterTextField: NSTextField!
     private var statusLabel: NSTextField!
+    private var emptyStateLabel: NSTextField!
 
     // Toolbar buttons
     private var startButton: NSButton!
@@ -72,7 +73,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         // Apply dark theme
         window.appearance = NSAppearance(named: .darkAqua)
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor
+        contentView.layer?.backgroundColor = AppColors.backgroundSecondary.cgColor
 
         let width = contentView.bounds.width
         let height = contentView.bounds.height
@@ -83,25 +84,30 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         let toolbarHeight: CGFloat = 80
         let toolbarView = NSView(frame: NSRect(x: 0, y: height - toolbarHeight, width: width, height: toolbarHeight))
         toolbarView.wantsLayer = true
-        toolbarView.layer?.backgroundColor = NSColor(red: 0.06, green: 0.06, blue: 0.10, alpha: 1.0).cgColor
+        toolbarView.layer?.backgroundColor = AppColors.backgroundTertiary.cgColor
         toolbarView.autoresizingMask = [.width, .minYMargin]
 
         // Row 1: Capture controls
-        var xOffset: CGFloat = 15
+        var xOffset: CGFloat = LayoutConstants.spacingLG
 
         startButton = createToolbarButton(title: "▶ Start", action: #selector(startCapture(_:)))
         startButton.frame = NSRect(x: xOffset, y: 45, width: 70, height: 28)
+        startButton.toolTip = "Begin live packet capture from the selected interface"
+        startButton.setAccessibilityLabel("Start capture")
         toolbarView.addSubview(startButton)
         xOffset += 75
 
         stopButton = createToolbarButton(title: "⏹ Stop", action: #selector(stopCapture(_:)))
         stopButton.frame = NSRect(x: xOffset, y: 45, width: 70, height: 28)
         stopButton.isEnabled = false
+        stopButton.toolTip = "Stop the in-progress packet capture"
+        stopButton.setAccessibilityLabel("Stop capture")
         toolbarView.addSubview(stopButton)
         xOffset += 75
 
         clearButton = createToolbarButton(title: "Clear", action: #selector(clearPackets(_:)))
         clearButton.frame = NSRect(x: xOffset, y: 45, width: 60, height: 28)
+        clearButton.toolTip = "Clear the visible packet list (does not delete saved PCAPs)"
         toolbarView.addSubview(clearButton)
         xOffset += 80
 
@@ -114,19 +120,23 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         // PCAP buttons
         let openButton = createToolbarButton(title: "Open PCAP", action: #selector(openPCAP(_:)))
         openButton.frame = NSRect(x: xOffset, y: 45, width: 90, height: 28)
+        openButton.toolTip = "Load a .pcap or .pcapng file from disk"
         toolbarView.addSubview(openButton)
         xOffset += 95
 
         let saveButton = createToolbarButton(title: "Save PCAP", action: #selector(savePCAP(_:)))
         saveButton.frame = NSRect(x: xOffset, y: 45, width: 90, height: 28)
+        saveButton.toolTip = "Export the captured packets to a .pcap file"
         toolbarView.addSubview(saveButton)
         xOffset += 110
 
-        // Auto-scroll checkbox
+        // Auto-scroll checkbox — y=47 keeps the 24pt-high checkbox visually
+        // centered with the 28pt-high buttons in this row (both centered at y=59).
         autoScrollCheckbox = NSButton(checkboxWithTitle: "Auto-scroll", target: self, action: #selector(toggleAutoScroll(_:)))
         autoScrollCheckbox.frame = NSRect(x: xOffset, y: 47, width: 100, height: 24)
         autoScrollCheckbox.state = .on
         autoScrollCheckbox.contentTintColor = NSColor.white
+        autoScrollCheckbox.toolTip = "Follow new packets as they arrive (jump to the latest row)"
         toolbarView.addSubview(autoScrollCheckbox)
 
         // Row 2: Filter with preset dropdown
@@ -273,6 +283,25 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         scrollView.documentView = packetTableView
         contentView.addSubview(scrollView)
 
+        // Empty-state label, overlaid on the table. Visible when the displayed
+        // packet list is empty (either capture not started or filter has no hits).
+        emptyStateLabel = NSTextField(labelWithString: "No packets captured yet.\nClick ▶ Start to begin capturing.")
+        emptyStateLabel.alignment = .center
+        emptyStateLabel.isEditable = false
+        emptyStateLabel.isBezeled = false
+        emptyStateLabel.drawsBackground = false
+        emptyStateLabel.textColor = AppColors.textMuted
+        emptyStateLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .regular)
+        emptyStateLabel.usesSingleLineMode = false
+        emptyStateLabel.maximumNumberOfLines = 3
+        emptyStateLabel.lineBreakMode = .byWordWrapping
+        emptyStateLabel.frame = NSRect(x: 10,
+                                       y: tableY + tableHeight / 2 - 30,
+                                       width: width - 20,
+                                       height: 60)
+        emptyStateLabel.autoresizingMask = [.width, .minYMargin, .maxYMargin]
+        contentView.addSubview(emptyStateLabel)
+
         // ═══════════════════════════════════════════════════════════════
         // PACKET DETAILS (Bottom)
         // ═══════════════════════════════════════════════════════════════
@@ -281,8 +310,8 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
         let detailLabel = NSTextField(labelWithString: "Packet Details:")
         detailLabel.frame = NSRect(x: 15, y: tableY - 25, width: 150, height: 20)
-        detailLabel.textColor = NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0)
-        detailLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        detailLabel.textColor = AppColors.accentODGlow
+        detailLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
         detailLabel.autoresizingMask = [.minYMargin]
         contentView.addSubview(detailLabel)
 
@@ -293,9 +322,9 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
 
         detailTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: width - 20, height: detailHeight))
         detailTextView.isEditable = false
-        detailTextView.backgroundColor = NSColor(red: 0.04, green: 0.04, blue: 0.08, alpha: 1.0)
-        detailTextView.textColor = NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
-        detailTextView.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        detailTextView.backgroundColor = AppColors.backgroundPanel
+        detailTextView.textColor = AppColors.textOD
+        detailTextView.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
         detailTextView.autoresizingMask = [.width, .height]
 
         detailScrollView.documentView = detailTextView
@@ -306,13 +335,13 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         // ═══════════════════════════════════════════════════════════════
         let statusBar = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 30))
         statusBar.wantsLayer = true
-        statusBar.layer?.backgroundColor = NSColor(red: 0.06, green: 0.06, blue: 0.10, alpha: 1.0).cgColor
+        statusBar.layer?.backgroundColor = AppColors.backgroundTertiary.cgColor
         statusBar.autoresizingMask = [.width]
 
         statusLabel = NSTextField(labelWithString: "Ready - tshark: \(PacketCaptureManager.shared.isTsharkAvailable ? "Available" : "Not Found")")
         statusLabel.frame = NSRect(x: 15, y: 5, width: width - 30, height: 20)
-        statusLabel.textColor = NSColor(red: 0.6, green: 0.8, blue: 0.6, alpha: 1.0)
-        statusLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        statusLabel.textColor = AppColors.statusRunning
+        statusLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSmall, weight: .regular)
         statusLabel.autoresizingMask = [.width]
         statusBar.addSubview(statusLabel)
 
@@ -611,6 +640,7 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         let allPackets = PacketCaptureManager.shared.getAllPackets()
         displayedPackets = allPackets.filter { passesFilter($0) }
         packetTableView.reloadData()
+        updateStatus()  // Refresh empty-state label + counters for the new filter
     }
 
     private func passesFilter(_ packet: CapturedPacket) -> Bool {
@@ -715,7 +745,24 @@ class PacketAnalysisWindowController: NSWindowController, NSTableViewDataSource,
         let filterStr = currentFilter.isEmpty ? "" : " | Filter: \(currentFilter)"
 
         statusLabel.stringValue = "Packets: \(total) | Displayed: \(displayed) | \(bytesStr) | Status: \(status)\(filterStr)"
-        statusLabel.textColor = isCapturing ? NSColor(red: 0.4, green: 1.0, blue: 0.4, alpha: 1.0) : NSColor(red: 0.6, green: 0.8, blue: 0.6, alpha: 1.0)
+        statusLabel.textColor = isCapturing ? AppColors.accentNeonGreen : AppColors.statusStopped
+
+        // Empty-state visibility: hide the placeholder as soon as we have rows
+        // to show; otherwise pick the right message for the situation.
+        if displayed > 0 {
+            emptyStateLabel?.isHidden = true
+        } else {
+            emptyStateLabel?.isHidden = false
+            if !currentFilter.isEmpty {
+                emptyStateLabel?.stringValue = "No packets match the current filter.\nClear the filter to see all captured packets."
+            } else if isCapturing {
+                emptyStateLabel?.stringValue = "Capture is running. Waiting for traffic…"
+            } else if total > 0 {
+                emptyStateLabel?.stringValue = "Captured \(total) packet\(total == 1 ? "" : "s"). Cleared from view."
+            } else {
+                emptyStateLabel?.stringValue = "No packets captured yet.\nClick ▶ Start to begin capturing."
+            }
+        }
     }
 
     private func updateDetailView() {

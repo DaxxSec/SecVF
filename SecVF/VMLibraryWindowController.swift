@@ -6,8 +6,46 @@
 import Cocoa
 import Virtualization
 
+/// A single row in the AI Sandbox tab of the library. Wraps either the
+/// shared base bundle or a per-session clone, with whatever metadata we
+/// can scrape from the bundle's `manifest.json` and disk.img mtime.
+struct AISandboxBundleRow {
+    let url: URL
+    let displayName: String
+    let isBase: Bool
+    let id: UUID?
+    let createdAt: Date?
+    let diskBytes: Int64
+
+    /// Pulled from the bundle URL: `ai-sandbox-exec-<sessionID>.bundle`.
+    /// Returns nil for the base bundle (which has no session id).
+    var sessionID: String? {
+        guard !isBase else { return nil }
+        let name = url.deletingPathExtension().lastPathComponent
+        let prefix = "ai-sandbox-exec-"
+        return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : nil
+    }
+}
+
+/// Reference-typed wrapper used as NSOutlineView's "item". NSOutlineView
+/// identifies items by object identity for reference types, which is the
+/// only reliable way to track selection / expansion state across reloads.
+/// `children` is nil for session leaves; non-nil (possibly empty) for the
+/// base node.
+final class AISandboxNode: NSObject {
+    let bundle: AISandboxBundleRow
+    var children: [AISandboxNode]?
+    init(bundle: AISandboxBundleRow, children: [AISandboxNode]?) {
+        self.bundle = bundle
+        self.children = children
+    }
+}
+
 @MainActor
-class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate {
+class VMLibraryWindowController: NSWindowController,
+                                 NSTableViewDataSource, NSTableViewDelegate,
+                                 NSOutlineViewDataSource, NSOutlineViewDelegate,
+                                 NSWindowDelegate {
 
     @IBOutlet weak var tableView: NSTableView?
     @IBOutlet weak var startButton: NSButton?
@@ -26,6 +64,22 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var networkVisualizationView: NetworkTrafficView?
     private var statsUpdateTimer: Timer?
 
+    // Live network rates per VM, computed from VirtualNetworkSwitch port
+    // byte counters polled every ~1.5s. `lastNetSample` stores the previous
+    // counter + timestamp; `liveRateBps` is the latest rate the detail card
+    // reads from. Only the virtual-switch path is sampled — NAT-mode VMs
+    // don't show a per-VM rate (the host network stack doesn't expose one).
+    private struct NetSample { let bytesRx: UInt64; let bytesTx: UInt64; let ts: Date }
+    private var lastNetSample: [String: NetSample] = [:]
+    private var liveRateBps: [String: (down: Double, up: Double)] = [:]
+    private var liveRateTimer: Timer?
+
+    /// Rolling per-VM buffer of (down + up) bytes/sec samples. Drives the
+    /// Traffic column sparkline. `maxTrafficSamples` × the timer cadence
+    /// (1.5s) defines the visible time window — 30 samples = ~45 s.
+    private var trafficSamples: [String: [Double]] = [:]
+    private static let maxTrafficSamples = 30
+
     // Right panel tabs (VMs / Tasks)
     private var rightPanelTabControl: NSSegmentedControl?
     private var vmsTabContent: NSView?
@@ -38,6 +92,65 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private var tasksStatusLabel: NSTextField?
     private var tasksProgressBar: NSProgressIndicator?
     private var vmsPlaceholderLabel: NSTextField?
+
+    // Library tab — switches the table between the standard VM list and
+    // the AI Sandbox bundle list. Recovery toggle is visible only in the
+    // AI Sandbox tab.
+    private enum LibraryTab: Int {
+        case standard = 0
+        case aiSandbox = 1
+    }
+    private var currentLibraryTab: LibraryTab = .standard
+    private var libraryTabControl: NSSegmentedControl?
+    private var recoveryModeCheckbox: NSButton?
+    /// Cached scan of `~/.avf/AISandbox/` — base + each session bundle.
+    /// Refreshed each time the AI Sandbox tab is selected.
+    /// In tree-view mode this still backs the data: `[0]` is the base
+    /// (root parent) and `[1...]` are sessions (children of the base),
+    /// ordered newest-first.
+    private var aiSandboxBundles: [AISandboxBundleRow] = []
+
+    /// Separate outline view + scroll view for the AI Sandbox tab. Sits
+    /// underneath the main NSTableView (same frame) and toggles visibility
+    /// on tab switch. The standard NSTableView stays in charge of standard
+    /// VMs; outline view shows the base→sessions tree.
+    private var aiSandboxOutlineView: NSOutlineView?
+    private var aiSandboxOutlineScroll: NSScrollView?
+
+    /// Node tree backing `aiSandboxOutlineView`. Single root (the base)
+    /// with the session bundles as children. Rebuilt whenever
+    /// `aiSandboxBundles` is re-scanned.
+    private var aiSandboxRootNode: AISandboxNode?
+
+    // Empty-state overlay labels — one per tab, shown over the table /
+    // outline view when there are no rows to display.
+    private var standardEmptyStateLabel: NSTextField?
+    private var aiSandboxEmptyStateLabel: NSTextField?
+
+    // Bottom status bar — slim global-state strip pinned to the bottom of
+    // the content view, under the packet panel.
+    private var bottomStatusBar: NSView?
+    private var statusBarRunningLabel: NSTextField?
+    private var statusBarSwitchLabel: NSTextField?
+    private var statusBarNATLabel: NSTextField?
+    private var statusBarCaptureLabel: NSTextField?
+    private var statusBarDiskLabel: NSTextField?
+    private var statusBarPulseDot: CAShapeLayer?
+    private var statusBarRefreshTimer: Timer?
+
+    /// Previous NAT-bridge byte sample, used to compute a bytes/sec delta
+    /// each tick of the status bar refresh.
+    private var statusBarPreviousNATSample: BridgeSample?
+
+    // Selected VM detail card (horizontal strip between table and packet panel)
+    private var selectedVMDetailCard: NSView?
+    private var detailNameLabel: NSTextField?
+    private var detailStatusPill: NSTextField?
+    private var detailOSLabel: NSTextField?
+    private var detailResourcesLabel: NSTextField?
+    private var detailDiskLabel: NSTextField?
+    private var detailNetworkModeLabel: NSTextField?
+    private var detailNetworkRateLabel: NSTextField?
 
     // Packet Log Panel
     private var packetLogPanel: NSView?
@@ -58,8 +171,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     deinit {
-        // Clean up timer and notification observers to prevent memory leaks
+        // Clean up timers and notification observers to prevent memory leaks
         statsUpdateTimer?.invalidate()
+        liveRateTimer?.invalidate()
+        statusBarRefreshTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -72,11 +187,22 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // Ensure window stays in front
         window?.level = .normal
         window?.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        window?.minSize = NSSize(width: LayoutConstants.minWindowWidth,
+                                 height: LayoutConstants.minWindowHeight)
+
+        // If `frameAutosaveName` restored a frame that no current screen
+        // overlaps (e.g., last run was on an external display that's no
+        // longer attached), center the window on the primary screen so it
+        // doesn't open off-screen.
+        if let win = window, !NSScreen.screens.contains(where: { $0.visibleFrame.intersects(win.frame) }) {
+            win.center()
+        }
 
         // Apply dark theme, add sidebar, and add status bar
         applyDarkTheme()
         addSidebar()
         addStatusBar()
+        addBottomStatusBar()
 
         // Configure table view
         tableView?.dataSource = self
@@ -84,11 +210,28 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         tableView?.target = self
         tableView?.doubleAction = #selector(startVM(_:))
 
+        // Programmatically append a Traffic column at the end of whatever
+        // the XIB defined. Done in code (not the XIB) so the column can
+        // host a custom NSView (SparklineView) rather than the default
+        // NSTextField cell. The column is non-resizable and ~80pt wide —
+        // enough for a glanceable line, not so wide it eats other columns.
+        if let tableView = tableView,
+           !tableView.tableColumns.contains(where: { $0.identifier.rawValue == "TrafficColumn" }) {
+            let trafficCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TrafficColumn"))
+            trafficCol.title = "Traffic"
+            trafficCol.width = 80
+            trafficCol.minWidth = 60
+            trafficCol.maxWidth = 120
+            trafficCol.headerCell.alignment = .center
+            tableView.addTableColumn(trafficCol)
+        }
+
         // Load VMs asynchronously to avoid blocking main thread
         vmManager.initializeAsync { [weak self] in
             guard let self = self else { return }
             self.tableView?.reloadData()
             self.refreshStatusBar()
+            self.refreshEmptyStateOverlays()
         }
 
         // Force the table to use view-based mode
@@ -118,6 +261,20 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             object: nil
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleVMBundleSizeUpdated(_:)),
+            name: .vmBundleSizeUpdated,
+            object: nil
+        )
+
+        // Start the live network-rate timer (1.5s cadence). Samples the
+        // VirtualNetworkSwitch per-port byte counters and computes a moving
+        // bytes/sec for each VM. Detail card reads from `liveRateBps`.
+        liveRateTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.sampleLiveNetworkRates() }
+        }
+
         // Update button states
         updateButtonStates()
 
@@ -135,12 +292,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Cybersecurity dark background - deep black
         contentView.wantsLayer = true
-        contentView.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
+        contentView.layer?.backgroundColor = AppColors.backgroundPrimary.cgColor
 
         // Style table view with dark theme - darker grey
-        tableView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
-        tableView?.enclosingScrollView?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0)
-        tableView?.gridColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan grid
+        tableView?.backgroundColor = AppColors.backgroundSecondary
+        tableView?.enclosingScrollView?.backgroundColor = AppColors.backgroundSecondary
+        tableView?.gridColor = AppColors.borderCyan
 
         // Style toolbar buttons to match session panel
         styleToolbarButtons()
@@ -150,18 +307,89 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let buttons: [NSButton?] = [newButton, startButton, deleteButton, renameButton, cloneButton, importButton, configureButton]
 
         for button in buttons.compactMap({ $0 }) {
-            let title = button.title
             button.isBordered = false
             button.wantsLayer = true
-            button.layer?.backgroundColor = AppColors.backgroundButton.cgColor
-            button.layer?.borderColor = AppColors.accentCyan.withAlphaComponent(0.5).cgColor
-            button.layer?.borderWidth = 1.0
-            button.layer?.cornerRadius = 5
-            button.attributedTitle = NSAttributedString(string: title, attributes: [
-                .foregroundColor: AppColors.accentCyan,
-                .font: NSFont.systemFont(ofSize: 11, weight: .medium)
-            ])
+            button.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+            button.layer?.borderWidth = LayoutConstants.borderHairline
+            applyButtonStyle(button)
         }
+
+        // Primary (Start) gets a brighter border + filled background.
+        // Destructive (Delete) gets a red border so it stands out.
+        startButton?.layer?.borderColor = AppColors.accentNeonCyan.withAlphaComponent(0.8).cgColor
+        startButton?.layer?.borderWidth = LayoutConstants.borderEmphasis
+        deleteButton?.layer?.borderColor = AppColors.accentRed.withAlphaComponent(0.6).cgColor
+
+        // Keyboard shortcuts. The XIB sets Start's keyEquivalent to Return
+        // (no modifier) so it acts as the table's default action. Here we
+        // add the Cmd-modified shortcuts for the other operations so they
+        // don't capture bare keypresses.
+        newButton?.keyEquivalent = "n"
+        newButton?.keyEquivalentModifierMask = .command
+        importButton?.keyEquivalent = "i"
+        importButton?.keyEquivalentModifierMask = [.command, .shift]
+        deleteButton?.keyEquivalent = String(Character(UnicodeScalar(NSDeleteCharacter)!))
+        deleteButton?.keyEquivalentModifierMask = .command
+    }
+
+    /// Tactical-themed `NSSegmentedControl`. Uses `.roundRect` (cleaner than
+    /// the heavy `.texturedSquare`) and tints the selected segment with the
+    /// OD-green primary accent so it reads as part of the SecVF palette
+    /// instead of a stock blue Mac control. Falls back gracefully on older
+    /// macOS where `selectedSegmentBezelColor` is unavailable.
+    static func applyTacticalStyle(to control: NSSegmentedControl) {
+        control.segmentStyle = .roundRect
+        control.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        if #available(macOS 10.12.2, *) {
+            control.selectedSegmentBezelColor = AppColors.accentOD
+        }
+    }
+
+    /// Apply the tactical-theme button styling. Buttons use a custom layer
+    /// instead of the system bezel, so we must visually depress when
+    /// disabled — otherwise `isEnabled = false` reads as "active but
+    /// unresponsive."
+    ///
+    /// Tactical conventions:
+    /// - **Primary** (Start) — OD green border + brighter background. "Go".
+    /// - **Destructive** (Delete) — red border + red text. "Stop".
+    /// - **Secondary** — slate background + OD-text. Neutral operations.
+    private func applyButtonStyle(_ button: NSButton) {
+        let isPrimary = (button === startButton)
+        let isDestructive = (button === deleteButton)
+        let enabled = button.isEnabled
+
+        // Primary fills with a low-alpha OD tint so it stands out from the
+        // toolbar bezel; everything else uses the standard slate button bg.
+        let baseBg: NSColor = isPrimary ? AppColors.accentOD.withAlphaComponent(0.22)
+                                        : AppColors.backgroundButton
+        let baseBorder: NSColor
+        if isDestructive {
+            baseBorder = AppColors.accentRed.withAlphaComponent(0.6)
+        } else if isPrimary {
+            baseBorder = AppColors.accentODGlow.withAlphaComponent(0.85)
+        } else {
+            baseBorder = AppColors.borderOD
+        }
+        let textColor: NSColor
+        if isDestructive {
+            textColor = AppColors.accentRed
+        } else if isPrimary {
+            // Primary uses a brighter near-white so it pops against the OD fill
+            textColor = AppColors.textPrimary
+        } else {
+            textColor = AppColors.textOD
+        }
+
+        button.layer?.backgroundColor = baseBg.withAlphaComponent(enabled ? 1.0 : 0.35).cgColor
+        button.layer?.borderColor = baseBorder.withAlphaComponent(enabled ? 1.0 : 0.25).cgColor
+
+        let fontWeight: NSFont.Weight = isPrimary ? .semibold : .medium
+        button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+            .foregroundColor: textColor.withAlphaComponent(enabled ? 1.0 : 0.4),
+            .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: fontWeight)
+        ])
+        button.alphaValue = enabled ? 1.0 : 0.7
     }
 
     private func addSidebar() {
@@ -178,8 +406,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let gradientLayer = CAGradientLayer()
         gradientLayer.frame = sidebar.bounds
         gradientLayer.colors = [
-            NSColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 1.0).cgColor,  // Deep black
-            NSColor(red: 0.06, green: 0.08, blue: 0.12, alpha: 1.0).cgColor   // Charcoal with blue tint
+            AppColors.gradientTop.cgColor,
+            AppColors.gradientBottom.cgColor
         ]
         gradientLayer.startPoint = CGPoint(x: 0, y: 1)
         gradientLayer.endPoint = CGPoint(x: 1, y: 0)
@@ -216,7 +444,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // "Sec" in light gray
         let secPart = NSAttributedString(string: "Sec", attributes: [
             .font: font,
-            .foregroundColor: NSColor(red: 0.85, green: 0.85, blue: 0.85, alpha: 1.0),
+            .foregroundColor: AppColors.textLight,
             .paragraphStyle: paragraphStyle
         ])
         attributedTitle.append(secPart)
@@ -224,7 +452,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         // "VF" in medium gray
         let vfPart = NSAttributedString(string: "VF", attributes: [
             .font: font,
-            .foregroundColor: NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0),
+            .foregroundColor: AppColors.textMuted,
             .paragraphStyle: paragraphStyle
         ])
         attributedTitle.append(vfPart)
@@ -237,7 +465,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         subtitleLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 195, width: sidebarWidth, height: 20)
         subtitleLabel.alignment = .center
         subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        subtitleLabel.textColor = NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0)
+        subtitleLabel.textColor = AppColors.textMuted
         subtitleLabel.isBordered = false
         subtitleLabel.isEditable = false
         subtitleLabel.drawsBackground = false
@@ -254,7 +482,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         statsLabel.frame = NSRect(x: 0, y: sidebar.bounds.height - 310, width: sidebarWidth, height: 80)
         statsLabel.alignment = .center
         statsLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        statsLabel.textColor = NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 0.9)  // Medium gray
+        statsLabel.textColor = AppColors.textSubtle
         statsLabel.isBordered = false
         statsLabel.isEditable = false
         statsLabel.drawsBackground = false
@@ -270,7 +498,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let infoY: CGFloat = 115
         addInfoLabel(to: sidebar, text: "Built on", y: infoY, bold: false, width: sidebarWidth)
         addInfoLabel(to: sidebar, text: "Apple Virtualization Framework", y: infoY - 28, bold: true, width: sidebarWidth)
-        addInfoLabel(to: sidebar, text: "github.com/DaxxSec/SecVF", y: infoY - 58, bold: false, color: NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0), width: sidebarWidth)
+        addInfoLabel(to: sidebar, text: "github.com/DaxxSec/SecVF", y: infoY - 58, bold: false, color: AppColors.textSubtle, width: sidebarWidth)
 
         // Add sidebar to window
         contentView.addSubview(sidebar, positioned: .above, relativeTo: nil)
@@ -282,28 +510,29 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func createProtocolLegend(width: CGFloat, height: CGFloat) -> NSView {
         let legendView = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         legendView.wantsLayer = true
-        legendView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor
+        legendView.layer?.backgroundColor = AppColors.backgroundSecondary.cgColor
         legendView.layer?.cornerRadius = 6
         legendView.layer?.borderWidth = 1
-        legendView.layer?.borderColor = NSColor(red: 0.0, green: 0.5, blue: 0.7, alpha: 0.3).cgColor
+        legendView.layer?.borderColor = AppColors.borderOD.cgColor
 
         // Legend title
         let titleLabel = NSTextField(labelWithString: "⚡ PROTOCOL COLORS")
         titleLabel.frame = NSRect(x: 8, y: height - 18, width: width - 16, height: 14)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .bold)
-        titleLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0)
+        titleLabel.textColor = AppColors.accentODGlow
         legendView.addSubview(titleLabel)
 
-        // Protocol colors - matching the packet log colors
+        // Protocol colors — sourced from AppColors.proto* so the legend
+        // stays in lock-step with the per-packet row tinting.
         let protocols: [(String, NSColor)] = [
-            ("TCP", NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0)),     // Cyan
-            ("UDP", NSColor(red: 0.6, green: 1.0, blue: 0.6, alpha: 1.0)),     // Green
-            ("DNS", NSColor(red: 1.0, green: 0.9, blue: 0.4, alpha: 1.0)),     // Yellow
-            ("HTTP", NSColor(red: 1.0, green: 0.6, blue: 0.3, alpha: 1.0)),    // Orange
-            ("ARP", NSColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1.0)),     // Gray
-            ("ICMP", NSColor(red: 1.0, green: 0.5, blue: 0.5, alpha: 1.0)),    // Red/Pink
-            ("IPv6", NSColor(red: 0.8, green: 0.6, blue: 1.0, alpha: 1.0)),    // Purple
-            ("TLS", NSColor(red: 0.3, green: 1.0, blue: 0.8, alpha: 1.0))      // Teal
+            ("TCP",  AppColors.protoTCP),
+            ("UDP",  AppColors.protoUDP),
+            ("DNS",  AppColors.protoDNS),
+            ("HTTP", AppColors.protoHTTP),
+            ("ARP",  AppColors.protoARP),
+            ("ICMP", AppColors.protoICMP),
+            ("IPv6", AppColors.protoIPv6),
+            ("TLS",  AppColors.protoTLS)
         ]
 
         let colWidth = (width - 16) / 2
@@ -365,8 +594,8 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         hexPath.close()
         hexPath.lineWidth = 2.5
 
-        // Neon cyan stroke
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0).setStroke()
+        // OD glow stroke (was neon cyan)
+        AppColors.accentODGlow.setStroke()
         hexPath.stroke()
 
         // Digital lock icon in center
@@ -377,7 +606,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         // Lock body
         let lockBody = NSBezierPath(roundedRect: NSRect(x: lockX, y: lockY, width: lockWidth, height: lockHeight * 0.6), xRadius: 2, yRadius: 2)
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.8).setFill()
+        AppColors.accentODGlow.withAlphaComponent(0.8).setFill()
         lockBody.fill()
 
         // Lock shackle (top arc)
@@ -390,7 +619,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             clockwise: false
         )
         shacklePath.lineWidth = 3.0
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0).setStroke()
+        AppColors.accentODGlow.setStroke()
         shacklePath.stroke()
 
         // Keyhole
@@ -400,8 +629,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         keyholePath.fill()
         keyholeSlot.fill()
 
-        // Circuit board pattern in corners (hacker aesthetic)
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.4).setStroke()
+        // Circuit-board pattern in corners. Now uses safety orange — adds
+        // a second-accent hit that ties the logo to the rest of the
+        // tactical palette (status bar pulse, sparkline spikes, section
+        // ticks all use the same orange).
+        AppColors.accentOrange.withAlphaComponent(0.4).setStroke()
 
         // Top-left circuit
         let circuit1 = NSBezierPath()
@@ -412,7 +644,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         circuit1.stroke()
 
         // Draw nodes
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.8).setFill()
+        AppColors.accentOrangeHot.withAlphaComponent(0.85).setFill()
         NSBezierPath(ovalIn: NSRect(x: 23, y: 83, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 43, y: 83, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 43, y: 73, width: 4, height: 4)).fill()
@@ -423,10 +655,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         circuit2.line(to: CGPoint(x: 125, y: 35))
         circuit2.line(to: CGPoint(x: 125, y: 45))
         circuit2.lineWidth = 1.2
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.4).setStroke()
+        AppColors.accentOrange.withAlphaComponent(0.4).setStroke()
         circuit2.stroke()
 
-        NSColor(red: 0.0, green: 1.0, blue: 0.5, alpha: 0.8).setFill()
+        AppColors.accentOrangeHot.withAlphaComponent(0.85).setFill()
         NSBezierPath(ovalIn: NSRect(x: 143, y: 33, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 123, y: 33, width: 4, height: 4)).fill()
         NSBezierPath(ovalIn: NSRect(x: 123, y: 43, width: 4, height: 4)).fill()
@@ -438,7 +670,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func createSeparator(y: CGFloat, width: CGFloat) -> NSBox {
         let separator = NSBox(frame: NSRect(x: 20, y: y, width: width - 40, height: 1))
         separator.boxType = .separator
-        separator.fillColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.3)  // Subtle cyan glow
+        separator.fillColor = AppColors.borderCyan
         return separator
     }
 
@@ -458,20 +690,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     private func adjustContentForSidebar(sidebarWidth: CGFloat) {
         guard let window = window, let contentView = window.contentView else { return }
 
-        let activePanelWidth: CGFloat = 220
-        let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
-        let packetPanelHeight: CGFloat = 180  // Horizontal packet panel below table
+        let buttonHeight: CGFloat = 32
+        let toolbarGap: CGFloat = 8                  // gap below the toolbar row
+        let libraryTabsHeight: CGFloat = 26
+        let libraryTabsGap: CGFloat = 8              // gap below the library-tabs row
+        let packetPanelHeight: CGFloat = 180
+        let bottomStatusBarHeight: CGFloat = 24      // slim global status strip
 
-        // Set window to proper size
-        let minWidth: CGFloat = sidebarWidth + 680 + activePanelWidth + padding * 3
-        let minHeight: CGFloat = 600  // Increased to accommodate packet panel
+        // Set window to proper size. Right-side "Active VMs / Tasks" panel
+        // was removed — the 680pt main content area plus the sidebar +
+        // padding gives a reasonable minimum.
+        let minWidth: CGFloat = sidebarWidth + 680 + padding * 2
+        let minHeight: CGFloat = 620
         window.minSize = NSSize(width: minWidth, height: minHeight)
 
         // Set default window size on launch
         var windowFrame = window.frame
         let defaultWidth: CGFloat = 1150
-        let defaultHeight: CGFloat = 650  // Taller default
+        let defaultHeight: CGFloat = 720
         if windowFrame.size.width < defaultWidth || windowFrame.size.height < defaultHeight {
             windowFrame.size.width = defaultWidth
             windowFrame.size.height = defaultHeight
@@ -485,11 +722,48 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Calculate areas - table above packet panel
+        // ── Vertical layout (top-down) ───────────────────────────────────
+        //   contentHeight                                  ← top of content
+        //     toolbar row    (h=32)   y = top - padding - 32
+        //     gap            (8)
+        //     library tabs   (h=26)
+        //     gap            (8)
+        //     table          (flex, fills middle)
+        //     detail card    (h=70)
+        //     packet panel   (h=180)
+        //     gap            (padding)
+        //     y=0                                          ← bottom of content
+        //
+        // The bottom button row was here historically. Moving it to the top
+        // matches macOS NSToolbar convention and the design mockup at
+        // docs/ui-redesign-mockup.html. We're not using NSToolbar itself
+        // (the existing IBOutlet buttons still drive every action), just
+        // re-anchoring them to the top of the content view.
+
+        let toolbarY = contentHeight - padding - buttonHeight
+
+        let libraryTabsY = toolbarY - toolbarGap - libraryTabsHeight
+
         let tableX = sidebarWidth + padding
-        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let tableY = buttonRowHeight + padding + packetPanelHeight + padding  // Above packet panel
-        let tableHeight = contentHeight - tableY - padding
+        // Right-side panel is gone — table fills out to the right edge of
+        // the content view (minus one padding).
+        let tableWidth = contentWidth - sidebarWidth - padding * 2
+
+        let detailCardHeight: CGFloat = 70
+        let detailCardX = sidebarWidth + padding
+        let detailCardWidth = tableWidth
+        // Vertical stack from bottom (after the new bottom status bar):
+        //   y=0: status bar (h=24)
+        //   y=24+padding=39: packet panel top
+        //   y=39+180+padding=234: detail card top
+        let detailCardY = bottomStatusBarHeight + padding + packetPanelHeight + padding
+
+        let tableY = detailCardY + detailCardHeight + padding     // 210 + 70 + 15 = 295
+        let tableHeight = libraryTabsY - libraryTabsGap - tableY
+
+        addLibraryTabsHeader(in: contentView,
+                             frame: NSRect(x: tableX, y: libraryTabsY,
+                                           width: tableWidth, height: libraryTabsHeight))
 
         // Position the table scroll view
         if let scrollView = tableView?.enclosingScrollView {
@@ -497,220 +771,1081 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             scrollView.autoresizingMask = [.width, .height]
             scrollView.wantsLayer = true
             scrollView.layer?.borderWidth = 1
-            scrollView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
-            scrollView.layer?.cornerRadius = 6
+            scrollView.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
+            scrollView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
         }
 
-        // Position buttons at the bottom, centered in the table area
-        let buttons: [NSButton?] = [newButton, deleteButton, renameButton, cloneButton, importButton, configureButton, startButton]
-        let buttonWidth: CGFloat = 80
-        let buttonSpacing: CGFloat = 10
-        let visibleButtons = buttons.compactMap { $0 }
-        let totalButtonsWidth = CGFloat(visibleButtons.count) * buttonWidth + CGFloat(visibleButtons.count - 1) * buttonSpacing
-        var buttonX = tableX + (tableWidth - totalButtonsWidth) / 2
+        // Empty-state overlays — one per tab. Hidden when their respective
+        // data source has rows. Centered over the table region.
+        if standardEmptyStateLabel == nil {
+            let label = makeEmptyStateLabel(
+                title: "No virtual machines yet",
+                hint: "Click ⊕ New to create your first VM,\nor Import to bring in an existing bundle.")
+            label.frame = NSRect(x: tableX, y: tableY,
+                                 width: tableWidth, height: tableHeight)
+            label.autoresizingMask = [.width, .height]
+            contentView.addSubview(label)
+            standardEmptyStateLabel = label
+        } else {
+            standardEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
+                                                   width: tableWidth, height: tableHeight)
+        }
+        if aiSandboxEmptyStateLabel == nil {
+            let label = makeEmptyStateLabel(
+                title: "No AI Sandbox VM",
+                hint: "Use Tools → Create AI Sandbox VM…\nto build the base bundle (30–60 min).")
+            label.frame = NSRect(x: tableX, y: tableY,
+                                 width: tableWidth, height: tableHeight)
+            label.autoresizingMask = [.width, .height]
+            label.isHidden = true   // Standard tab is default
+            contentView.addSubview(label)
+            aiSandboxEmptyStateLabel = label
+        } else {
+            aiSandboxEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
+                                                    width: tableWidth, height: tableHeight)
+        }
 
-        for button in visibleButtons {
-            button.frame = NSRect(x: buttonX, y: padding, width: buttonWidth, height: 32)
-            button.autoresizingMask = [.minYMargin, .minXMargin, .maxXMargin]
+        // AI Sandbox outline view — same frame as the table scroll view but
+        // hidden until the AI Sandbox tab is selected. Created once; later
+        // tab switches just toggle .isHidden.
+        if aiSandboxOutlineScroll == nil {
+            buildAISandboxOutlineView(in: contentView, frame: NSRect(
+                x: tableX, y: tableY, width: tableWidth, height: tableHeight))
+        } else {
+            aiSandboxOutlineScroll?.frame = NSRect(
+                x: tableX, y: tableY, width: tableWidth, height: tableHeight)
+        }
+
+        // Selected-VM detail card — at-a-glance summary for the highlighted
+        // row. Sits between the table and the packet panel.
+        addSelectedVMDetailCard(in: contentView,
+                                frame: NSRect(x: detailCardX, y: detailCardY,
+                                              width: detailCardWidth,
+                                              height: detailCardHeight))
+
+        // Top toolbar — buttons aligned LEFT (not centered) so the primary
+        // action (Start) anchors visually at the left edge of the table,
+        // matching the mockup. Logical reading order: Start → New → Import
+        // → Configure → Clone → Rename → Delete. Delete is rightmost so the
+        // destructive button is visually distant from Start.
+        let buttons: [NSButton?] = [startButton, newButton, importButton,
+                                    configureButton, cloneButton,
+                                    renameButton, deleteButton]
+        let buttonWidth: CGFloat = 80
+        let buttonSpacing: CGFloat = 8
+        var buttonX = tableX
+        for button in buttons.compactMap({ $0 }) {
+            button.frame = NSRect(x: buttonX, y: toolbarY,
+                                  width: buttonWidth, height: buttonHeight)
+            // .minYMargin keeps the bottom margin flexible so the toolbar
+            // floats with the content-view top edge on resize. .maxXMargin
+            // keeps the toolbar left-anchored so the group doesn't drift.
+            button.autoresizingMask = [.minYMargin, .maxXMargin]
             buttonX += buttonWidth + buttonSpacing
         }
+    }
+
+    // MARK: - Selected VM Detail Card
+
+    /// Build the horizontal "selected VM" detail strip and add it to the
+    /// content view. Cells are laid out in a single row:
+    ///
+    ///   [● STATUS] · name · OS · CPU·RAM · Disk · Network mode · ↓/↑ rate
+    ///
+    /// Empty state (no selection) shows a single muted hint.
+    private func addSelectedVMDetailCard(in contentView: NSView, frame: NSRect) {
+        // Remove the old card if we're being re-laid-out (window resize, etc.)
+        selectedVMDetailCard?.removeFromSuperview()
+
+        let card = NSView(frame: frame)
+        card.wantsLayer = true
+        card.layer?.backgroundColor = AppColors.backgroundPanel.cgColor
+        card.layer?.borderColor = AppColors.borderOD.cgColor
+        card.layer?.borderWidth = LayoutConstants.borderHairline
+        card.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        // Stay anchored to a fixed bottom-Y (above the packet panel) and let
+        // only the width flex with window resize. Mirrors the packet-panel
+        // autoresize pattern so both elements move as a coherent unit.
+        card.autoresizingMask = [.width]
+
+        // Glow line along the top edge — visual cue that this card follows
+        // the table selection above it.
+        let glow = CAGradientLayer()
+        glow.frame = CGRect(x: 0, y: frame.height - 1, width: frame.width, height: 1)
+        glow.startPoint = CGPoint(x: 0, y: 0.5)
+        glow.endPoint = CGPoint(x: 1, y: 0.5)
+        glow.colors = [
+            NSColor.clear.cgColor,
+            AppColors.accentOD.cgColor,
+            NSColor.clear.cgColor
+        ]
+        glow.opacity = 0.5
+        card.layer?.addSublayer(glow)
+
+        // Cell layout — every value sits on the same baseline (`valueY`),
+        // every caption sits on `captionY` directly above it. Name + pill
+        // align with the value row so the card reads as a single horizontal
+        // band, not a misaligned grid.
+        let cellPadding: CGFloat = LayoutConstants.spacingLG  // 16pt edge padding
+        let valueY: CGFloat = 14         // bottom of the value text row
+        let valueH: CGFloat = 20
+        let captionY: CGFloat = 41       // bottom of the caption text row
+        let captionH: CGFloat = 12
+        let pillW: CGFloat = 84
+        let nameW: CGFloat = 180
+        let gapIdentity: CGFloat = LayoutConstants.spacingLG  // pill → name, name → metrics
+        let gapMetric: CGFloat = LayoutConstants.spacingMD    // between metric cells
+
+        var x: CGFloat = cellPadding
+
+        // ── STATUS pill ──────────────────────────────────────────────────
+        // Pill height 22 to give visible padding around 9pt label; centered
+        // on the value baseline.
+        let pillH: CGFloat = 22
+        let pill = makeStatusPill()
+        pill.frame = NSRect(x: x, y: valueY + (valueH - pillH) / 2, width: pillW, height: pillH)
+        pill.setAccessibilityLabel("Selected VM status")
+        card.addSubview(pill)
+        detailStatusPill = pill
+        x += pillW + LayoutConstants.spacingSM  // tight 8pt gap — pill + name read as a pair
+
+        // ── Name (monospace, prominent) ──────────────────────────────────
+        let nameLabel = NSTextField(labelWithString: "")
+        nameLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .semibold)
+        nameLabel.textColor = AppColors.textPrimary
+        nameLabel.frame = NSRect(x: x, y: valueY, width: nameW, height: valueH)
+        nameLabel.setAccessibilityLabel("Selected VM name")
+        card.addSubview(nameLabel)
+        detailNameLabel = nameLabel
+
+        // Vertical divider between "identity" (pill + name) and metrics — a
+        // 1pt vertical line in subtle OD, spanning roughly the value + caption
+        // rows so it visually frames the two-row metric grid.
+        let dividerX = x + nameW + LayoutConstants.spacingSM
+        let dividerYBottom = valueY - 4
+        let dividerYTop = captionY + captionH + 4
+        let divider = NSBox(frame: NSRect(x: dividerX,
+                                          y: dividerYBottom,
+                                          width: 1,
+                                          height: dividerYTop - dividerYBottom))
+        divider.boxType = .custom
+        divider.borderWidth = 0
+        divider.fillColor = AppColors.borderOD
+        card.addSubview(divider)
+        x = dividerX + 1 + gapIdentity
+
+        // ── OS / distro ──────────────────────────────────────────────────
+        let osLabel = makeMetricLabel(caption: "OS", x: x,
+                                      valueY: valueY, valueH: valueH,
+                                      captionY: captionY, captionH: captionH,
+                                      width: 130)
+        card.addSubview(osLabel.caption)
+        card.addSubview(osLabel.value)
+        detailOSLabel = osLabel.value
+        x += 130 + gapMetric
+
+        // ── CPU · RAM ────────────────────────────────────────────────────
+        let resourcesLabel = makeMetricLabel(caption: "CPU · RAM", x: x,
+                                             valueY: valueY, valueH: valueH,
+                                             captionY: captionY, captionH: captionH,
+                                             width: 100)
+        card.addSubview(resourcesLabel.caption)
+        card.addSubview(resourcesLabel.value)
+        detailResourcesLabel = resourcesLabel.value
+        x += 100 + gapMetric
+
+        // ── Disk ─────────────────────────────────────────────────────────
+        let diskLabel = makeMetricLabel(caption: "Disk", x: x,
+                                        valueY: valueY, valueH: valueH,
+                                        captionY: captionY, captionH: captionH,
+                                        width: 90)
+        card.addSubview(diskLabel.caption)
+        card.addSubview(diskLabel.value)
+        detailDiskLabel = diskLabel.value
+        x += 90 + gapMetric
+
+        // ── Network mode ─────────────────────────────────────────────────
+        let netModeLabel = makeMetricLabel(caption: "Network", x: x,
+                                           valueY: valueY, valueH: valueH,
+                                           captionY: captionY, captionH: captionH,
+                                           width: 80)
+        card.addSubview(netModeLabel.caption)
+        card.addSubview(netModeLabel.value)
+        detailNetworkModeLabel = netModeLabel.value
+        x += 80 + gapMetric
+
+        // ── Live rate ────────────────────────────────────────────────────
+        let netRateLabel = makeMetricLabel(caption: "↓ / ↑", x: x,
+                                           valueY: valueY, valueH: valueH,
+                                           captionY: captionY, captionH: captionH,
+                                           width: 130)
+        card.addSubview(netRateLabel.caption)
+        card.addSubview(netRateLabel.value)
+        detailNetworkRateLabel = netRateLabel.value
+
+        contentView.addSubview(card)
+        selectedVMDetailCard = card
+
+        // Populate with whatever the table currently has selected (if anything)
+        updateSelectedVMDetailCard()
+    }
+
+    /// Build a `[CAPTION / value]` pair stacked vertically, with explicit Y
+    /// positions for both rows so every cell across the card lines up.
+    private func makeMetricLabel(caption: String,
+                                 x: CGFloat,
+                                 valueY: CGFloat, valueH: CGFloat,
+                                 captionY: CGFloat, captionH: CGFloat,
+                                 width: CGFloat)
+        -> (caption: NSTextField, value: NSTextField)
+    {
+        let captionLabel = NSTextField(labelWithString: caption.uppercased())
+        captionLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .medium)
+        captionLabel.textColor = AppColors.textSubtle
+        captionLabel.frame = NSRect(x: x, y: captionY, width: width, height: captionH)
+        // Caption is decorative — the value label below carries the real
+        // information. Hide the caption from accessibility to avoid
+        // VoiceOver reading both "OS:" and the OS name redundantly.
+        captionLabel.setAccessibilityElement(false)
+
+        let valueLabel = NSTextField(labelWithString: "—")
+        valueLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+        valueLabel.textColor = AppColors.textLight
+        valueLabel.frame = NSRect(x: x, y: valueY, width: width, height: valueH)
+        valueLabel.lineBreakMode = .byTruncatingTail
+        // The value label is the focusable thing; label it with the
+        // caption so VoiceOver reads "OS, Kali 2024.1".
+        valueLabel.setAccessibilityLabel(caption)
+
+        return (captionLabel, valueLabel)
+    }
+
+    /// Status pill: pill-shaped label with a leading dot, color-coded by
+    /// `selectedVM` state. Background tinted with the same hue at 15% alpha.
+    private func makeStatusPill() -> NSTextField {
+        let pill = NSTextField(labelWithString: "—")
+        pill.alignment = .center
+        pill.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .semibold)
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = 10
+        pill.layer?.borderWidth = LayoutConstants.borderHairline
+        pill.drawsBackground = false
+        return pill
+    }
+
+    /// Refresh the detail card from `tableView`'s current selection. Called
+    /// whenever the selection changes or a VM's status changes.
+    private func updateSelectedVMDetailCard() {
+        guard selectedVMDetailCard != nil else { return }
+
+        // AI Sandbox tab pulls the row from the outline view, not the table.
+        if currentLibraryTab == .aiSandbox {
+            updateDetailCardForAISandbox(selectedNode: aiSandboxOutlineView.flatMap {
+                $0.item(atRow: $0.selectedRow) as? AISandboxNode
+            })
+            return
+        }
+
+        let selectedRow = tableView?.selectedRow ?? -1
+
+        let allVMs = vmManager.virtualMachines
+
+        guard selectedRow >= 0, selectedRow < allVMs.count else {
+            // Empty state — no VM picked
+            detailNameLabel?.stringValue = "No VM selected"
+            detailNameLabel?.textColor = AppColors.textMuted
+            detailStatusPill?.stringValue = ""
+            detailStatusPill?.layer?.backgroundColor = NSColor.clear.cgColor
+            detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
+            detailOSLabel?.stringValue = "—"
+            detailResourcesLabel?.stringValue = "—"
+            detailDiskLabel?.stringValue = "—"
+            detailNetworkModeLabel?.stringValue = "—"
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+            return
+        }
+
+        let vm = allVMs[selectedRow]
+
+        detailNameLabel?.stringValue = vm.name
+        detailNameLabel?.textColor = AppColors.textPrimary
+
+        // Status pill (uses VMStatus from VMConfiguration)
+        let (pillText, pillColor): (String, NSColor) = {
+            switch vm.status {
+            case .running:  return ("● RUNNING",  AppColors.statusRunning)
+            case .starting: return ("◐ STARTING", AppColors.statusPaused)
+            case .stopping: return ("◐ STOPPING", AppColors.statusPaused)
+            case .stopped:  return ("○ STOPPED",  AppColors.statusStopped)
+            }
+        }()
+        detailStatusPill?.stringValue = pillText
+        detailStatusPill?.textColor = pillColor
+        detailStatusPill?.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
+        detailStatusPill?.layer?.borderColor = pillColor.withAlphaComponent(0.45).cgColor
+
+        // OS / distro — Linux VMs show "Kali 2024.1" style, macOS shows "macOS 15"
+        if vm.osType == "Linux", let distro = vm.linuxDistribution {
+            if let version = vm.linuxVersion, !version.isEmpty {
+                detailOSLabel?.stringValue = "\(distro) \(version)"
+            } else {
+                detailOSLabel?.stringValue = distro
+            }
+        } else {
+            detailOSLabel?.stringValue = vm.osType
+        }
+
+        // CPU · RAM (memorySize is bytes; convert to GB)
+        let ramGB = Double(vm.memorySize) / 1_073_741_824.0
+        detailResourcesLabel?.stringValue = String(format: "%d · %.1f GB", vm.cpuCount, ramGB)
+
+        // Disk — show "used / total". `onDiskBundleSize` returns the cached
+        // value immediately and kicks a background re-scan if stale; the
+        // detail card refreshes via `.vmBundleSizeUpdated` notification when
+        // a fresh measurement lands. Until first measurement returns, fall
+        // back to "— / total".
+        let diskGB = Double(vm.diskSize) / 1_073_741_824.0
+        if let usedBytes = vmManager.onDiskBundleSize(for: vm) {
+            let usedGB = Double(usedBytes) / 1_073_741_824.0
+            detailDiskLabel?.stringValue = String(format: "%.1f / %.0f GB", usedGB, diskGB)
+        } else {
+            detailDiskLabel?.stringValue = String(format: "— / %.0f GB", diskGB)
+        }
+
+        // Network mode (color-coded by safety)
+        switch vm.networkConfig.mode {
+        case .nat:
+            detailNetworkModeLabel?.stringValue = "NAT"
+            detailNetworkModeLabel?.textColor = AppColors.networkNAT
+        case .virtual:
+            detailNetworkModeLabel?.stringValue = vm.networkConfig.isRouter ? "ROUTER" : "VIRTUAL"
+            detailNetworkModeLabel?.textColor = AppColors.networkIsolated
+        }
+
+        // Live rate ↓/↑ — sampled from VirtualNetworkSwitch per-port byte
+        // counters on a 1.5s cadence. Only VMs connected to the virtual
+        // switch (Virtual / Router modes) get a real rate; NAT-mode VMs
+        // route through the host stack which the switch never sees, so
+        // their rate cell explicitly says so instead of leaving a blank
+        // dash that reads as "data missing".
+        if vm.status == .running {
+            switch vm.networkConfig.mode {
+            case .virtual:
+                let rate = liveRateBps[vm.name]
+                let down = rate?.down ?? 0
+                let up = rate?.up ?? 0
+                let downStr = ByteCountFormatter.string(fromByteCount: Int64(down), countStyle: .binary)
+                let upStr = ByteCountFormatter.string(fromByteCount: Int64(up), countStyle: .binary)
+                detailNetworkRateLabel?.stringValue = "\(downStr)/s ↓  \(upStr)/s ↑"
+                // Tint hot only when there's actual traffic — keeps the cell
+                // visually quiet for idle VMs.
+                let hot = (down + up) > 1024  // anything above ~1 KiB/s reads as live
+                detailNetworkRateLabel?.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+                detailNetworkRateLabel?.toolTip = "Sampled every 1.5s from the virtual switch port counters."
+            case .nat:
+                detailNetworkRateLabel?.stringValue = "host-routed"
+                detailNetworkRateLabel?.textColor = AppColors.textMuted
+                detailNetworkRateLabel?.toolTip = "NAT-mode VMs route through the host's network stack — per-VM byte counters aren't surfaced through Apple's Virtualization framework."
+            }
+        } else {
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+            detailNetworkRateLabel?.toolTip = nil
+        }
+    }
+
+    /// Poll the VirtualNetworkSwitch port stats and turn cumulative byte
+    /// counters into a moving bytes/sec rate per VM. Called on a 1.5s timer
+    /// from `windowDidLoad`. Skips entirely when the switch isn't running.
+    private func sampleLiveNetworkRates() {
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+        guard let isRunning = stats["running"] as? Bool, isRunning,
+              let portStats = stats["ports"] as? [[String: Any]] else {
+            // Decay all live rates when the switch isn't running so stale
+            // numbers don't linger.
+            if !liveRateBps.isEmpty { liveRateBps.removeAll() }
+            return
+        }
+
+        let now = Date()
+        for port in portStats {
+            guard let name = port["vmName"] as? String,
+                  let rxAny = port["bytesRx"], let txAny = port["bytesTx"] else { continue }
+            // Counters can come back as Int / UInt64 / NSNumber depending on
+            // how the dict was serialised — normalize through NSNumber.
+            let rx = (rxAny as? NSNumber)?.uint64Value ?? 0
+            let tx = (txAny as? NSNumber)?.uint64Value ?? 0
+
+            if let prev = lastNetSample[name] {
+                let dt = now.timeIntervalSince(prev.ts)
+                guard dt > 0.001 else { continue }  // avoid div-by-zero on rapid ticks
+                // Defend against UInt64 wraparound — if counters went backwards
+                // (e.g., port re-attached and reset), drop the sample.
+                let dRx = rx >= prev.bytesRx ? Double(rx - prev.bytesRx) : 0
+                let dTx = tx >= prev.bytesTx ? Double(tx - prev.bytesTx) : 0
+                let down = dRx / dt
+                let up = dTx / dt
+                liveRateBps[name] = (down: down, up: up)
+                appendTrafficSample(down + up, for: name)
+            }
+            lastNetSample[name] = NetSample(bytesRx: rx, bytesTx: tx, ts: now)
+        }
+
+        // Refresh the detail card if the selected VM has a live rate.
+        // Cheap to call — most cells short-circuit when the selection
+        // hasn't changed.
+        if currentLibraryTab == .standard {
+            updateSelectedVMDetailCard()
+            // Update only the Traffic column to keep the sparklines fresh
+            // without re-rendering every cell on every tick.
+            refreshTrafficColumn()
+        }
+    }
+
+    /// Append a (down + up) bytes/sec sample to the rolling buffer for `vmName`,
+    /// trimming to `maxTrafficSamples` length.
+    private func appendTrafficSample(_ value: Double, for vmName: String) {
+        var buffer = trafficSamples[vmName] ?? []
+        buffer.append(value)
+        let cap = Self.maxTrafficSamples
+        if buffer.count > cap {
+            buffer.removeFirst(buffer.count - cap)
+        }
+        trafficSamples[vmName] = buffer
+    }
+
+    /// Repaint the Traffic column for every row. Cheap — each cell already
+    /// holds a SparklineView, we just push fresh samples into it.
+    private func refreshTrafficColumn() {
+        guard let tableView = tableView else { return }
+        guard let colIdx = tableView.tableColumns.firstIndex(where: {
+            $0.identifier.rawValue == "TrafficColumn"
+        }) else { return }
+        let rowRange = 0..<tableView.numberOfRows
+        for row in rowRange {
+            guard let cell = tableView.view(atColumn: colIdx, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let spark = cell.subviews.first(where: { $0 is SparklineView }) as? SparklineView else {
+                continue
+            }
+            let vmName = vmManager.virtualMachines.indices.contains(row)
+                ? vmManager.virtualMachines[row].name : ""
+            spark.samples = trafficSamples[vmName] ?? []
+        }
+    }
+
+    /// Repaint the detail card from the currently-selected AI Sandbox
+    /// outline node. AI Sandbox VMs have a fixed shape (macOS, isolated,
+    /// 4 vCPU / 8 GB RAM via AISandboxDefaults), so several cells are
+    /// constant.
+    private func updateDetailCardForAISandbox(selectedNode: AISandboxNode?) {
+        guard let node = selectedNode else {
+            detailNameLabel?.stringValue = aiSandboxBundles.isEmpty ?
+                "No AI Sandbox bundles" : "No bundle selected"
+            detailNameLabel?.textColor = AppColors.textMuted
+            detailStatusPill?.stringValue = ""
+            detailStatusPill?.layer?.backgroundColor = NSColor.clear.cgColor
+            detailStatusPill?.layer?.borderColor = NSColor.clear.cgColor
+            detailOSLabel?.stringValue = "—"
+            detailResourcesLabel?.stringValue = "—"
+            detailDiskLabel?.stringValue = "—"
+            detailNetworkModeLabel?.stringValue = "—"
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+            return
+        }
+
+        let bundle = node.bundle
+
+        detailNameLabel?.stringValue = bundle.displayName
+        detailNameLabel?.textColor = AppColors.textPrimary
+
+        let (pillText, pillColor): (String, NSColor) = bundle.isBase
+            ? ("◆ TEMPLATE", AppColors.accentOrange)
+            : ("● SESSION",  AppColors.statusRunning)
+        detailStatusPill?.stringValue = pillText
+        detailStatusPill?.textColor = pillColor
+        detailStatusPill?.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
+        detailStatusPill?.layer?.borderColor = pillColor.withAlphaComponent(0.45).cgColor
+
+        detailOSLabel?.stringValue = "macOS"
+        detailResourcesLabel?.stringValue = "4 · 8 GB"
+        detailDiskLabel?.stringValue = ByteCountFormatter.string(
+            fromByteCount: bundle.diskBytes, countStyle: .binary)
+
+        detailNetworkModeLabel?.stringValue = "ISOLATED"
+        detailNetworkModeLabel?.textColor = AppColors.networkIsolated
+
+        if let created = bundle.createdAt {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            detailNetworkRateLabel?.stringValue = formatter.string(from: created)
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+        } else {
+            detailNetworkRateLabel?.stringValue = "—"
+            detailNetworkRateLabel?.textColor = AppColors.textMuted
+        }
+    }
+
+    /// Build a centered "empty state" label with a title + hint line.
+    /// Title is mono-medium textPrimary; hint is system-light textMuted.
+    /// Used for the Standard / AI Sandbox tabs when the underlying data
+    /// source is empty.
+    private func makeEmptyStateLabel(title: String, hint: String) -> NSTextField {
+        let label = NSTextField()
+        label.isBordered = false
+        label.isEditable = false
+        label.drawsBackground = false
+        label.alignment = .center
+        label.usesSingleLineMode = false
+        label.maximumNumberOfLines = 4
+        label.lineBreakMode = .byWordWrapping
+
+        let para = NSMutableParagraphStyle()
+        para.alignment = .center
+        para.lineSpacing = 4
+
+        let attr = NSMutableAttributedString()
+        attr.append(NSAttributedString(string: title, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle,
+                                               weight: .semibold),
+            .foregroundColor: AppColors.textPrimary,
+            .paragraphStyle: para
+        ]))
+        attr.append(NSAttributedString(string: "\n\n" + hint, attributes: [
+            .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular),
+            .foregroundColor: AppColors.textMuted,
+            .paragraphStyle: para
+        ]))
+        label.attributedStringValue = attr
+        return label
+    }
+
+    /// Refresh empty-state overlay visibility from the current data sources.
+    /// Called whenever rows are added / removed / on tab switch.
+    private func refreshEmptyStateOverlays() {
+        let isStandard = (currentLibraryTab == .standard)
+
+        // Standard tab: visible only when standard tab is active AND there
+        // are no VMs at all.
+        let showStandard = isStandard && vmManager.virtualMachines.isEmpty
+        standardEmptyStateLabel?.isHidden = !showStandard
+
+        // AI Sandbox tab: visible only when the AI tab is active AND there's
+        // no base bundle (sessions can't exist without a base).
+        let showSandbox = !isStandard && (aiSandboxRootNode == nil)
+        aiSandboxEmptyStateLabel?.isHidden = !showSandbox
+    }
+
+    // MARK: - Library Tabs (Standard / AI Sandbox)
+
+    /// Build the [Standard VMs] / [AI Sandbox] segmented header plus the
+    /// recovery-mode checkbox that's only visible when the AI Sandbox tab
+    /// is selected.
+    private func addLibraryTabsHeader(in contentView: NSView, frame: NSRect) {
+        libraryTabControl?.removeFromSuperview()
+        recoveryModeCheckbox?.removeFromSuperview()
+
+        let tabs = NSSegmentedControl(labels: ["Standard VMs", "AI Sandbox"],
+                                      trackingMode: .selectOne,
+                                      target: self,
+                                      action: #selector(libraryTabChanged(_:)))
+        tabs.frame = NSRect(x: frame.origin.x, y: frame.origin.y,
+                            width: 240, height: frame.height)
+        tabs.selectedSegment = currentLibraryTab.rawValue
+        Self.applyTacticalStyle(to: tabs)
+        tabs.autoresizingMask = [.minYMargin]  // stick to top of content view
+        tabs.setAccessibilityLabel("Library view")
+        tabs.toolTip = "Switch between standard VMs and the AI Sandbox tree view"
+        contentView.addSubview(tabs)
+        libraryTabControl = tabs
+
+        // Recovery-mode checkbox — toggling this changes the boot path for
+        // an AI Sandbox session VM. Hidden in the Standard tab so it never
+        // confuses users browsing their regular VMs.
+        let check = NSButton(checkboxWithTitle: "Boot in Recovery Mode",
+                             target: self,
+                             action: #selector(recoveryModeToggled(_:)))
+        check.frame = NSRect(x: frame.origin.x + 240 + LayoutConstants.spacingLG,
+                             y: frame.origin.y + (frame.height - 20) / 2,
+                             width: 200,
+                             height: 20)
+        check.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody)
+        check.toolTip = "When checked, AI Sandbox sessions boot into macOS Recovery instead of normal startup. Useful for disk repair or reinstalling macOS inside the sandbox."
+        check.state = .off
+        check.isHidden = (currentLibraryTab != .aiSandbox)
+        check.autoresizingMask = [.minYMargin]
+        contentView.addSubview(check)
+        recoveryModeCheckbox = check
+    }
+
+    @objc private func libraryTabChanged(_ sender: NSSegmentedControl) {
+        guard let newTab = LibraryTab(rawValue: sender.selectedSegment) else { return }
+        currentLibraryTab = newTab
+
+        // Toggle the recovery checkbox visibility
+        recoveryModeCheckbox?.isHidden = (newTab != .aiSandbox)
+
+        // Show the outline view in the AI Sandbox tab; keep the standard
+        // NSTableView for the Standard tab. They share the same frame.
+        let showOutline = (newTab == .aiSandbox)
+        tableView?.enclosingScrollView?.isHidden = showOutline
+        aiSandboxOutlineScroll?.isHidden = !showOutline
+
+        if showOutline {
+            aiSandboxBundles = scanAISandboxBundles()
+            rebuildAISandboxNodeTree()
+        }
+        tableView?.reloadData()
+        updateButtonStates()
+        updateSelectedVMDetailCard()
+        refreshEmptyStateOverlays()
+    }
+
+    @objc private func recoveryModeToggled(_ sender: NSButton) {
+        // State is read at Start-button click time; nothing to do here
+        // besides log so the user gets feedback the toggle took.
+        NSLog("[Library] Recovery mode toggle → %@", sender.state == .on ? "ON" : "OFF")
+    }
+
+    // MARK: AI Sandbox outline view
+
+    /// Build the NSOutlineView used by the AI Sandbox tab. Columns mirror
+    /// the standard table's set (Name, Status, OS, CPU, Memory, Disk,
+    /// LastUsed) so the visual rhythm stays consistent on tab swap. The
+    /// first column gets the disclosure triangle.
+    private func buildAISandboxOutlineView(in contentView: NSView, frame: NSRect) {
+        let scroll = NSScrollView(frame: frame)
+        scroll.autoresizingMask = [.width, .height]
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.borderType = .noBorder
+        scroll.wantsLayer = true
+        scroll.layer?.borderWidth = LayoutConstants.borderHairline
+        scroll.layer?.borderColor = AppColors.borderCyanEmphasis.cgColor
+        scroll.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        scroll.backgroundColor = AppColors.backgroundSecondary
+        scroll.drawsBackground = true
+        scroll.isHidden = true   // Standard tab is default; reveal on switch
+
+        let outline = NSOutlineView()
+        outline.headerView = NSTableHeaderView()
+        outline.allowsMultipleSelection = false
+        outline.allowsEmptySelection = true
+        outline.usesAlternatingRowBackgroundColors = false
+        outline.backgroundColor = AppColors.backgroundSecondary
+        outline.gridColor = AppColors.borderOD
+        outline.gridStyleMask = []
+        outline.style = .plain
+        outline.rowSizeStyle = .default
+        outline.indentationPerLevel = 16
+        outline.dataSource = self
+        outline.delegate = self
+        outline.target = self
+        outline.doubleAction = #selector(startVM(_:))
+
+        // Columns — same identifiers as the XIB so cell-render code can be
+        // shared (we still branch by `currentLibraryTab`).
+        let columnSpecs: [(id: String, title: String, width: CGFloat)] = [
+            ("NameColumn",    "Name",      220),
+            ("StatusColumn",  "Status",     90),
+            ("OSColumn",      "OS",         90),
+            ("CPUColumn",     "Session ID", 110),
+            ("MemoryColumn",  "Memory",     80),
+            ("DiskColumn",    "Disk",      100),
+            ("LastUsedColumn","Created",   140),
+        ]
+        for spec in columnSpecs {
+            let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(spec.id))
+            col.title = spec.title
+            col.width = spec.width
+            col.minWidth = 60
+            outline.addTableColumn(col)
+        }
+        outline.outlineTableColumn = outline.tableColumns.first  // Name column gets the disclosure ▶
+
+        scroll.documentView = outline
+        contentView.addSubview(scroll)
+        aiSandboxOutlineScroll = scroll
+        aiSandboxOutlineView = outline
+    }
+
+    /// Rebuild the node tree from `aiSandboxBundles`, reload the outline,
+    /// auto-expand the base node.
+    private func rebuildAISandboxNodeTree() {
+        guard let baseRow = aiSandboxBundles.first(where: { $0.isBase }) else {
+            aiSandboxRootNode = nil
+            aiSandboxOutlineView?.reloadData()
+            return
+        }
+        let sessionRows = aiSandboxBundles.filter { !$0.isBase }
+        let sessionNodes = sessionRows.map { AISandboxNode(bundle: $0, children: nil) }
+        aiSandboxRootNode = AISandboxNode(bundle: baseRow, children: sessionNodes)
+        aiSandboxOutlineView?.reloadData()
+        if let root = aiSandboxRootNode {
+            aiSandboxOutlineView?.expandItem(root)
+        }
+    }
+
+    /// Find the most-recently-created session node, or nil if there are no
+    /// session children. Used by Start-on-base routing.
+    private func latestAISandboxSessionNode() -> AISandboxNode? {
+        guard let children = aiSandboxRootNode?.children, !children.isEmpty else { return nil }
+        return children.max(by: { ($0.bundle.createdAt ?? .distantPast) < ($1.bundle.createdAt ?? .distantPast) })
+    }
+
+    /// Scan `~/.avf/AISandbox/` for bundle directories. Returns a list of
+    /// rows ordered: base first (if present), then sessions sorted by
+    /// creation time descending (newest first).
+    private func scanAISandboxBundles() -> [AISandboxBundleRow] {
+        let fm = FileManager.default
+        let aiRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".avf/AISandbox")
+        var rows: [AISandboxBundleRow] = []
+
+        // Base bundle (one only)
+        let baseURL = aiRoot.appendingPathComponent("ai-sandbox-base-v1.bundle")
+        if fm.fileExists(atPath: baseURL.path) {
+            rows.append(makeBundleRow(url: baseURL, isBase: true))
+        }
+
+        // Sessions (zero or more)
+        let sessionsURL = aiRoot.appendingPathComponent("sessions")
+        if let contents = try? fm.contentsOfDirectory(at: sessionsURL,
+                                                     includingPropertiesForKeys: [.creationDateKey],
+                                                     options: [.skipsHiddenFiles]) {
+            let sessionRows = contents
+                .filter { $0.pathExtension == "bundle" }
+                .map { makeBundleRow(url: $0, isBase: false) }
+                .sorted { ($0.createdAt ?? .distantPast) > ($1.createdAt ?? .distantPast) }
+            rows.append(contentsOf: sessionRows)
+        }
+
+        return rows
+    }
+
+    private func makeBundleRow(url: URL, isBase: Bool) -> AISandboxBundleRow {
+        let fm = FileManager.default
+        let manifestURL = url.appendingPathComponent("manifest.json")
+        var name: String?
+        var id: UUID?
+        if let data = try? Data(contentsOf: manifestURL),
+           let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            name = dict["name"] as? String
+            if let s = dict["id"] as? String { id = UUID(uuidString: s) }
+        }
+        let display: String = {
+            if isBase { return name ?? "ai-sandbox-base" }
+            return name ?? url.deletingPathExtension().lastPathComponent
+        }()
+
+        let createdAt = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+        let diskURL = url.appendingPathComponent("disk.img")
+        let diskBytes: Int64 = {
+            guard let attr = try? fm.attributesOfItem(atPath: diskURL.path),
+                  let size = attr[.size] as? NSNumber else { return 0 }
+            return size.int64Value
+        }()
+
+        return AISandboxBundleRow(url: url, displayName: display,
+                                  isBase: isBase, id: id,
+                                  createdAt: createdAt, diskBytes: diskBytes)
+    }
+
+    // MARK: - Bottom status bar
+
+    /// Slim 24pt status strip pinned to the bottom of the content view.
+    /// Shows: pulse-dot + running VM count · switch state · capture state ·
+    /// disk free · build. Updated on a 1s timer.
+    private func addBottomStatusBar() {
+        guard let contentView = window?.contentView else { return }
+
+        let padding: CGFloat = 15
+        let height: CGFloat = 24
+        let width = contentView.bounds.width
+
+        let bar = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = AppColors.backgroundTertiary.cgColor
+        bar.autoresizingMask = [.width, .maxYMargin]
+        bottomStatusBar = bar
+
+        // Hairline OD divider along the top edge — signals "bar is part of
+        // the chrome, not floating".
+        let topDivider = CALayer()
+        topDivider.frame = CGRect(x: 0, y: height - 1, width: width, height: 1)
+        topDivider.backgroundColor = AppColors.borderOD.cgColor
+        topDivider.autoresizingMask = [.layerWidthSizable]
+        bar.layer?.addSublayer(topDivider)
+
+        // Live pulse dot — same idiom as the mockup's status bar
+        let dot = CAShapeLayer()
+        let dotSize: CGFloat = 8
+        dot.path = CGPath(ellipseIn: CGRect(x: 0, y: 0, width: dotSize, height: dotSize), transform: nil)
+        dot.fillColor = AppColors.statusRunning.cgColor
+        dot.shadowColor = AppColors.statusRunning.cgColor
+        dot.shadowOpacity = 0.8
+        dot.shadowRadius = 4
+        dot.shadowOffset = .zero
+        dot.frame = CGRect(x: padding, y: (height - dotSize) / 2, width: dotSize, height: dotSize)
+        bar.layer?.addSublayer(dot)
+        statusBarPulseDot = dot
+        // Subtle pulse animation so the dot reads as "live"
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1.0
+        pulse.toValue = 0.45
+        pulse.duration = 1.4
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        dot.add(pulse, forKey: "pulse")
+
+        // Three label segments left-to-right + a right-anchored disk/version
+        var x = padding + dotSize + LayoutConstants.spacingSM
+
+        statusBarRunningLabel = makeStatusBarLabel(text: "—", x: x, width: 140, height: height, alignment: .left)
+        statusBarRunningLabel?.setAccessibilityLabel("Running VM count")
+        bar.addSubview(statusBarRunningLabel!)
+        x += 140 + LayoutConstants.spacingLG
+
+        statusBarSwitchLabel = makeStatusBarLabel(text: "—", x: x, width: 200, height: height, alignment: .left)
+        statusBarSwitchLabel?.setAccessibilityLabel("Virtual switch state")
+        bar.addSubview(statusBarSwitchLabel!)
+        x += 200 + LayoutConstants.spacingLG
+
+        statusBarNATLabel = makeStatusBarLabel(text: "", x: x, width: 170, height: height, alignment: .left)
+        statusBarNATLabel?.toolTip = "Aggregate bytes/sec across all VZ NAT bridge interfaces. Apple's Virtualization framework doesn't expose per-VM counters in NAT mode — this is the combined total."
+        statusBarNATLabel?.setAccessibilityLabel("Aggregate NAT bridge bytes per second")
+        bar.addSubview(statusBarNATLabel!)
+        x += 170 + LayoutConstants.spacingLG
+
+        statusBarCaptureLabel = makeStatusBarLabel(text: "—", x: x, width: 160, height: height, alignment: .left)
+        statusBarCaptureLabel?.setAccessibilityLabel("Packet capture state")
+        bar.addSubview(statusBarCaptureLabel!)
+
+        // Right-anchored: disk free + build. Single label, autoresizes off
+        // the right edge of the bar.
+        let rightW: CGFloat = 280
+        statusBarDiskLabel = makeStatusBarLabel(text: "—",
+                                                x: width - rightW - padding,
+                                                width: rightW, height: height,
+                                                alignment: .right)
+        statusBarDiskLabel?.autoresizingMask = [.minXMargin]
+        statusBarDiskLabel?.setAccessibilityLabel("Disk free and build version")
+        bar.addSubview(statusBarDiskLabel!)
+
+        contentView.addSubview(bar)
+
+        // Initial fill + 1s refresh
+        refreshBottomStatusBar()
+        statusBarRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshBottomStatusBar() }
+        }
+    }
+
+    private func makeStatusBarLabel(text: String, x: CGFloat, width: CGFloat,
+                                    height: CGFloat, alignment: NSTextAlignment) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.frame = NSRect(x: x, y: (height - 14) / 2, width: width, height: 14)
+        label.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSmall, weight: .regular)
+        label.textColor = AppColors.textMuted
+        label.alignment = alignment
+        label.isBordered = false
+        label.drawsBackground = false
+        label.isEditable = false
+        return label
+    }
+
+    /// Pull current state from the singletons and repaint the labels.
+    /// Cheap — just string interpolation + a single ByteCountFormatter call.
+    private func refreshBottomStatusBar() {
+        guard bottomStatusBar != nil else { return }
+
+        // Running / total VMs
+        let runningCount = vmManager.getRunningVMsCount()
+        let totalCount = vmManager.virtualMachines.count
+        statusBarRunningLabel?.stringValue = "\(runningCount) of \(totalCount) running"
+        statusBarPulseDot?.fillColor = (runningCount > 0
+            ? AppColors.statusRunning : AppColors.statusStopped).cgColor
+
+        // Switch state
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+        let switchOn = (stats["running"] as? Bool) ?? false
+        let ports = (stats["connectedPorts"] as? Int) ?? 0
+        let fwd = (stats["packetsForwarded"] as? UInt64).map { Int($0) } ?? 0
+        statusBarSwitchLabel?.stringValue = switchOn
+            ? "Switch · \(ports) ports · \(formatCount(fwd)) pkts"
+            : "Switch · idle"
+        statusBarSwitchLabel?.textColor = switchOn ? AppColors.textOD : AppColors.textMuted
+
+        // NAT bridge bytes/sec — aggregate across all VZ NAT bridge
+        // interfaces (vmenet*, bridge1*). Hidden when no bridge interface
+        // exists on the system (no NAT VM has ever booted in this session).
+        let currentNATSample = BridgeInterfaceStats.sample()
+        let natRate = BridgeInterfaceStats.rate(from: statusBarPreviousNATSample,
+                                                to: currentNATSample)
+        statusBarPreviousNATSample = currentNATSample
+        if currentNATSample == nil {
+            statusBarNATLabel?.stringValue = ""
+        } else if let rate = natRate {
+            let down = ByteCountFormatter.string(fromByteCount: Int64(rate.down), countStyle: .binary)
+            let up   = ByteCountFormatter.string(fromByteCount: Int64(rate.up),   countStyle: .binary)
+            statusBarNATLabel?.stringValue = "NAT · \(down)/s ↓ \(up)/s ↑"
+            let hot = (rate.down + rate.up) > 1024
+            statusBarNATLabel?.textColor = hot ? AppColors.accentOrangeHot : AppColors.textMuted
+        } else {
+            // First sample after launch — no delta yet
+            statusBarNATLabel?.stringValue = "NAT · sampling…"
+            statusBarNATLabel?.textColor = AppColors.textMuted
+        }
+
+        // Capture / install state — the capture cell triple-roles:
+        //   1. While an AI Sandbox install is in flight (build / provision /
+        //      seal), show the phase + magenta tint so the user knows
+        //      something significant is happening.
+        //   2. Else if packet capture is running, show packet count in
+        //      hot-orange.
+        //   3. Else show "Capture · idle" in muted text.
+        let installPhase = AISandboxInstallTracker.shared.phase
+        let installInProgress: Bool = {
+            switch installPhase {
+            case .installing, .provisioning, .sealing: return true
+            default: return false
+            }
+        }()
+        if installInProgress {
+            statusBarCaptureLabel?.stringValue = "AI Sandbox · \(installPhase.humanLabel)"
+            statusBarCaptureLabel?.textColor = AppColors.accentMagenta
+        } else {
+            let capturing = PacketCaptureManager.shared.isCapturing
+            let totalPackets = PacketCaptureManager.shared.totalPacketCount
+            statusBarCaptureLabel?.stringValue = capturing
+                ? "Capture · \(formatCount(totalPackets)) pkts"
+                : "Capture · idle"
+            statusBarCaptureLabel?.textColor = capturing ? AppColors.accentOrangeHot : AppColors.textMuted
+        }
+
+        // Disk free + version
+        var diskStr = "—"
+        let homeURL = FileManager.default.homeDirectoryForCurrentUser
+        if let values = try? homeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+           let bytes = values.volumeAvailableCapacityForImportantUsage {
+            diskStr = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .binary)
+        }
+        let version = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
+        let build = (Bundle.main.infoDictionary?["CFBundleVersion"] as? String) ?? "?"
+        statusBarDiskLabel?.stringValue = "~/.avf · \(diskStr) free  ·  v\(version) (\(build))"
+    }
+
+    private func formatCount(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        let formatter = NumberFormatter()
+        formatter.groupingSeparator = ","
+        formatter.numberStyle = .decimal
+        return formatter.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 
     private func addStatusBar() {
         guard let window = window, let contentView = window.contentView else { return }
 
+        // Right-side "Active VMs / Tasks" panel and the protocol legend
+        // panel were removed in the mockup-driven cleanup so the VM table +
+        // detail card + packet panel can fill the full width. The packet
+        // flow eyecandy (NetworkTrafficView) lived in the Active VMs panel
+        // and is intentionally not relocated here — a falling-packet
+        // animation across each VM row is planned as a follow-up.
         let sidebarWidth: CGFloat = 220
-        let activePanelWidth: CGFloat = 220
-        let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
         let packetPanelHeight: CGFloat = 180
+        let bottomStatusBarHeight: CGFloat = 24
 
         let contentWidth = contentView.bounds.width
-        let contentHeight = contentView.bounds.height
 
         // ═══════════════════════════════════════════════════════════════
-        // ACTIVE VMs PANEL (Right side - same height as VM table)
+        // (removed: ACTIVE VMs PANEL — right-side panel + VMs/Tasks tabs)
         // ═══════════════════════════════════════════════════════════════
-        let activePanelX = contentWidth - activePanelWidth - padding
-        let activePanelY = buttonRowHeight + padding + packetPanelHeight + padding  // Same as table Y
-        let activePanelHeight = contentHeight - activePanelY - padding
-
-        let runningVMsPanel = NSView(frame: NSRect(x: activePanelX, y: activePanelY, width: activePanelWidth, height: activePanelHeight))
-        runningVMsPanel.wantsLayer = true
-        runningVMsPanel.autoresizingMask = [.minXMargin, .height]
-
-        // Dark background with cyan border
-        runningVMsPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
-        runningVMsPanel.layer?.cornerRadius = 8
-        runningVMsPanel.layer?.borderWidth = 1
-        runningVMsPanel.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
-
-        // Panel title
-        let titleLabel = NSTextField(labelWithString: "● ACTIVE VMs")
-        titleLabel.frame = NSRect(x: 12, y: activePanelHeight - 28, width: activePanelWidth - 24, height: 20)
-        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .bold)
-        titleLabel.textColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)
-        titleLabel.autoresizingMask = [.minYMargin]
-        runningVMsPanel.addSubview(titleLabel)
-        statusLabel = titleLabel
-
-        // VMs / Tasks tab control
-        let tabCtrl = NSSegmentedControl(
-            labels: ["VMs", "Tasks"],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(rightPanelTabChanged(_:))
-        )
-        tabCtrl.frame = NSRect(x: 8, y: activePanelHeight - 56, width: activePanelWidth - 16, height: 22)
-        tabCtrl.selectedSegment = 0
-        tabCtrl.segmentStyle = .texturedSquare
-        tabCtrl.autoresizingMask = [.minYMargin]
-        runningVMsPanel.addSubview(tabCtrl)
-        rightPanelTabControl = tabCtrl
-
-        // Content area height (below tab control)
-        let contentH = activePanelHeight - 64
-
-        // ── VMs tab content ───────────────────────────────────────────────────
-        let vmsContent = NSView(frame: NSRect(x: 0, y: 0, width: activePanelWidth, height: contentH))
-        vmsContent.autoresizingMask = [.height]
-        runningVMsPanel.addSubview(vmsContent)
-        vmsTabContent = vmsContent
-
-        let scrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: contentH - 10))
-        scrollView.autoresizingMask = [.height]
-        scrollView.hasHorizontalScroller = false
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-
-        let stackView = NSStackView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: contentH - 10))
-        stackView.orientation = .vertical
-        stackView.spacing = 10
-        stackView.alignment = .centerX
-        stackView.distribution = .gravityAreas
-        stackView.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
-
-        scrollView.documentView = stackView
-        vmsContent.addSubview(scrollView)
-        runningVMsContainer = stackView
-
-        let placeholder = NSTextField(labelWithString: "No active VMs.\n\nSelect a VM and\nclick Start.")
-        placeholder.frame = NSRect(x: 12, y: contentH / 2 - 30, width: activePanelWidth - 24, height: 60)
-        placeholder.font = NSFont.systemFont(ofSize: 10)
-        placeholder.textColor = NSColor(white: 0.45, alpha: 1.0)
-        placeholder.alignment = .center
-        placeholder.isEditable = false
-        placeholder.isBordered = false
-        placeholder.drawsBackground = false
-        placeholder.maximumNumberOfLines = 0
-        placeholder.autoresizingMask = [.minYMargin, .maxYMargin]
-        vmsContent.addSubview(placeholder)
-        vmsPlaceholderLabel = placeholder
-
-        // ── Tasks tab content (hidden initially) ──────────────────────────────
-        let tasksContent = NSView(frame: NSRect(x: 0, y: 0, width: activePanelWidth, height: contentH))
-        tasksContent.autoresizingMask = [.height]
-        tasksContent.isHidden = true
-        runningVMsPanel.addSubview(tasksContent)
-        tasksTabContent = tasksContent
-
-        let taskStatusLbl = NSTextField(labelWithString: "No tasks running.")
-        taskStatusLbl.frame = NSRect(x: 8, y: contentH - 20, width: activePanelWidth - 16, height: 16)
-        taskStatusLbl.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        taskStatusLbl.textColor = NSColor(white: 0.5, alpha: 1.0)
-        taskStatusLbl.lineBreakMode = .byTruncatingTail
-        taskStatusLbl.autoresizingMask = [.minYMargin]
-        tasksContent.addSubview(taskStatusLbl)
-        tasksStatusLabel = taskStatusLbl
-
-        let taskProgress = NSProgressIndicator(frame: NSRect(x: 8, y: contentH - 36, width: activePanelWidth - 16, height: 8))
-        taskProgress.style = .bar
-        taskProgress.controlSize = .small
-        taskProgress.minValue = 0
-        taskProgress.maxValue = 1
-        taskProgress.isHidden = true
-        taskProgress.autoresizingMask = [.minYMargin]
-        tasksContent.addSubview(taskProgress)
-        tasksProgressBar = taskProgress
-
-        let logScrollView = NSScrollView(frame: NSRect(x: 8, y: 8, width: activePanelWidth - 16, height: contentH - 48))
-        logScrollView.hasVerticalScroller = true
-        logScrollView.autohidesScrollers = true
-        logScrollView.drawsBackground = false
-        logScrollView.borderType = .noBorder
-        logScrollView.autoresizingMask = [.height]
-
-        let logText = NSTextView(frame: NSRect(x: 0, y: 0, width: activePanelWidth - 16, height: contentH - 48))
-        logText.isEditable = false
-        logText.drawsBackground = false
-        logText.textColor = NSColor(white: 0.7, alpha: 1.0)
-        logText.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
-        logText.autoresizingMask = [.width, .height]
-        logScrollView.documentView = logText
-        tasksContent.addSubview(logScrollView)
-        tasksLogTextView = logText
-
-        contentView.addSubview(runningVMsPanel)
-        statusBar = runningVMsPanel
-
         // ═══════════════════════════════════════════════════════════════
-        // PACKET LOG PANEL (Horizontal - below VM Table, extends to Active VMs)
+        // PACKET LOG PANEL (Horizontal - below VM Table, above the bottom)
         // ═══════════════════════════════════════════════════════════════
+        // Packet panel sits just above the new bottom status bar — single
+        // padding gap separates them.
         let packetPanelX = sidebarWidth + padding
-        let packetPanelY = buttonRowHeight + padding
-        let packetPanelWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 2 - 5  // Reduced gap
+        let packetPanelY = bottomStatusBarHeight + padding
+        // Width: full content minus sidebar minus left/right padding.
+        // Right-side panel is gone now so the packet panel stretches across.
+        let packetPanelWidth = contentWidth - sidebarWidth - padding * 2
 
         let packetPanel = NSView(frame: NSRect(x: packetPanelX, y: packetPanelY, width: packetPanelWidth, height: packetPanelHeight))
         packetPanel.wantsLayer = true
         packetPanel.autoresizingMask = [.width]
 
-        // Dark background with yellow/orange border
-        packetPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
-        packetPanel.layer?.cornerRadius = 8
-        packetPanel.layer?.borderWidth = 1
-        packetPanel.layer?.borderColor = NSColor(red: 0.8, green: 0.6, blue: 0.0, alpha: 0.4).cgColor
+        // Tactical-styled panel: OD border, panel background. Drops the
+        // yellow/amber border that read as "warning"; the panel is just
+        // ambient live data now.
+        packetPanel.layer?.backgroundColor = AppColors.backgroundPanel.cgColor
+        packetPanel.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        packetPanel.layer?.borderWidth = LayoutConstants.borderHairline
+        packetPanel.layer?.borderColor = AppColors.borderOD.cgColor
 
-        // Panel title
-        let packetTitle = NSTextField(labelWithString: "⚡ PACKET LOG")
-        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 110, height: 20)
-        packetTitle.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .bold)
-        packetTitle.textColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
+        // Panel title — "▸ LIVE TRAFFIC" with an orange tick prefix matches
+        // the sidebar section-label treatment in the mockup. The orange
+        // arrow signals "data flow / attention"; the title itself stays in
+        // muted mono so it reads as a section header, not a button.
+        let packetTitle = NSTextField(labelWithString: "")
+        packetTitle.attributedStringValue = {
+            let tick = NSAttributedString(string: "▸ ", attributes: [
+                .foregroundColor: AppColors.accentOrange,
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+            ])
+            let title = NSAttributedString(string: "LIVE TRAFFIC", attributes: [
+                .foregroundColor: AppColors.textPrimary,
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+            ])
+            let combined = NSMutableAttributedString()
+            combined.append(tick)
+            combined.append(title)
+            return combined
+        }()
+        packetTitle.frame = NSRect(x: 12, y: packetPanelHeight - 28, width: 140, height: 20)
         packetPanel.addSubview(packetTitle)
 
-        // Tab control (Packets / Protocols) - next to title
+        // Tab control (Packets / Protocols) — shifted right to clear the
+        // wider "▸ LIVE TRAFFIC" title.
         let tabControl = NSSegmentedControl(labels: ["Packets", "Protocols"], trackingMode: .selectOne, target: self, action: #selector(packetLogTabChanged(_:)))
-        tabControl.frame = NSRect(x: 120, y: packetPanelHeight - 30, width: 130, height: 24)
+        tabControl.frame = NSRect(x: 160, y: packetPanelHeight - 30, width: 140, height: 24)
         tabControl.selectedSegment = 0
-        tabControl.segmentStyle = .texturedSquare
+        Self.applyTacticalStyle(to: tabControl)
         packetPanel.addSubview(tabControl)
         packetLogTabControl = tabControl
 
-        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols
+        // VM Filter tabs (macOS / Kali / All) - to the right of Packets/Protocols.
+        // Widened "macOS" segment from 45 → 60 so the full label fits at 11pt
+        // (the previous 45pt clipped to "ma..." on Aqua's roundRect style).
         let vmFilterControl = NSSegmentedControl(labels: ["macOS", "Kali", "All"], trackingMode: .selectOne, target: self, action: #selector(vmFilterChanged(_:)))
-        vmFilterControl.frame = NSRect(x: 258, y: packetPanelHeight - 30, width: 140, height: 24)
+        vmFilterControl.frame = NSRect(x: 310, y: packetPanelHeight - 30, width: 160, height: 24)
         vmFilterControl.selectedSegment = 0  // Default to macOS
-        vmFilterControl.segmentStyle = .texturedSquare
-        vmFilterControl.setWidth(45, forSegment: 0)  // macOS
-        vmFilterControl.setWidth(45, forSegment: 1)  // Kali
-        vmFilterControl.setWidth(40, forSegment: 2)  // All
+        Self.applyTacticalStyle(to: vmFilterControl)
+        vmFilterControl.setWidth(60, forSegment: 0)  // macOS — was 45 (truncated)
+        vmFilterControl.setWidth(50, forSegment: 1)  // Kali
+        vmFilterControl.setWidth(45, forSegment: 2)  // All
         packetPanel.addSubview(vmFilterControl)
         packetVMFilterControl = vmFilterControl
 
-        // Filter ARP checkbox (checked by default)
+        // Filter ARP checkbox (checked by default) — moved right to clear
+        // the widened macOS/Kali/All segmented control.
         let arpCheckbox = NSButton(checkboxWithTitle: "Filter ARP", target: self, action: #selector(toggleARPFilter(_:)))
-        arpCheckbox.frame = NSRect(x: 400, y: packetPanelHeight - 30, width: 80, height: 24)
+        arpCheckbox.frame = NSRect(x: 480, y: packetPanelHeight - 30, width: 90, height: 24)
         arpCheckbox.state = .on  // Checked by default
-        arpCheckbox.font = NSFont.systemFont(ofSize: 10)
+        arpCheckbox.font = NSFont.systemFont(ofSize: 11)
         arpCheckbox.contentTintColor = NSColor.white
         packetPanel.addSubview(arpCheckbox)
 
-        // ARP filtered count label (yellow, compact format)
+        // ARP filtered count label — uses the amber token instead of an
+        // inline hex literal so the legend stays consistent.
         let arpCountLabel = NSTextField(labelWithString: "(0)")
-        arpCountLabel.frame = NSRect(x: 478, y: packetPanelHeight - 28, width: 45, height: 18)
+        arpCountLabel.frame = NSRect(x: 568, y: packetPanelHeight - 28, width: 45, height: 18)
         arpCountLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        arpCountLabel.textColor = NSColor(red: 1.0, green: 0.85, blue: 0.0, alpha: 1.0)  // Yellow
+        arpCountLabel.textColor = AppColors.accentYellow
         arpCountLabel.alignment = .left
         packetPanel.addSubview(arpCountLabel)
         arpFilterCountLabel = arpCountLabel
@@ -733,10 +1868,11 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         openButton.autoresizingMask = [.minXMargin]
         packetPanel.addSubview(openButton)
 
-        // Separator below header
+        // Separator below header — OD hairline, matches the panel border.
         let packetSeparator = NSBox(frame: NSRect(x: 10, y: packetPanelHeight - 45, width: packetPanelWidth - 20, height: 1))
-        packetSeparator.boxType = .separator
-        packetSeparator.fillColor = NSColor(red: 0.8, green: 0.6, blue: 0.0, alpha: 0.3)
+        packetSeparator.boxType = .custom
+        packetSeparator.borderWidth = 0
+        packetSeparator.fillColor = AppColors.borderOD
         packetSeparator.autoresizingMask = [.width]
         packetPanel.addSubview(packetSeparator)
 
@@ -752,7 +1888,7 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let packetsTextView = NSTextView(frame: NSRect(x: 0, y: 0, width: packetPanelWidth - 16, height: packetPanelHeight - 60))
         packetsTextView.isEditable = false
         packetsTextView.drawsBackground = false
-        packetsTextView.textColor = NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
+        packetsTextView.textColor = AppColors.textOD
         packetsTextView.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         packetsTextView.autoresizingMask = [.width]
         packetsScrollView.documentView = packetsTextView
@@ -770,32 +1906,6 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         contentView.addSubview(packetPanel)
         packetLogPanel = packetPanel
-
-        // ═══════════════════════════════════════════════════════════════
-        // PROTOCOL LEGEND PANEL (Right side - below Active VMs, same level as packet panel)
-        // ═══════════════════════════════════════════════════════════════
-        let legendPanelX = activePanelX
-        let legendPanelY = buttonRowHeight + padding
-        let legendPanelWidth = activePanelWidth
-        let legendPanelHeight = packetPanelHeight
-
-        let legendPanel = NSView(frame: NSRect(x: legendPanelX, y: legendPanelY, width: legendPanelWidth, height: legendPanelHeight))
-        legendPanel.wantsLayer = true
-        legendPanel.autoresizingMask = [.minXMargin]
-
-        // Dark background with cyan border (matching Active VMs panel)
-        legendPanel.layer?.backgroundColor = NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 1.0).cgColor
-        legendPanel.layer?.cornerRadius = 8
-        legendPanel.layer?.borderWidth = 1
-        legendPanel.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor
-
-        // Add the protocol legend centered in the panel
-        let legendHeight: CGFloat = 95
-        let legendView = createProtocolLegend(width: legendPanelWidth - 16, height: legendHeight)
-        legendView.frame = NSRect(x: 8, y: (legendPanelHeight - legendHeight) / 2, width: legendPanelWidth - 16, height: legendHeight)
-        legendPanel.addSubview(legendView)
-
-        contentView.addSubview(legendPanel)
 
         // Subscribe to packet capture notifications
         NotificationCenter.default.addObserver(
@@ -1131,10 +2241,12 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
         containerView.wantsLayer = true
+        // Magenta-tinted card distinguishes the AI Sandbox install progress
+        // from the standard VM status cards (which use OD/cyan).
         containerView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.06, blue: 0.16, alpha: 1.0).cgColor
-        containerView.layer?.cornerRadius = 6
-        containerView.layer?.borderWidth = 1
-        containerView.layer?.borderColor = NSColor(red: 0.78, green: 0.30, blue: 0.95, alpha: 0.65).cgColor
+        containerView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        containerView.layer?.borderWidth = LayoutConstants.borderHairline
+        containerView.layer?.borderColor = AppColors.borderMagenta.cgColor
         containerView.translatesAutoresizingMaskIntoConstraints = false
         containerView.widthAnchor.constraint(equalToConstant: cardWidth).isActive = true
         containerView.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
@@ -1142,19 +2254,18 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         let tracker = AISandboxInstallTracker.shared
 
         // Title — building / done / failed
-        let titleColor = NSColor(red: 0.86, green: 0.50, blue: 1.00, alpha: 1.0) // magenta
         let titleLabel = NSTextField(labelWithString: "⚙ AI Sandbox VM (building)")
         titleLabel.frame = NSRect(x: 8, y: cardHeight - 22, width: cardWidth - 16, height: 16)
         titleLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = titleColor
+        titleLabel.textColor = AppColors.accentMagenta
         titleLabel.lineBreakMode = .byTruncatingTail
         containerView.addSubview(titleLabel)
 
         // Phase label
         let phaseLabel = NSTextField(labelWithString: tracker.phase.humanLabel)
         phaseLabel.frame = NSRect(x: 8, y: cardHeight - 38, width: cardWidth - 16, height: 14)
-        phaseLabel.font = NSFont.systemFont(ofSize: 9)
-        phaseLabel.textColor = NSColor(white: 0.7, alpha: 1.0)
+        phaseLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeCaption)
+        phaseLabel.textColor = AppColors.textMuted
         containerView.addSubview(phaseLabel)
 
         // Progress bar — determinate during install (we have a real fraction
@@ -1200,10 +2311,10 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
         let containerView = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
         containerView.wantsLayer = true
-        containerView.layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 1.0).cgColor
-        containerView.layer?.cornerRadius = 6
-        containerView.layer?.borderWidth = 1
-        containerView.layer?.borderColor = NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.5).cgColor
+        containerView.layer?.backgroundColor = AppColors.backgroundSecondary.cgColor
+        containerView.layer?.cornerRadius = LayoutConstants.cornerRadiusMD
+        containerView.layer?.borderWidth = LayoutConstants.borderHairline
+        containerView.layer?.borderColor = AppColors.borderODEmphasis.cgColor
         containerView.translatesAutoresizingMaskIntoConstraints = false
 
         // Store VM ID in layer name for button lookups (safer than hash)
@@ -1213,24 +2324,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         containerView.widthAnchor.constraint(equalToConstant: cardWidth).isActive = true
         containerView.heightAnchor.constraint(equalToConstant: cardHeight).isActive = true
 
-        // State color and icon
+        // State color and icon — all five states read from semantic tokens
+        // so they stay in sync with the status pills + sparkline tinting.
         let stateColor: NSColor
         let stateIcon: String
         switch state.lowercased() {
         case "running":
-            stateColor = NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)  // Neon green
+            stateColor = AppColors.statusRunning   // OD green
             stateIcon = "▶"
         case "starting":
-            stateColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0)  // Cyan
+            stateColor = AppColors.accentODGlow    // light OD — transitioning toward running
             stateIcon = "◐"
         case "paused":
-            stateColor = NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)  // Yellow
+            stateColor = AppColors.statusPaused    // amber
             stateIcon = "⏸"
         case "stopping":
-            stateColor = NSColor(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0)  // Orange
+            stateColor = AppColors.accentOrange    // safety orange — attention
             stateIcon = "◑"
         default:
-            stateColor = NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0)  // Grey
+            stateColor = AppColors.statusStopped   // slate
             stateIcon = "●"
         }
 
@@ -1426,56 +2538,75 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     func windowDidResize(_ notification: Notification) {
-        // Recalculate layout when window is resized
+        // Recalculate layout when window is resized. Mirrors the math in
+        // adjustContentForSidebar (toolbar at top, packet panel + legend at
+        // bottom, table + detail card in the middle). Autoresizing masks
+        // handle a chunk of this already, but a few panels (Active VMs
+        // height, library tabs Y, detail card Y) are calculated from
+        // contentHeight at layout time and need re-anchoring here.
         guard let contentView = window?.contentView else { return }
 
         let sidebarWidth: CGFloat = 220
-        let activePanelWidth: CGFloat = 220
-        let buttonRowHeight: CGFloat = 50
         let padding: CGFloat = 15
+        let buttonHeight: CGFloat = 32
+        let toolbarGap: CGFloat = 8
+        let libraryTabsHeight: CGFloat = 26
+        let libraryTabsGap: CGFloat = 8
+        let detailCardHeight: CGFloat = 70
         let packetPanelHeight: CGFloat = 180
+        let bottomStatusBarHeight: CGFloat = 24
 
         let contentWidth = contentView.bounds.width
         let contentHeight = contentView.bounds.height
 
-        // Recalculate table position and size (above packet panel)
+        // Vertical anchors — match adjustContentForSidebar()
+        let toolbarY = contentHeight - padding - buttonHeight
+        let libraryTabsY = toolbarY - toolbarGap - libraryTabsHeight
+
         let tableX = sidebarWidth + padding
-        let tableWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-        let tableY = buttonRowHeight + padding + packetPanelHeight + padding
-        let tableHeight = contentHeight - tableY - padding
+        // Right-side panel is gone — table fills out to the right edge of
+        // the content view (minus one padding).
+        let tableWidth = contentWidth - sidebarWidth - padding * 2
+        let detailCardY = bottomStatusBarHeight + padding + packetPanelHeight + padding
+        let tableY = detailCardY + detailCardHeight + padding
+        let tableHeight = libraryTabsY - libraryTabsGap - tableY
 
         if let scrollView = tableView?.enclosingScrollView {
             scrollView.frame = NSRect(x: tableX, y: tableY, width: tableWidth, height: tableHeight)
         }
+        aiSandboxOutlineScroll?.frame = NSRect(x: tableX, y: tableY,
+                                               width: tableWidth, height: tableHeight)
 
-        // Recalculate button positions
-        let buttons: [NSButton?] = [newButton, deleteButton, renameButton, cloneButton, importButton, configureButton, startButton]
-        let buttonWidth: CGFloat = 80
-        let buttonSpacing: CGFloat = 10
-        let visibleButtons = buttons.compactMap { $0 }
-        let totalButtonsWidth = CGFloat(visibleButtons.count) * buttonWidth + CGFloat(visibleButtons.count - 1) * buttonSpacing
-        var buttonX = tableX + (tableWidth - totalButtonsWidth) / 2
+        // Library tabs header + recovery checkbox stay glued under the toolbar.
+        libraryTabControl?.frame.origin.y = libraryTabsY
+        recoveryModeCheckbox?.frame.origin.y = libraryTabsY + (libraryTabsHeight - 20) / 2
 
-        for button in visibleButtons {
-            button.frame = NSRect(x: buttonX, y: padding, width: buttonWidth, height: 32)
-            buttonX += buttonWidth + buttonSpacing
+        // Toolbar buttons re-anchor to the new top — autoresize keeps the
+        // horizontal flow, this just updates Y.
+        let topButtons: [NSButton?] = [startButton, newButton, importButton,
+                                       configureButton, cloneButton,
+                                       renameButton, deleteButton]
+        for button in topButtons.compactMap({ $0 }) {
+            button.frame.origin.y = toolbarY
         }
 
-        // Recalculate Active VMs panel position (right side, same height as table)
-        if let panel = statusBar {
-            let panelX = contentWidth - activePanelWidth - padding
-            let panelY = buttonRowHeight + padding + packetPanelHeight + padding  // Same as table Y
-            let panelHeight = contentHeight - panelY - padding
-            panel.frame = NSRect(x: panelX, y: panelY, width: activePanelWidth, height: panelHeight)
-        }
+        // Detail card stays at fixed Y (autoresize handles its width).
+        selectedVMDetailCard?.frame.origin.y = detailCardY
 
-        // Recalculate Packet Log panel position (horizontal, below table)
+        // (Active VMs / Legend panels were removed; no right-side re-anchor.)
+
+        // Packet panel sits just above the bottom status bar.
         if let packetPanel = packetLogPanel {
-            let packetX = sidebarWidth + padding
-            let packetY = buttonRowHeight + padding
-            let packetWidth = contentWidth - sidebarWidth - activePanelWidth - padding * 3
-            packetPanel.frame = NSRect(x: packetX, y: packetY, width: packetWidth, height: packetPanelHeight)
+            let packetWidth = contentWidth - sidebarWidth - padding * 2
+            packetPanel.frame = NSRect(x: sidebarWidth + padding,
+                                       y: bottomStatusBarHeight + padding,
+                                       width: packetWidth, height: packetPanelHeight)
         }
+
+        // Bottom status bar stretches the full width along y=0.
+        bottomStatusBar?.frame = NSRect(x: 0, y: 0,
+                                        width: contentWidth,
+                                        height: bottomStatusBarHeight)
     }
 
     @objc private func handleVMStatusChanged(_ notification: Notification) {
@@ -1485,6 +2616,25 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
 
             // Update status bar with current running VMs
             self.refreshStatusBar()
+
+            // Selected VM's pill + live rate also depend on status
+            self.updateSelectedVMDetailCard()
+        }
+    }
+
+    @objc private func handleVMBundleSizeUpdated(_ notification: Notification) {
+        // Bundle-size scan is per-VM. If the updated VM matches the currently
+        // selected row, refresh the detail card so the Disk cell jumps from
+        // "—" to the real measurement (or updates from a stale value).
+        guard let updatedId = notification.object as? UUID else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let selectedRow = self.tableView?.selectedRow ?? -1
+            guard selectedRow >= 0,
+                  selectedRow < self.vmManager.virtualMachines.count else { return }
+            if self.vmManager.virtualMachines[selectedRow].id == updatedId {
+                self.updateSelectedVMDetailCard()
+            }
         }
     }
 
@@ -1495,6 +2645,16 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             // Keep Tasks tab live when it's visible
             if self.rightPanelTabControl?.selectedSegment == 1 {
                 self.refreshTasksTab()
+            }
+            // If the user is currently viewing the AI Sandbox tab, re-scan
+            // so a newly-installed base / new session appears without
+            // requiring a tab toggle. The empty-state overlay flips off
+            // automatically when the base appears.
+            if self.currentLibraryTab == .aiSandbox {
+                self.aiSandboxBundles = self.scanAISandboxBundles()
+                self.rebuildAISandboxNodeTree()
+                self.updateSelectedVMDetailCard()
+                self.refreshEmptyStateOverlays()
             }
         }
     }
@@ -1630,17 +2790,50 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     // MARK: - NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        return vmManager.virtualMachines.count
+        switch currentLibraryTab {
+        case .standard:  return vmManager.virtualMachines.count
+        case .aiSandbox: return aiSandboxBundles.count
+        }
     }
 
     // MARK: - NSTableViewDelegate
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < vmManager.virtualMachines.count else {
-            return nil
+    /// Dequeue (or build) the cell for the Traffic column. The cell hosts a
+    /// `SparklineView` configured from the per-VM rolling buffer in
+    /// `trafficSamples`. AI Sandbox tab gets an empty sparkline because we
+    /// don't sample those bundles through the virtual switch.
+    private func trafficColumnCell(tableView: NSTableView, row: Int) -> NSView? {
+        let id = NSUserInterfaceItemIdentifier("TrafficColumn")
+        var cell = tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView
+        var spark: SparklineView!
+        if cell == nil {
+            cell = NSTableCellView()
+            cell?.identifier = id
+            spark = SparklineView(frame: NSRect(x: 6, y: 2, width: 68, height: 16))
+            spark.autoresizingMask = [.width, .height]
+            cell?.addSubview(spark)
+        } else {
+            spark = cell?.subviews.first(where: { $0 is SparklineView }) as? SparklineView
         }
 
-        let vm = vmManager.virtualMachines[row]
+        let vmName: String? = {
+            if currentLibraryTab == .standard,
+               vmManager.virtualMachines.indices.contains(row) {
+                return vmManager.virtualMachines[row].name
+            }
+            return nil
+        }()
+        spark.samples = vmName.flatMap { trafficSamples[$0] } ?? []
+        return cell
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        // Traffic column gets a custom SparklineView cell instead of the
+        // shared NSTextField cell used by every other column. We intercept
+        // here before the text-cell construction below.
+        if tableColumn?.identifier.rawValue == "TrafficColumn" {
+            return trafficColumnCell(tableView: tableView, row: row)
+        }
 
         // Try to get existing cell, or create new one programmatically
         var cell = tableView.makeView(withIdentifier: tableColumn!.identifier, owner: self) as? NSTableCellView
@@ -1666,9 +2859,46 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             ])
         }
 
-        guard let finalCell = cell else {
-            return nil
+        guard let finalCell = cell else { return nil }
+
+        // AI Sandbox tab uses the same columns but filled from the bundle row
+        if currentLibraryTab == .aiSandbox {
+            guard row < aiSandboxBundles.count else { return nil }
+            let bundle = aiSandboxBundles[row]
+            let columnId = tableColumn?.identifier.rawValue ?? ""
+
+            switch columnId {
+            case "NameColumn":
+                finalCell.textField?.stringValue = bundle.displayName + (bundle.isBase ? " (base)" : "")
+            case "StatusColumn":
+                finalCell.textField?.stringValue = bundle.isBase ? "Template" : "Session"
+            case "OSColumn":
+                finalCell.textField?.stringValue = "macOS"
+            case "CPUColumn":
+                finalCell.textField?.stringValue = bundle.id?.uuidString.prefix(8).description ?? "—"
+            case "MemoryColumn":
+                finalCell.textField?.stringValue = bundle.isBase ? "8 GB" : "—"
+            case "DiskColumn":
+                finalCell.textField?.stringValue = ByteCountFormatter.string(
+                    fromByteCount: bundle.diskBytes, countStyle: .binary)
+            case "LastUsedColumn":
+                if let created = bundle.createdAt {
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .short
+                    finalCell.textField?.stringValue = formatter.string(from: created)
+                } else {
+                    finalCell.textField?.stringValue = "—"
+                }
+            default:
+                finalCell.textField?.stringValue = ""
+            }
+            return finalCell
         }
+
+        // Standard VMs tab — existing behavior
+        guard row < vmManager.virtualMachines.count else { return nil }
+        let vm = vmManager.virtualMachines[row]
 
         switch tableColumn?.identifier.rawValue {
         case "NameColumn":
@@ -1699,13 +2929,149 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         return finalCell
     }
 
+    // MARK: - NSOutlineViewDataSource / Delegate (AI Sandbox tab)
+
+    func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
+        if item == nil {
+            return aiSandboxRootNode == nil ? 0 : 1
+        }
+        return (item as? AISandboxNode)?.children?.count ?? 0
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, child index: Int, ofItem item: Any?) -> Any {
+        if item == nil { return aiSandboxRootNode! }
+        return (item as! AISandboxNode).children![index]
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
+        return ((item as? AISandboxNode)?.children?.isEmpty == false)
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
+        guard let node = item as? AISandboxNode, let colId = tableColumn?.identifier.rawValue else {
+            return nil
+        }
+        let bundle = node.bundle
+        let cellId = NSUserInterfaceItemIdentifier("AISandboxOutlineCell_\(colId)")
+        var cell = outlineView.makeView(withIdentifier: cellId, owner: self) as? NSTableCellView
+        if cell == nil {
+            cell = NSTableCellView()
+            cell?.identifier = cellId
+            let text = NSTextField()
+            text.isBordered = false
+            text.drawsBackground = false
+            text.isEditable = false
+            text.translatesAutoresizingMaskIntoConstraints = false
+            text.lineBreakMode = .byTruncatingTail
+            cell?.addSubview(text)
+            cell?.textField = text
+            NSLayoutConstraint.activate([
+                text.leadingAnchor.constraint(equalTo: cell!.leadingAnchor, constant: 2),
+                text.trailingAnchor.constraint(equalTo: cell!.trailingAnchor, constant: -2),
+                text.centerYAnchor.constraint(equalTo: cell!.centerYAnchor),
+            ])
+        }
+
+        switch colId {
+        case "NameColumn":
+            // Sessions get a "↳" arrow prefix so the parent-child link reads
+            // visually even when the disclosure triangle is collapsed. Base
+            // bundle gets a "◆" diamond marker to distinguish it as the
+            // template.
+            let prefix = bundle.isBase ? "◆  " : "↳  "
+            let suffix = bundle.isBase ? "  (base)" : ""
+            cell?.textField?.stringValue = prefix + bundle.displayName + suffix
+            cell?.textField?.font = bundle.isBase
+                ? NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .semibold)
+                : NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+            cell?.textField?.textColor = bundle.isBase ? AppColors.accentODGlow : AppColors.textPrimary
+        case "StatusColumn":
+            cell?.textField?.stringValue = bundle.isBase ? "TEMPLATE" : "SESSION"
+            cell?.textField?.textColor = bundle.isBase ? AppColors.accentOrange : AppColors.statusRunning
+            cell?.textField?.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .semibold)
+        case "OSColumn":
+            cell?.textField?.stringValue = "macOS"
+            cell?.textField?.textColor = AppColors.textMuted
+        case "CPUColumn":  // repurposed for session id prefix
+            cell?.textField?.stringValue = bundle.sessionID ?? "—"
+            cell?.textField?.textColor = AppColors.textMuted
+            cell?.textField?.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .regular)
+        case "MemoryColumn":
+            cell?.textField?.stringValue = bundle.isBase ? "8 GB" : "—"
+            cell?.textField?.textColor = AppColors.textMuted
+        case "DiskColumn":
+            cell?.textField?.stringValue = ByteCountFormatter.string(
+                fromByteCount: bundle.diskBytes, countStyle: .binary)
+            cell?.textField?.textColor = AppColors.textMuted
+        case "LastUsedColumn":
+            if let created = bundle.createdAt {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .short
+                formatter.timeStyle = .short
+                cell?.textField?.stringValue = formatter.string(from: created)
+            } else {
+                cell?.textField?.stringValue = "—"
+            }
+            cell?.textField?.textColor = AppColors.textMuted
+        default:
+            cell?.textField?.stringValue = ""
+        }
+        return cell
+    }
+
+    func outlineViewSelectionDidChange(_ notification: Notification) {
+        updateButtonStates()
+        updateSelectedVMDetailCard()
+    }
+
+    // MARK: - NSTableViewDelegate (cont.)
+
     func tableViewSelectionDidChange(_ notification: Notification) {
         updateButtonStates()
+        updateSelectedVMDetailCard()
     }
 
     // MARK: - Actions
 
     @IBAction func startVM(_ sender: Any) {
+        // AI Sandbox tab: read from the outline view (not the table). Two
+        // routing rules:
+        //
+        //  - Base node selected: if any sessions exist, boot the latest
+        //    one in place ("Start" on the parent means "boot the most
+        //    recent child"). If no sessions, fall through with reuseID
+        //    = nil so AppDelegate clones+boots a fresh one.
+        //  - Session node selected: boot THAT specific session.
+        //
+        // Either way the recovery-mode checkbox state controls boot path.
+        if currentLibraryTab == .aiSandbox {
+            guard let outline = aiSandboxOutlineView,
+                  let node = outline.item(atRow: outline.selectedRow) as? AISandboxNode else {
+                return
+            }
+            let inRecovery = (recoveryModeCheckbox?.state == .on)
+            var reuseID: String? = nil
+            var isBase = node.bundle.isBase
+            if node.bundle.isBase {
+                if let latest = latestAISandboxSessionNode() {
+                    reuseID = latest.bundle.sessionID
+                    isBase = false   // We're effectively booting a session
+                }
+                // else reuseID stays nil → fresh clone path
+            } else {
+                reuseID = node.bundle.sessionID
+            }
+            var userInfo: [String: Any] = [
+                "inRecoveryMode": inRecovery,
+                "isBaseBundle": isBase
+            ]
+            if let id = reuseID { userInfo["reusingSessionID"] = id }
+            NotificationCenter.default.post(
+                name: .bootAISandbox, object: nil, userInfo: userInfo)
+            return
+        }
+
+        // Standard tab — needs a VM selected in the NSTableView
         guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
@@ -1739,13 +3105,46 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
     }
 
     @IBAction func deleteVM(_ sender: Any) {
+        // AI Sandbox tab — delete the selected session bundle off disk.
+        // updateButtonStates() already disables the Delete button for the
+        // base bundle, but we double-check here to defend against keyboard
+        // shortcut paths.
+        if currentLibraryTab == .aiSandbox {
+            guard let outline = aiSandboxOutlineView,
+                  let node = outline.item(atRow: outline.selectedRow) as? AISandboxNode else {
+                return
+            }
+            let bundle = node.bundle
+            guard !bundle.isBase else {
+                showAlert(message: "The AI Sandbox base bundle cannot be deleted from here. Use Tools → Create AI Sandbox VM to rebuild it.")
+                return
+            }
+            let alert = NSAlert()
+            alert.messageText = "Delete AI Sandbox session?"
+            alert.informativeText = "Permanently remove the bundle at:\n\(bundle.url.path)\n\nThis action cannot be undone."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            do {
+                try FileManager.default.removeItem(at: bundle.url)
+                aiSandboxBundles = scanAISandboxBundles()
+                rebuildAISandboxNodeTree()
+                updateButtonStates()
+                updateSelectedVMDetailCard()
+            } catch {
+                showAlert(message: "Failed to delete bundle: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        // Standard tab — needs a VM selected in the table
         guard let tableView = tableView else { return }
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else {
             showAlert(message: "Please select a VM to delete")
             return
         }
-
         let vm = vmManager.virtualMachines[selectedRow]
 
         let alert = NSAlert()
@@ -2200,16 +3599,47 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
             guard let self else { return }
             self.tableView?.reloadData()
             self.updateButtonStates()
+            self.refreshEmptyStateOverlays()
         }
     }
 
     private func updateButtonStates() {
-        let hasSelection = tableView?.selectedRow ?? -1 >= 0
+        let isAITab = (currentLibraryTab == .aiSandbox)
+        let hasSelection: Bool = {
+            if isAITab {
+                return (aiSandboxOutlineView?.selectedRow ?? -1) >= 0
+            }
+            return (tableView?.selectedRow ?? -1) >= 0
+        }()
+
+        // AI Sandbox bundles have their own lifecycle (create via Tools menu,
+        // boot via Start, otherwise managed on disk). The standard Configure
+        // / Clone / Rename / Import / New flows don't apply, so we disable
+        // them in the AI Sandbox tab to avoid silent no-ops.
         startButton?.isEnabled = hasSelection
-        deleteButton?.isEnabled = hasSelection
-        renameButton?.isEnabled = hasSelection
-        cloneButton?.isEnabled = hasSelection
-        configureButton?.isEnabled = hasSelection
+        deleteButton?.isEnabled = hasSelection && (!isAITab || isAITabSessionRowSelected())
+        configureButton?.isEnabled = hasSelection && !isAITab
+        cloneButton?.isEnabled     = hasSelection && !isAITab
+        renameButton?.isEnabled    = hasSelection && !isAITab
+        newButton?.isEnabled       = !isAITab
+        importButton?.isEnabled    = !isAITab
+
+        let allButtons: [NSButton?] = [startButton, deleteButton, renameButton,
+                                       cloneButton, configureButton, newButton, importButton]
+        allButtons.compactMap({ $0 }).forEach(applyButtonStyle)
+    }
+
+    /// True when the AI Sandbox tab is active AND the currently selected
+    /// outline-view row is a session (not the base bundle). The base bundle
+    /// must not be deletable from the library — that's a Tools-menu admin
+    /// action only.
+    private func isAITabSessionRowSelected() -> Bool {
+        guard currentLibraryTab == .aiSandbox,
+              let outline = aiSandboxOutlineView,
+              let node = outline.item(atRow: outline.selectedRow) as? AISandboxNode else {
+            return false
+        }
+        return !node.bundle.isBase
     }
 
     private func showAlert(message: String) {
@@ -2284,13 +3714,19 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
         versionSpinner.isHidden = true
         view.addSubview(versionSpinner)
 
-        // ISO Cache Status Label (below version dropdown)
+        // ISO Cache Status Label (below version dropdown). Two lines tall:
+        // line 1 shows version, line 2 shows download date. Frame height
+        // bumped to 32 to fit both at 11pt; .byWordWrapping handles the
+        // wrap on the explicit "\n" we insert when populating the value.
         let isoCacheStatusLabel = NSTextField(labelWithString: "")
-        isoCacheStatusLabel.frame = NSRect(x: 110, y: 230, width: 280, height: 20)
+        isoCacheStatusLabel.frame = NSRect(x: 110, y: 218, width: 280, height: 32)
         isoCacheStatusLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         isoCacheStatusLabel.isEditable = false
         isoCacheStatusLabel.isBordered = false
         isoCacheStatusLabel.drawsBackground = false
+        isoCacheStatusLabel.usesSingleLineMode = false
+        isoCacheStatusLabel.maximumNumberOfLines = 2
+        isoCacheStatusLabel.lineBreakMode = .byWordWrapping
         view.addSubview(isoCacheStatusLabel)
 
         // Delegate to handle dynamic UI updates
@@ -2508,18 +3944,29 @@ class VMLibraryWindowController: NSWindowController, NSTableViewDataSource, NSTa
                 let distroInfo = ISOCacheManager.shared.getDistributionInfo(for: linuxDistro)
 
                 if distroInfo.isCached, let downloadDate = distroInfo.lastDownloaded {
-                    // ISO is cached - show green text
+                    // ISO is cached — show version + date on two lines so
+                    // the user sees what "Latest" actually resolved to last
+                    // time it downloaded.
                     let formatter = DateFormatter()
                     formatter.dateStyle = .medium
                     formatter.timeStyle = .short
                     let dateString = formatter.string(from: downloadDate)
 
-                    isoCacheStatusLabel.stringValue = "ISO Cached! (downloaded: \(dateString))"
-                    isoCacheStatusLabel.textColor = NSColor(red: 0.0, green: 0.8, blue: 0.2, alpha: 1.0) // Green
+                    let versionLine: String
+                    if let v = distroInfo.cachedVersion, !v.isEmpty {
+                        versionLine = "ISO Cached · v\(v)"
+                    } else {
+                        versionLine = "ISO Cached"
+                    }
+                    isoCacheStatusLabel.stringValue =
+                        "\(versionLine)\ndownloaded \(dateString)"
+                    isoCacheStatusLabel.textColor = AppColors.statusRunning
+                    isoCacheStatusLabel.maximumNumberOfLines = 2
+                    isoCacheStatusLabel.lineBreakMode = .byWordWrapping
                 } else {
                     // ISO not cached - show red text
                     isoCacheStatusLabel.stringValue = "Will download latest ISO"
-                    isoCacheStatusLabel.textColor = NSColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1.0) // Red
+                    isoCacheStatusLabel.textColor = AppColors.accentRed
                 }
             }
 

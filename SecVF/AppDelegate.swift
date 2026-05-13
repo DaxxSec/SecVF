@@ -88,6 +88,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
             object: nil
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleBootAISandbox(_:)),
+            name: .bootAISandbox,
+            object: nil
+        )
+
         // Open packet analysis — single owner is AppDelegate. Other UIs post
         // .openPacketAnalysis rather than instantiate a second controller.
         NotificationCenter.default.addObserver(
@@ -391,6 +398,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                 NSLog("[AppDelegate] VM \(vm.name) stopped successfully")
             }
         }
+    }
+
+    /// Handle the `.bootAISandbox` notification posted by the library
+    /// window's AI Sandbox tab when the user clicks Start. The `userInfo`
+    /// carries the recovery-mode flag from the checkbox plus whether the
+    /// selected row was the base bundle (which can't boot directly — the
+    /// boot flow always clones base → session).
+    @objc private func handleBootAISandbox(_ notification: Notification) {
+        let info = notification.userInfo ?? [:]
+        let inRecovery = (info["inRecoveryMode"] as? Bool) ?? false
+        let reuseID = info["reusingSessionID"] as? String
+        let isBase = (info["isBaseBundle"] as? Bool) ?? false
+
+        if isBase && reuseID == nil {
+            // Base bundle selected and no session to reuse — caller asked
+            // for a fresh clone-and-boot. Standard path.
+            NSLog("[AISandbox] Start clicked on base bundle — cloning to new session")
+        } else if reuseID != nil {
+            NSLog("[AISandbox] Start clicked — reusing existing session %@", reuseID!)
+        }
+        bootAISandboxSession(inRecoveryMode: inRecovery, reusingSessionID: reuseID)
     }
 
     @objc private func handlePauseVM(_ notification: Notification) {
@@ -1556,11 +1584,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         // Boot AI Sandbox (clone base → session, boot, show window)
         let bootSandboxItem = NSMenuItem(
             title: "Boot AI Sandbox",
-            action: #selector(bootAISandboxSession),
+            action: #selector(AppDelegate.bootAISandboxSession as (AppDelegate) -> () -> Void),
             keyEquivalent: ""
         )
         bootSandboxItem.target = self
         toolsMenu.addItem(bootSandboxItem)
+
+        // Boot AI Sandbox into macOS Recovery — useful when the base image
+        // is wedged and needs disk repair / firmware reset.
+        let bootRecoveryItem = NSMenuItem(
+            title: "Boot AI Sandbox in Recovery…",
+            action: #selector(bootAISandboxSessionInRecovery),
+            keyEquivalent: ""
+        )
+        bootRecoveryItem.target = self
+        bootRecoveryItem.toolTip = "Boots the AI Sandbox session VM into macOS Recovery instead of normal startup. Useful for disk repair or reinstalling macOS inside the sandbox."
+        toolsMenu.addItem(bootRecoveryItem)
 
         // Create top-level menu item
         let toolsMenuItem = NSMenuItem(title: "Tools", action: nil, keyEquivalent: "")
@@ -2500,7 +2539,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
     /// Tools → Boot AI Sandbox. Clones the base bundle (APFS CoW), boots
     /// the session VM, and shows it in a new window.
+    /// `@objc` entry point used by the existing "Tools → Boot AI Sandbox"
+    /// menu item. Boots in normal mode.
     @objc private func bootAISandboxSession() {
+        bootAISandboxSession(inRecoveryMode: false, reusingSessionID: nil)
+    }
+
+    /// `@objc` entry point used by the new "Tools → Boot AI Sandbox in
+    /// Recovery…" menu item and by the recovery-mode toggle in the main
+    /// window's AI Sandbox tab.
+    @objc private func bootAISandboxSessionInRecovery() {
+        bootAISandboxSession(inRecoveryMode: true, reusingSessionID: nil)
+    }
+
+    /// Boot an AI Sandbox session VM.
+    ///
+    /// - parameter inRecoveryMode: when true, passes
+    ///   `VZMacOSVirtualMachineStartOptions(startUpFromMacOSRecovery: true)`
+    ///   to `machine.start(options:)`.
+    /// - parameter reusingSessionID: when non-nil, boot the existing session
+    ///   bundle at `~/.avf/AISandbox/sessions/ai-sandbox-exec-<id>.bundle`
+    ///   without cloning. When nil, clone the base bundle to a fresh session
+    ///   first. The tree-view UI in the main library uses this to "Start"
+    ///   the latest session when the user has the base row selected.
+    private func bootAISandboxSession(inRecoveryMode: Bool, reusingSessionID: String?) {
         let baseBundle = AISandboxVMBundle(url: AISandboxDefaults.baseBundle)
         guard baseBundle.exists else {
             showAlert(
@@ -2533,12 +2595,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
         Task { @MainActor in
             defer { self.activeSandboxBootInFlight = false }
 
-            let session = AISandboxVMSession()
-            NSLog("[AISandbox] Cloning base → session %@", session.sessionID)
+            // When `reusingSessionID` is set, attach to the existing session
+            // bundle in place — no clone. Otherwise mint a fresh session id
+            // and clone the base into it.
+            let session: AISandboxVMSession
+            if let existingID = reusingSessionID {
+                session = AISandboxVMSession(sessionID: existingID)
+                NSLog("[AISandbox] Reusing existing session %@", session.sessionID)
+            } else {
+                session = AISandboxVMSession()
+                NSLog("[AISandbox] Cloning base → session %@", session.sessionID)
+            }
 
             do {
-                try session.cloneBase()
-                NSLog("[AISandbox] Clone complete: %@", session.bundleURL.path)
+                if reusingSessionID == nil {
+                    try session.cloneBase()
+                    NSLog("[AISandbox] Clone complete: %@", session.bundleURL.path)
+                } else if !FileManager.default.fileExists(atPath: session.bundleURL.path) {
+                    // The session row in the UI got out of sync with disk
+                    // (manual delete, etc.). Fall back to clone + boot from
+                    // base so the user still gets a working VM.
+                    NSLog("[AISandbox] Session bundle missing — falling back to fresh clone")
+                    try session.cloneBase()
+                }
 
                 // Build VZ config from the cloned session bundle
                 let bundle = AISandboxVMBundle(url: session.bundleURL)
@@ -2595,8 +2674,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
                     try? updated.write(to: manifestURL)
                 }
 
-                NSLog("[AISandbox] Starting session VM (id=%@)…", sandboxVMId.uuidString)
-                try await machine.start()
+                NSLog("[AISandbox] Starting session VM (id=%@, recovery=%@)…",
+                      sandboxVMId.uuidString,
+                      inRecoveryMode ? "YES" : "no")
+                if inRecoveryMode {
+                    // macOS Recovery boot — useful when the sandbox base image
+                    // is wedged and needs disk repair / reinstall / firmware
+                    // reset without re-baking from scratch. Apple's flag lives
+                    // on VZMacOSVirtualMachineStartOptions; we only build the
+                    // options object when recovery is requested so normal
+                    // boots keep the default path.
+                    let opts = VZMacOSVirtualMachineStartOptions()
+                    opts.startUpFromMacOSRecovery = true
+                    try await machine.start(options: opts)
+                } else {
+                    try await machine.start()
+                }
                 NSLog("[AISandbox] Session VM running")
 
                 // Start the vsock exec bridge so `secvf-cli vm exec` can reach this VM
@@ -2849,9 +2942,33 @@ extension AppDelegate {
             libraryWindowController = VMLibraryWindowController()
         }
 
+        let win = libraryWindowController?.window
+        let wasActive = NSApp.isActive
+
+        // Request a dock-icon bounce when SecVF launched into the background
+        // (e.g., `open` from a terminal in another app). `.criticalRequest`
+        // bounces until the user clicks, which is unmissable. When the app
+        // is already foreground we use the gentler `.informationalRequest`
+        // (single bounce) — it's a no-op on the frontmost app anyway, but
+        // costs nothing to ask.
+        if wasActive {
+            NSApp.requestUserAttention(.informationalRequest)
+        } else {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+
         libraryWindowController?.showWindow(nil)
-        libraryWindowController?.window?.makeKeyAndOrderFront(nil)
+        win?.orderFrontRegardless()
+        win?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // A short deferred re-activate handles the case where another app
+        // grabs focus between `activate` and the splash-screen tear-down.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.libraryWindowController?.window?.orderFrontRegardless()
+            self?.libraryWindowController?.window?.makeKeyAndOrderFront(nil)
+        }
 
         // Refresh the table view (will trigger async load if needed)
         DispatchQueue.main.async {

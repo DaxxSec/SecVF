@@ -26,6 +26,7 @@ class SwitchStatisticsWindowController: NSWindowController {
             defer: false
         )
         window.title = "Virtual Switch Statistics"
+        window.minSize = NSSize(width: 500, height: 320)
         window.center()
 
         super.init(window: window)
@@ -51,29 +52,54 @@ class SwitchStatisticsWindowController: NSWindowController {
         let contentView = NSView(frame: window.contentView!.bounds)
         contentView.autoresizingMask = [.width, .height]
 
-        // Toolbar with controls
-        let toolbar = NSView(frame: NSRect(x: 0, y: window.contentView!.bounds.height - 40, width: window.contentView!.bounds.width, height: 40))
+        // Toolbar with controls (uses spacing tokens for consistent alignment)
+        let toolbarHeight: CGFloat = 40
+        let toolbar = NSView(frame: NSRect(x: 0,
+                                           y: window.contentView!.bounds.height - toolbarHeight,
+                                           width: window.contentView!.bounds.width,
+                                           height: toolbarHeight))
         toolbar.autoresizingMask = [.width, .minYMargin]
 
+        let buttonY: CGFloat = (toolbarHeight - 24) / 2
+        let buttonH: CGFloat = 24
+        let padding = LayoutConstants.spacingMD
+
         // Refresh button
-        let refreshButton = NSButton(frame: NSRect(x: 10, y: 8, width: 80, height: 24))
+        let refreshButton = NSButton(frame: NSRect(x: padding, y: buttonY, width: 80, height: buttonH))
         refreshButton.title = "Refresh"
         refreshButton.bezelStyle = .rounded
         refreshButton.target = self
         refreshButton.action = #selector(refreshStatistics)
+        refreshButton.toolTip = "Refresh statistics now (⌘R)"
+        refreshButton.keyEquivalent = "r"
+        refreshButton.keyEquivalentModifierMask = .command
         toolbar.addSubview(refreshButton)
 
-        // Auto-refresh checkbox
-        autoRefreshCheckbox = NSButton(checkboxWithTitle: "Auto-refresh", target: self, action: nil)
-        autoRefreshCheckbox.frame = NSRect(x: 100, y: 10, width: 120, height: 20)
+        // Auto-refresh checkbox — explicit action so toggling it kicks an
+        // immediate refresh (and visually confirms the change), instead of
+        // waiting for the next 2s tick.
+        autoRefreshCheckbox = NSButton(checkboxWithTitle: "Auto-refresh",
+                                       target: self,
+                                       action: #selector(autoRefreshToggled(_:)))
+        autoRefreshCheckbox.frame = NSRect(x: padding + 80 + LayoutConstants.spacingMD,
+                                           y: buttonY,
+                                           width: 120,
+                                           height: buttonH)
         autoRefreshCheckbox.state = .on
+        autoRefreshCheckbox.toolTip = "Refresh statistics automatically every 2 seconds"
         toolbar.addSubview(autoRefreshCheckbox)
 
-        // Status label
-        let statusLabel = NSTextField(labelWithString: "Auto-refresh: Every 2 seconds")
-        statusLabel.frame = NSRect(x: 230, y: 12, width: 250, height: 16)
-        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        // Status label — right-aligned and autoresizing
+        let statusW: CGFloat = 200
+        let statusLabel = NSTextField(labelWithString: "Auto-refresh · every 2s")
+        statusLabel.frame = NSRect(x: window.contentView!.bounds.width - statusW - padding,
+                                   y: (toolbarHeight - 16) / 2,
+                                   width: statusW,
+                                   height: 16)
+        statusLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody)
         statusLabel.textColor = .secondaryLabelColor
+        statusLabel.alignment = .right
+        statusLabel.autoresizingMask = [.minXMargin]
         toolbar.addSubview(statusLabel)
 
         // Separator line
@@ -183,5 +209,13 @@ class SwitchStatisticsWindowController: NSWindowController {
 
     @objc private func refreshStatistics() {
         loadStatistics()
+    }
+
+    @objc private func autoRefreshToggled(_ sender: NSButton) {
+        // Toggling on triggers an immediate refresh so the user gets
+        // instant feedback that the control worked.
+        if sender.state == .on {
+            loadStatistics()
+        }
     }
 }

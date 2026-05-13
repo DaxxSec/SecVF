@@ -44,6 +44,7 @@ class LogViewerWindowController: NSWindowController {
             defer: false
         )
         window.title = logType.displayName
+        window.minSize = NSSize(width: 600, height: 360)
         window.center()
 
         super.init(window: window)
@@ -70,37 +71,63 @@ class LogViewerWindowController: NSWindowController {
         let contentView = NSView(frame: window.contentView!.bounds)
         contentView.autoresizingMask = [.width, .height]
 
-        // Toolbar with controls
-        let toolbar = NSView(frame: NSRect(x: 0, y: window.contentView!.bounds.height - 40, width: window.contentView!.bounds.width, height: 40))
+        // Toolbar with controls (uses 4pt spacing grid; spacingLG between groups)
+        let toolbarHeight: CGFloat = 40
+        let toolbar = NSView(frame: NSRect(x: 0,
+                                           y: window.contentView!.bounds.height - toolbarHeight,
+                                           width: window.contentView!.bounds.width,
+                                           height: toolbarHeight))
         toolbar.autoresizingMask = [.width, .minYMargin]
 
+        let buttonY: CGFloat = (toolbarHeight - 24) / 2  // Center 24pt buttons in 40pt toolbar
+        let buttonW: CGFloat = 80
+        let buttonH: CGFloat = 24
+        let padding = LayoutConstants.spacingMD
+
         // Refresh button
-        let refreshButton = NSButton(frame: NSRect(x: 10, y: 8, width: 80, height: 24))
+        let refreshButton = NSButton(frame: NSRect(x: padding, y: buttonY, width: buttonW, height: buttonH))
         refreshButton.title = "Refresh"
         refreshButton.bezelStyle = .rounded
         refreshButton.target = self
         refreshButton.action = #selector(refreshLogs)
+        refreshButton.toolTip = "Reload the log file (⌘R)"
+        refreshButton.keyEquivalent = "r"
+        refreshButton.keyEquivalentModifierMask = .command
         toolbar.addSubview(refreshButton)
 
         // Clear button
-        let clearButton = NSButton(frame: NSRect(x: 100, y: 8, width: 80, height: 24))
+        let clearButton = NSButton(frame: NSRect(x: padding + buttonW + LayoutConstants.spacingSM,
+                                                 y: buttonY,
+                                                 width: buttonW,
+                                                 height: buttonH))
         clearButton.title = "Clear"
         clearButton.bezelStyle = .rounded
         clearButton.target = self
         clearButton.action = #selector(clearLogs)
+        clearButton.toolTip = "Erase the log file on disk (cannot be undone)"
         toolbar.addSubview(clearButton)
 
-        // Auto-scroll checkbox
-        autoScrollCheckbox = NSButton(checkboxWithTitle: "Auto-scroll", target: self, action: nil)
-        autoScrollCheckbox.frame = NSRect(x: 190, y: 10, width: 100, height: 20)
+        // Auto-scroll checkbox — aligned with buttons on the same baseline
+        autoScrollCheckbox = NSButton(checkboxWithTitle: "Auto-scroll",
+                                      target: self,
+                                      action: #selector(autoScrollToggled(_:)))
+        let checkboxX = padding + (buttonW + LayoutConstants.spacingSM) * 2 + LayoutConstants.spacingMD
+        autoScrollCheckbox.frame = NSRect(x: checkboxX, y: buttonY, width: 100, height: buttonH)
         autoScrollCheckbox.state = .on
+        autoScrollCheckbox.toolTip = "Follow new log entries as they arrive"
         toolbar.addSubview(autoScrollCheckbox)
 
-        // Status label
-        let statusLabel = NSTextField(labelWithString: "Auto-refresh: Every 2 seconds")
-        statusLabel.frame = NSRect(x: 300, y: 12, width: 250, height: 16)
-        statusLabel.font = NSFont.systemFont(ofSize: 11)
+        // Status label — right-aligned, autoresizes with the window
+        let statusW: CGFloat = 200
+        let statusLabel = NSTextField(labelWithString: "Auto-refresh · every 2s")
+        statusLabel.frame = NSRect(x: window.contentView!.bounds.width - statusW - padding,
+                                   y: (toolbarHeight - 16) / 2,
+                                   width: statusW,
+                                   height: 16)
+        statusLabel.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody)
         statusLabel.textColor = .secondaryLabelColor
+        statusLabel.alignment = .right
+        statusLabel.autoresizingMask = [.minXMargin]
         toolbar.addSubview(statusLabel)
 
         // Separator line
@@ -270,8 +297,6 @@ class LogViewerWindowController: NSWindowController {
     }
 
     @objc private func clearLogs() {
-        textView.string = ""
-
         let alert = NSAlert()
         alert.messageText = "Clear Log File?"
         alert.informativeText = "This will permanently delete the current log file:\n\(getLogPath())\n\nThis action cannot be undone."
@@ -279,14 +304,22 @@ class LogViewerWindowController: NSWindowController {
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
 
-        if alert.runModal() == .alertFirstButtonReturn {
-            do {
-                try "".write(toFile: getLogPath(), atomically: true, encoding: .utf8)
-                textView.string = "Log file cleared.\n"
-                lastFileSize = 0
-            } catch {
-                textView.string = "Error clearing log file:\n\(error.localizedDescription)"
-            }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        do {
+            try "".write(toFile: getLogPath(), atomically: true, encoding: .utf8)
+            textView.string = "Log file cleared.\n"
+            lastFileSize = 0
+        } catch {
+            textView.string = "Error clearing log file:\n\(error.localizedDescription)"
+        }
+    }
+
+    @objc private func autoScrollToggled(_ sender: NSButton) {
+        // When the user re-enables auto-scroll, jump to the bottom immediately
+        // instead of waiting for the next 2s refresh tick.
+        if sender.state == .on {
+            textView.scrollToEndOfDocument(nil)
         }
     }
 }

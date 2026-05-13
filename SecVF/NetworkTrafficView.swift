@@ -29,11 +29,12 @@ class NetworkTrafficView: NSView {
     var sourceVMName: String = "Client"
     var routerVMName: String = "Router"
 
-    // Animation properties
+    // Animation properties — packet streamer tint cycles through tactical
+    // accents. Pulled from AppColors so a future palette swap propagates.
     private let packetColors: [NSColor] = [
-        NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0),   // Neon green
-        NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 1.0),   // Cyan
-        NSColor(red: 0.4, green: 0.8, blue: 1.0, alpha: 1.0),   // Light blue
+        AppColors.accentNeonGreen,
+        AppColors.accentODGlow,
+        AppColors.accentOrangeHot,
     ]
 
     struct AnimatedPacket {
@@ -142,12 +143,12 @@ class NetworkTrafficView: NSView {
         let lineTop = height - 15
         let lineBottom: CGFloat = 15
 
-        // Glow effect
+        // Glow effect — OD-tinted shadow matches the tactical accent family
         context.saveGState()
-        context.setShadow(offset: .zero, blur: 8, color: NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 0.5).cgColor)
+        context.setShadow(offset: .zero, blur: 8, color: AppColors.accentODGlow.withAlphaComponent(0.5).cgColor)
 
         // Main line
-        context.setStrokeColor(NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.6).cgColor)
+        context.setStrokeColor(AppColors.borderODEmphasis.cgColor)
         context.setLineWidth(2)
         context.setLineDash(phase: 0, lengths: [4, 4])
         context.move(to: CGPoint(x: lineX, y: lineTop))
@@ -174,13 +175,13 @@ class NetworkTrafficView: NSView {
             context.restoreGState()
         }
 
-        // Stats background
+        // Stats background — translucent panel tint
         let statsRect = NSRect(x: statsX, y: statsY, width: statsWidth, height: statsHeight)
-        context.setFillColor(NSColor(red: 0.04, green: 0.04, blue: 0.08, alpha: 0.9).cgColor)
+        context.setFillColor(AppColors.backgroundPanel.withAlphaComponent(0.9).cgColor)
         context.fill(statsRect)
 
         // Stats border
-        context.setStrokeColor(NSColor(red: 0.0, green: 0.6, blue: 0.8, alpha: 0.4).cgColor)
+        context.setStrokeColor(AppColors.borderOD.cgColor)
         context.setLineWidth(1)
         context.setLineDash(phase: 0, lengths: [])
         context.stroke(statsRect)
@@ -188,11 +189,11 @@ class NetworkTrafficView: NSView {
         // Draw statistics text
         let titleAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .bold),
-            .foregroundColor: NSColor(red: 0.0, green: 1.0, blue: 0.6, alpha: 1.0)
+            .foregroundColor: AppColors.statusRunning
         ]
         let valueAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 8, weight: .medium),
-            .foregroundColor: NSColor(red: 0.7, green: 0.9, blue: 1.0, alpha: 1.0)
+            .foregroundColor: AppColors.textOD
         ]
 
         // Title
@@ -215,7 +216,7 @@ class NetworkTrafficView: NSView {
         // Draw direction arrows - properly centered on line
         let arrowAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold),
-            .foregroundColor: NSColor(red: 0.0, green: 0.9, blue: 1.0, alpha: 0.8)
+            .foregroundColor: AppColors.accentODGlow.withAlphaComponent(0.8)
         ]
 
         // Measure arrow width to center properly

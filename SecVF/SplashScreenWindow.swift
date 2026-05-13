@@ -57,21 +57,21 @@ class SplashScreenWindow: NSWindow {
     private func setupUI() {
         guard let contentView = contentView else { return }
 
-        // Dark gradient background - cybersecurity aesthetic
+        // Dark gradient background — tactical/cybersecurity aesthetic
         let backgroundView = GradientView(frame: contentView.bounds)
         backgroundView.autoresizingMask = [.width, .height]
         backgroundView.colors = [
-            NSColor(red: 0.05, green: 0.05, blue: 0.08, alpha: 0.98),  // Deep black
-            NSColor(red: 0.08, green: 0.08, blue: 0.12, alpha: 0.98)   // Slightly lighter black
+            AppColors.backgroundPrimary.withAlphaComponent(0.98),
+            AppColors.backgroundSecondary.withAlphaComponent(0.98)
         ]
         backgroundView.wantsLayer = true
-        backgroundView.layer?.cornerRadius = 20
+        backgroundView.layer?.cornerRadius = LayoutConstants.cornerRadiusLG
         contentView.addSubview(backgroundView)
 
-        // Logo container with neon glow effect
+        // Logo container with OD glow effect
         let logoContainer = NSView(frame: NSRect(x: 100, y: 180, width: 300, height: 150))
         logoContainer.wantsLayer = true
-        logoContainer.layer?.shadowColor = NSColor(red: 0.0, green: 0.8, blue: 1.0, alpha: 1.0).cgColor  // Neon cyan
+        logoContainer.layer?.shadowColor = AppColors.accentODGlow.cgColor
         logoContainer.layer?.shadowOpacity = 1.0
         logoContainer.layer?.shadowOffset = CGSize.zero
         logoContainer.layer?.shadowRadius = 40
@@ -102,18 +102,18 @@ class SplashScreenWindow: NSWindow {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
 
-        // "Sec" in light gray
+        // "Sec" in light text
         let secPart = NSAttributedString(string: "Sec", attributes: [
             .font: font,
-            .foregroundColor: NSColor(red: 0.85, green: 0.85, blue: 0.85, alpha: 1.0),
+            .foregroundColor: AppColors.textLight,
             .paragraphStyle: paragraphStyle
         ])
         attributedTitle.append(secPart)
 
-        // "VF" in medium gray
+        // "VF" in muted text
         let vfPart = NSAttributedString(string: "VF", attributes: [
             .font: font,
-            .foregroundColor: NSColor(red: 0.6, green: 0.6, blue: 0.6, alpha: 1.0),  // Medium gray
+            .foregroundColor: AppColors.textMuted,
             .paragraphStyle: paragraphStyle
         ])
         attributedTitle.append(vfPart)
@@ -121,22 +121,22 @@ class SplashScreenWindow: NSWindow {
         titleLabel.attributedStringValue = attributedTitle
         contentView.addSubview(titleLabel)
 
-        // Subtitle - Light gray
+        // Subtitle - subtle gray
         subtitleLabel = NSTextField(labelWithString: "Security Virtualization Framework\nBuilt on Apple Virtualization Framework")
         subtitleLabel.frame = NSRect(x: 0, y: 60, width: 500, height: 50)
         subtitleLabel.alignment = .center
-        subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        subtitleLabel.textColor = NSColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0)
+        subtitleLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSmall, weight: .medium)
+        subtitleLabel.textColor = AppColors.textSubtle
         subtitleLabel.alphaValue = 0
         contentView.addSubview(subtitleLabel)
 
-        // Version/Loading label - Soft white
+        // Version/Loading label - light text
         let versionLabel = NSTextField(labelWithString: "[ INITIALIZING SANDBOX ]")
         self.statusLabel = versionLabel
         versionLabel.frame = NSRect(x: 0, y: 20, width: 500, height: 20)
         versionLabel.alignment = .center
-        versionLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-        versionLabel.textColor = NSColor(red: 0.7, green: 0.7, blue: 0.7, alpha: 1.0)  // Soft white/gray
+        versionLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        versionLabel.textColor = AppColors.textLight
         versionLabel.alphaValue = 0
         contentView.addSubview(versionLabel)
 
