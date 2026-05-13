@@ -552,11 +552,47 @@ class VMLibraryWindowController: NSWindowController,
             textColor = AppColors.textOD
         }
         let fontWeight: NSFont.Weight = isPrimary ? .semibold : .medium
-        button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+        // Map each toolbar button to its mockup-spec leading glyph so the
+        // pill row reads as an icon strip even before the eye lands on
+        // the label. Falls back to plain text for anything unrecognized
+        // (other buttons that flow through this styler in the future).
+        let label = button.title
+        let glyph = Self.toolbarGlyph(for: button, label: label)
+        let displayString: String
+        if let glyph = glyph, !label.hasPrefix(glyph) {
+            displayString = "\(glyph)  \(label)"
+        } else {
+            displayString = label
+        }
+        button.attributedTitle = NSAttributedString(string: displayString, attributes: [
             .foregroundColor: textColor.withAlphaComponent(enabled ? 1.0 : 0.4),
             .font: NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: fontWeight)
         ])
         button.alphaValue = enabled ? 1.0 : 0.7
+    }
+
+    /// Map a toolbar button to its leading glyph (mockup parity). Drives
+    /// the icon column on every pill so the toolbar reads as an icon row
+    /// at a glance. Returns nil for buttons we don't have a glyph for —
+    /// the styler leaves those as plain text.
+    ///
+    /// `applyButtonStyle` is called repeatedly (on enable changes, etc.)
+    /// and updates `attributedTitle`, which causes subsequent reads of
+    /// `button.title` to include the glyph + double-space prefix we
+    /// added. So we strip that prefix here before matching, so the
+    /// mapping is idempotent under re-styling.
+    private static func toolbarGlyph(for button: NSButton, label: String) -> String? {
+        let canonical = label.components(separatedBy: "  ").last ?? label
+        switch canonical {
+        case "Start":     return "▶"
+        case "New":       return "＋"
+        case "Import":    return "↧"
+        case "Configure": return "⚙"
+        case "Clone":     return "⎘"
+        case "Rename":    return "✎"
+        case "Delete":    return "🗑"
+        default:          return nil
+        }
     }
 
     /// Wrap a set of NSButton instances in a rounded pill container with a
