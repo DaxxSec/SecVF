@@ -137,6 +137,17 @@ class VMLibraryWindowController: NSWindowController,
     // changes.
     private var connectionOverlay: VMConnectionOverlayView?
 
+    /// Optional set of VM UUIDs to focus the standard-tab table on.
+    /// `nil` (default) means "show every VM"; a non-nil set means
+    /// "show only the rows whose IDs are in this set". Driven by the
+    /// "Focus Running ▾" button in the tabs row.
+    private var runningFilterIDs: Set<UUID>?
+
+    /// Button that pops the running-VM filter menu. Hidden when no VMs
+    /// are running (nothing to filter to). Title gets a count badge
+    /// while a filter is active so the user can see at a glance.
+    private var runningFilterButton: NSButton?
+
     // Bottom status bar — slim global-state strip pinned to the bottom of
     // the content view, under the packet panel.
     private var bottomStatusBar: NSView?
@@ -1240,9 +1251,9 @@ class VMLibraryWindowController: NSWindowController,
 
         let selectedRow = tableView?.selectedRow ?? -1
 
-        let allVMs = vmManager.virtualMachines
+        let displayed = displayedStandardVMs
 
-        guard selectedRow >= 0, selectedRow < allVMs.count else {
+        guard selectedRow >= 0, selectedRow < displayed.count else {
             // Empty state — no VM picked
             detailNameLabel?.stringValue = "No VM selected"
             detailNameLabel?.textColor = AppColors.textMuted
@@ -1258,7 +1269,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = allVMs[selectedRow]
+        let vm = displayed[selectedRow]
 
         detailNameLabel?.stringValue = vm.name
         detailNameLabel?.textColor = AppColors.textPrimary
@@ -1420,8 +1431,7 @@ class VMLibraryWindowController: NSWindowController,
                   let spark = cell.subviews.first(where: { $0 is SparklineView }) as? SparklineView else {
                 continue
             }
-            let vmName = vmManager.virtualMachines.indices.contains(row)
-                ? vmManager.virtualMachines[row].name : ""
+            let vmName = standardVM(at: row)?.name ?? ""
             spark.samples = trafficSamples[vmName] ?? []
         }
     }
@@ -1514,13 +1524,37 @@ class VMLibraryWindowController: NSWindowController,
         return label
     }
 
+    /// VMs that should appear as rows in the Standard tab right now,
+    /// accounting for any user-applied running-VM focus filter. When
+    /// `runningFilterIDs` is nil the master list is returned unchanged.
+    /// All table-row accessors (numberOfRows, viewFor, selection-based
+    /// action handlers) must read through this — never `vmManager.virtualMachines`
+    /// directly — so row indices stay consistent with what's on screen.
+    private var displayedStandardVMs: [VMConfiguration] {
+        let all = vmManager.virtualMachines
+        guard let ids = runningFilterIDs, !ids.isEmpty else { return all }
+        return all.filter { ids.contains($0.id) }
+    }
+
+    /// Safe row→VM lookup against the currently-displayed standard list.
+    /// Returns nil if `row` is out of bounds (e.g. table reload race).
+    private func standardVM(at row: Int) -> VMConfiguration? {
+        let list = displayedStandardVMs
+        guard row >= 0, row < list.count else { return nil }
+        return list[row]
+    }
+
     /// Recompute the (router, guest) row pairs that the connection overlay
     /// renders. Anchored on running router VMs so each link appears once
     /// (router→guest, never the reverse). Called whenever a VM status
     /// changes or the table reloads.
+    ///
+    /// Row indices are resolved against `displayedStandardVMs` (i.e. the
+    /// filtered list the table is showing), not the master list, so the
+    /// brackets stay aligned with the visible rows when a filter is on.
     private func refreshConnectionOverlay() {
         guard let overlay = connectionOverlay else { return }
-        let vms = vmManager.virtualMachines
+        let vms = displayedStandardVMs
         var pairs: [(fromRow: Int, toRow: Int)] = []
         for (i, vm) in vms.enumerated() {
             guard vm.status == .running else { continue }
@@ -1558,6 +1592,7 @@ class VMLibraryWindowController: NSWindowController,
     private func addLibraryTabsHeader(in contentView: NSView, frame: NSRect) {
         libraryTabControl?.removeFromSuperview()
         recoveryModeCheckbox?.removeFromSuperview()
+        runningFilterButton?.removeFromSuperview()
 
         let tabs = NSSegmentedControl(labels: ["Standard VMs", "AI Sandbox"],
                                       trackingMode: .selectOne,
@@ -1590,6 +1625,124 @@ class VMLibraryWindowController: NSWindowController,
         check.autoresizingMask = [.minYMargin]
         contentView.addSubview(check)
         recoveryModeCheckbox = check
+
+        // "▼ Focus Running" button — opens a menu of currently-running VMs
+        // with check marks. Selecting one or more focuses the table to only
+        // those rows (great when 6+ VMs are listed but you only care about
+        // the 2 that are firing right now). "Show all" clears the filter.
+        // Anchored to the right side of the tabs row.
+        let filterBtnWidth: CGFloat = 150
+        let filterBtnX = frame.origin.x + frame.width - filterBtnWidth
+        let filterBtn = NSButton(title: "▼ Focus Running",
+                                 target: self,
+                                 action: #selector(showRunningFilterMenu(_:)))
+        filterBtn.frame = NSRect(x: filterBtnX,
+                                 y: frame.origin.y + (frame.height - 22) / 2,
+                                 width: filterBtnWidth,
+                                 height: 22)
+        filterBtn.isBordered = false
+        filterBtn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        filterBtn.wantsLayer = true
+        filterBtn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        filterBtn.layer?.borderColor = AppColors.borderOD.cgColor
+        filterBtn.layer?.borderWidth = 1.0
+        filterBtn.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        filterBtn.attributedTitle = NSAttributedString(string: "▼ Focus Running", attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+        ])
+        filterBtn.toolTip = "Focus the table on specific running VMs (multi-select). Useful when many VMs are listed but only a couple are operationally relevant right now."
+        filterBtn.autoresizingMask = [.minXMargin, .minYMargin]
+        filterBtn.setAccessibilityLabel("Focus running VMs")
+        contentView.addSubview(filterBtn)
+        runningFilterButton = filterBtn
+        updateRunningFilterButtonTitle()
+    }
+
+    /// Sync the focus-filter button title with current filter state. Shows
+    /// the count when a filter is active so the user knows the table is
+    /// trimmed without having to expand the menu.
+    private func updateRunningFilterButtonTitle() {
+        guard let btn = runningFilterButton else { return }
+        let title: String
+        if let ids = runningFilterIDs, !ids.isEmpty {
+            title = "▼ Focus: \(ids.count)"
+        } else {
+            title = "▼ Focus Running"
+        }
+        btn.attributedTitle = NSAttributedString(string: title, attributes: [
+            .foregroundColor: AppColors.textPrimary,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+        ])
+        let isActive = runningFilterIDs != nil && !(runningFilterIDs?.isEmpty ?? true)
+        btn.layer?.borderColor = (isActive ? AppColors.accentODGlow : AppColors.borderOD).cgColor
+    }
+
+    /// Pop a menu of running VMs with check marks. Toggling an item edits
+    /// `runningFilterIDs`; the "Show all" item resets to nil. Empty list
+    /// when nothing is running so the user sees that explicitly rather
+    /// than a confusing empty menu.
+    @objc private func showRunningFilterMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let showAll = NSMenuItem(title: "Show all VMs",
+                                 action: #selector(focusClearFilter(_:)),
+                                 keyEquivalent: "")
+        showAll.target = self
+        if runningFilterIDs == nil || runningFilterIDs?.isEmpty == true {
+            showAll.state = .on
+        }
+        menu.addItem(showAll)
+        menu.addItem(.separator())
+
+        let running = vmManager.virtualMachines.filter { $0.status == .running }
+        if running.isEmpty {
+            let none = NSMenuItem(title: "— No VMs running —",
+                                  action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+        } else {
+            for vm in running {
+                let item = NSMenuItem(title: vm.name,
+                                      action: #selector(focusToggleVM(_:)),
+                                      keyEquivalent: "")
+                item.target = self
+                item.representedObject = vm.id
+                if runningFilterIDs?.contains(vm.id) == true {
+                    item.state = .on
+                }
+                menu.addItem(item)
+            }
+        }
+
+        let origin = NSPoint(x: 0, y: sender.bounds.height + 2)
+        menu.popUp(positioning: nil, at: origin, in: sender)
+    }
+
+    @objc private func focusClearFilter(_ sender: NSMenuItem) {
+        runningFilterIDs = nil
+        applyRunningFilterChange()
+    }
+
+    @objc private func focusToggleVM(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        var set = runningFilterIDs ?? []
+        if set.contains(id) { set.remove(id) } else { set.insert(id) }
+        runningFilterIDs = set.isEmpty ? nil : set
+        applyRunningFilterChange()
+    }
+
+    /// Common after-edit path: refresh the table + supporting overlays so
+    /// the change is visible immediately, and update the button title so
+    /// the user sees the new active-count badge.
+    private func applyRunningFilterChange() {
+        tableView?.reloadData()
+        updateRunningFilterButtonTitle()
+        updateButtonStates()
+        updateSelectedVMDetailCard()
+        refreshEmptyStateOverlays()
+        refreshConnectionOverlay()
     }
 
     @objc private func libraryTabChanged(_ sender: NSSegmentedControl) {
@@ -2922,9 +3075,8 @@ class VMLibraryWindowController: NSWindowController,
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let selectedRow = self.tableView?.selectedRow ?? -1
-            guard selectedRow >= 0,
-                  selectedRow < self.vmManager.virtualMachines.count else { return }
-            if self.vmManager.virtualMachines[selectedRow].id == updatedId {
+            guard let vm = self.standardVM(at: selectedRow) else { return }
+            if vm.id == updatedId {
                 self.updateSelectedVMDetailCard()
             }
         }
@@ -3083,7 +3235,7 @@ class VMLibraryWindowController: NSWindowController,
 
     func numberOfRows(in tableView: NSTableView) -> Int {
         switch currentLibraryTab {
-        case .standard:  return vmManager.virtualMachines.count
+        case .standard:  return displayedStandardVMs.count
         case .aiSandbox: return aiSandboxBundles.count
         }
     }
@@ -3109,9 +3261,8 @@ class VMLibraryWindowController: NSWindowController,
         }
 
         let vmName: String? = {
-            if currentLibraryTab == .standard,
-               vmManager.virtualMachines.indices.contains(row) {
-                return vmManager.virtualMachines[row].name
+            if currentLibraryTab == .standard {
+                return standardVM(at: row)?.name
             }
             return nil
         }()
@@ -3189,8 +3340,7 @@ class VMLibraryWindowController: NSWindowController,
         }
 
         // Standard VMs tab — existing behavior
-        guard row < vmManager.virtualMachines.count else { return nil }
-        let vm = vmManager.virtualMachines[row]
+        guard let vm = standardVM(at: row) else { return nil }
 
         switch tableColumn?.identifier.rawValue {
         case "NameColumn":
@@ -3380,7 +3530,8 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        selectedVM = vmManager.virtualMachines[selectedRow]
+        guard let vmToStart = standardVM(at: selectedRow) else { return }
+        selectedVM = vmToStart
 
         // Update last used date
         vmManager.updateLastUsedDate(selectedVM!)
@@ -3437,7 +3588,7 @@ class VMLibraryWindowController: NSWindowController,
             showAlert(message: "Please select a VM to delete")
             return
         }
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Delete VM?"
@@ -3464,7 +3615,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Rename VM"
@@ -3496,7 +3647,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
 
         let alert = NSAlert()
         alert.messageText = "Clone VM"
@@ -3564,7 +3715,7 @@ class VMLibraryWindowController: NSWindowController,
             return
         }
 
-        let vm = vmManager.virtualMachines[selectedRow]
+        guard let vm = standardVM(at: selectedRow) else { return }
         showConfigureVMDialog(vm)
     }
 
