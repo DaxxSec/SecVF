@@ -73,6 +73,8 @@
 		THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = THBT001THBT001THBT001001 /* TacticalHoverButton.swift */; };
 		TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */; };
 		TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */; };
+		ICMW002ICMW002ICMW002002 /* ISOCacheManagerWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = ICMW001ICMW001ICMW001001 /* ISOCacheManagerWindow.swift */; };
+		SSWC002SSWC002SSWC002002 /* SwitchStatisticsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = SSWC001SSWC001SSWC001001 /* SwitchStatisticsWindowController.swift */; };
 		TSSC002TSSC002TSSC002002 /* TacticalSidebarSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = TSSC001TSSC001TSSC001001 /* TacticalSidebarSection.swift */; };
 		TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
@@ -167,6 +169,8 @@
 		THBT001THBT001THBT001001 /* TacticalHoverButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalHoverButton.swift; sourceTree = "<group>"; };
 		TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableRowView.swift; sourceTree = "<group>"; };
 		TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalEmptyStateView.swift; sourceTree = "<group>"; };
+		ICMW001ICMW001ICMW001001 /* ISOCacheManagerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ISOCacheManagerWindow.swift; sourceTree = "<group>"; };
+		SSWC001SSWC001SSWC001001 /* SwitchStatisticsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchStatisticsWindowController.swift; sourceTree = "<group>"; };
 		TSSC001TSSC001TSSC001001 /* TacticalSidebarSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalSidebarSection.swift; sourceTree = "<group>"; };
 		TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableHeaderCell.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
@@ -246,6 +250,8 @@
 				THBT001THBT001THBT001001 /* TacticalHoverButton.swift */,
 				TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */,
 				TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */,
+				ICMW001ICMW001ICMW001001 /* ISOCacheManagerWindow.swift */,
+				SSWC001SSWC001SSWC001001 /* SwitchStatisticsWindowController.swift */,
 				TSSC001TSSC001TSSC001001 /* TacticalSidebarSection.swift */,
 				TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */,
 				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
@@ -469,6 +475,8 @@
 				THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */,
 				TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */,
 				TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */,
+				ICMW002ICMW002ICMW002002 /* ISOCacheManagerWindow.swift in Sources */,
+				SSWC002SSWC002SSWC002002 /* SwitchStatisticsWindowController.swift in Sources */,
 				TSSC002TSSC002TSSC002002 /* TacticalSidebarSection.swift in Sources */,
 				TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */,
 				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,

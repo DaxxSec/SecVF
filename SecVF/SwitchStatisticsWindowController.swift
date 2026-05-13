@@ -41,7 +41,13 @@ class SwitchStatisticsWindowController: NSWindowController {
     }
 
     deinit {
-        stopAutoRefresh()
+        // Tear down the refresh timer directly — `stopAutoRefresh` is
+        // main-actor isolated and can't be called from a nonisolated
+        // deinit. The Timer + nil-out are both safe from any thread
+        // (Timer.invalidate is documented thread-safe; the optional
+        // assignment doesn't touch UI state).
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     // MARK: - UI Setup
