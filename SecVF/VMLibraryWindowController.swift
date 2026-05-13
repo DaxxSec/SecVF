@@ -1028,105 +1028,126 @@ class VMLibraryWindowController: NSWindowController,
         card.layer?.addSublayer(glow)
 
         // Cell layout — every value sits on the same baseline (`valueY`),
-        // every caption sits on `captionY` directly above it. Name + pill
-        // align with the value row so the card reads as a single horizontal
-        // band, not a misaligned grid.
+        // every caption sits on `captionY` directly above it. Identity
+        // (pill + name) is LEFT-anchored; the metric grid lives in a
+        // right-anchored container so it stays glued to the right edge of
+        // the card as the window widens, instead of leaving a half-card-
+        // wide empty band in the middle.
         let cellPadding: CGFloat = LayoutConstants.spacingLG  // 16pt edge padding
-        let valueY: CGFloat = 14         // bottom of the value text row
+        let valueY: CGFloat = 14
         let valueH: CGFloat = 20
-        let captionY: CGFloat = 41       // bottom of the caption text row
+        let captionY: CGFloat = 41
         let captionH: CGFloat = 12
-        let pillW: CGFloat = 84
-        let nameW: CGFloat = 180
-        let gapIdentity: CGFloat = LayoutConstants.spacingLG  // pill → name, name → metrics
-        let gapMetric: CGFloat = LayoutConstants.spacingMD    // between metric cells
-
-        var x: CGFloat = cellPadding
-
-        // ── STATUS pill ──────────────────────────────────────────────────
-        // Pill height 22 to give visible padding around 9pt label; centered
-        // on the value baseline.
+        let pillW: CGFloat = 96       // bumped 84→96 so "◆ TEMPLATE" / "● RUNNING" have breathing room
         let pillH: CGFloat = 22
+        let nameW: CGFloat = 200
+        let gapMetric: CGFloat = LayoutConstants.spacingLG     // 16pt between metric cells (was 12)
+
+        // ── LEFT: identity (pill + name) ─────────────────────────────────
         let pill = makeStatusPill()
-        pill.frame = NSRect(x: x, y: valueY + (valueH - pillH) / 2, width: pillW, height: pillH)
+        pill.frame = NSRect(x: cellPadding,
+                            y: valueY + (valueH - pillH) / 2,
+                            width: pillW, height: pillH)
         pill.setAccessibilityLabel("Selected VM status")
         card.addSubview(pill)
         detailStatusPill = pill
-        x += pillW + LayoutConstants.spacingSM  // tight 8pt gap — pill + name read as a pair
 
-        // ── Name (monospace, prominent) ──────────────────────────────────
         let nameLabel = NSTextField(labelWithString: "")
         nameLabel.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeSubtitle, weight: .semibold)
         nameLabel.textColor = AppColors.textPrimary
-        nameLabel.frame = NSRect(x: x, y: valueY, width: nameW, height: valueH)
+        nameLabel.frame = NSRect(x: cellPadding + pillW + LayoutConstants.spacingSM,
+                                 y: valueY,
+                                 width: nameW, height: valueH)
+        nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.setAccessibilityLabel("Selected VM name")
         card.addSubview(nameLabel)
         detailNameLabel = nameLabel
 
-        // Vertical divider between "identity" (pill + name) and metrics — a
-        // 1pt vertical line in subtle OD, spanning roughly the value + caption
-        // rows so it visually frames the two-row metric grid.
-        let dividerX = x + nameW + LayoutConstants.spacingSM
+        // ── RIGHT: metrics container (right-anchored) ────────────────────
+        // Compute total width: 5 cells with their widths + 4 gaps + leading
+        // divider region. The container's x = card.width - totalW - cellPadding,
+        // and .minXMargin autoresizing keeps it glued to the right edge.
+        let osW: CGFloat = 130
+        let cpuW: CGFloat = 110
+        let diskW: CGFloat = 110
+        let netModeW: CGFloat = 100
+        let rateW: CGFloat = 160     // wider so creation timestamp doesn't truncate to "5..."
+        let dividerW: CGFloat = 1
+        let dividerGap: CGFloat = LayoutConstants.spacingLG  // gap divider → first metric cell
+        let metricsW = dividerW + dividerGap
+                       + osW + gapMetric
+                       + cpuW + gapMetric
+                       + diskW + gapMetric
+                       + netModeW + gapMetric
+                       + rateW
+
+        let metrics = NSView()
+        metrics.frame = NSRect(x: frame.width - metricsW - cellPadding,
+                               y: 0,
+                               width: metricsW, height: frame.height)
+        metrics.autoresizingMask = [.minXMargin]
+        card.addSubview(metrics)
+
+        // Vertical divider between identity and metrics — sits at x=0 inside
+        // the metrics container so it's flush with the metric grid's left
+        // edge regardless of card width.
         let dividerYBottom = valueY - 4
         let dividerYTop = captionY + captionH + 4
-        let divider = NSBox(frame: NSRect(x: dividerX,
+        let divider = NSBox(frame: NSRect(x: 0,
                                           y: dividerYBottom,
-                                          width: 1,
+                                          width: dividerW,
                                           height: dividerYTop - dividerYBottom))
         divider.boxType = .custom
         divider.borderWidth = 0
         divider.fillColor = AppColors.borderOD
-        card.addSubview(divider)
-        x = dividerX + 1 + gapIdentity
+        metrics.addSubview(divider)
 
-        // ── OS / distro ──────────────────────────────────────────────────
-        let osLabel = makeMetricLabel(caption: "OS", x: x,
+        // Metric cells positioned inside the container at fixed x offsets
+        var mx: CGFloat = dividerW + dividerGap
+
+        let osCell = makeMetricLabel(caption: "OS", x: mx,
+                                     valueY: valueY, valueH: valueH,
+                                     captionY: captionY, captionH: captionH,
+                                     width: osW)
+        metrics.addSubview(osCell.caption)
+        metrics.addSubview(osCell.value)
+        detailOSLabel = osCell.value
+        mx += osW + gapMetric
+
+        let cpuCell = makeMetricLabel(caption: "CPU · RAM", x: mx,
                                       valueY: valueY, valueH: valueH,
                                       captionY: captionY, captionH: captionH,
-                                      width: 130)
-        card.addSubview(osLabel.caption)
-        card.addSubview(osLabel.value)
-        detailOSLabel = osLabel.value
-        x += 130 + gapMetric
+                                      width: cpuW)
+        metrics.addSubview(cpuCell.caption)
+        metrics.addSubview(cpuCell.value)
+        detailResourcesLabel = cpuCell.value
+        mx += cpuW + gapMetric
 
-        // ── CPU · RAM ────────────────────────────────────────────────────
-        let resourcesLabel = makeMetricLabel(caption: "CPU · RAM", x: x,
-                                             valueY: valueY, valueH: valueH,
-                                             captionY: captionY, captionH: captionH,
-                                             width: 100)
-        card.addSubview(resourcesLabel.caption)
-        card.addSubview(resourcesLabel.value)
-        detailResourcesLabel = resourcesLabel.value
-        x += 100 + gapMetric
+        let diskCell = makeMetricLabel(caption: "Disk", x: mx,
+                                       valueY: valueY, valueH: valueH,
+                                       captionY: captionY, captionH: captionH,
+                                       width: diskW)
+        metrics.addSubview(diskCell.caption)
+        metrics.addSubview(diskCell.value)
+        detailDiskLabel = diskCell.value
+        mx += diskW + gapMetric
 
-        // ── Disk ─────────────────────────────────────────────────────────
-        let diskLabel = makeMetricLabel(caption: "Disk", x: x,
-                                        valueY: valueY, valueH: valueH,
-                                        captionY: captionY, captionH: captionH,
-                                        width: 90)
-        card.addSubview(diskLabel.caption)
-        card.addSubview(diskLabel.value)
-        detailDiskLabel = diskLabel.value
-        x += 90 + gapMetric
+        let netModeCell = makeMetricLabel(caption: "Network", x: mx,
+                                          valueY: valueY, valueH: valueH,
+                                          captionY: captionY, captionH: captionH,
+                                          width: netModeW)
+        metrics.addSubview(netModeCell.caption)
+        metrics.addSubview(netModeCell.value)
+        detailNetworkModeLabel = netModeCell.value
+        mx += netModeW + gapMetric
 
-        // ── Network mode ─────────────────────────────────────────────────
-        let netModeLabel = makeMetricLabel(caption: "Network", x: x,
-                                           valueY: valueY, valueH: valueH,
-                                           captionY: captionY, captionH: captionH,
-                                           width: 80)
-        card.addSubview(netModeLabel.caption)
-        card.addSubview(netModeLabel.value)
-        detailNetworkModeLabel = netModeLabel.value
-        x += 80 + gapMetric
-
-        // ── Live rate ────────────────────────────────────────────────────
-        let netRateLabel = makeMetricLabel(caption: "↓ / ↑", x: x,
-                                           valueY: valueY, valueH: valueH,
-                                           captionY: captionY, captionH: captionH,
-                                           width: 130)
-        card.addSubview(netRateLabel.caption)
-        card.addSubview(netRateLabel.value)
-        detailNetworkRateLabel = netRateLabel.value
+        let netRateCell = makeMetricLabel(caption: "↓ / ↑", x: mx,
+                                          valueY: valueY, valueH: valueH,
+                                          captionY: captionY, captionH: captionH,
+                                          width: rateW)
+        metrics.addSubview(netRateCell.caption)
+        metrics.addSubview(netRateCell.value)
+        detailNetworkRateLabel = netRateCell.value
 
         contentView.addSubview(card)
         selectedVMDetailCard = card
@@ -1166,15 +1187,20 @@ class VMLibraryWindowController: NSWindowController,
     }
 
     /// Status pill: pill-shaped label with a leading dot, color-coded by
-    /// `selectedVM` state. Background tinted with the same hue at 15% alpha.
+    /// `selectedVM` state. Background tinted with the same hue at ~12% alpha.
+    /// cornerRadius is half the pill height = perfect capsule. Caller sizes
+    /// the pill to ~96 × 22pt so the centered "◆ TEMPLATE" / "● RUNNING"
+    /// content has ~10pt of horizontal breathing room.
     private func makeStatusPill() -> NSTextField {
         let pill = NSTextField(labelWithString: "—")
         pill.alignment = .center
         pill.font = NSFont.monospacedSystemFont(ofSize: LayoutConstants.fontSizeCaption, weight: .semibold)
         pill.wantsLayer = true
-        pill.layer?.cornerRadius = 10
+        pill.layer?.cornerRadius = 11        // half the 22pt height — proper capsule
         pill.layer?.borderWidth = LayoutConstants.borderHairline
         pill.drawsBackground = false
+        pill.isBordered = false              // no inset border around the text
+        pill.lineBreakMode = .byClipping     // never wrap the pill label
         return pill
     }
 
