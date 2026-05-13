@@ -298,11 +298,21 @@ class VMLibraryWindowController: NSWindowController,
            !tableView.tableColumns.contains(where: { $0.identifier.rawValue == "TrafficColumn" }) {
             let trafficCol = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TrafficColumn"))
             trafficCol.title = "Traffic"
+            trafficCol.headerCell = TacticalTableHeaderCell(textCell: "Traffic")
             trafficCol.width = 80
             trafficCol.minWidth = 60
             trafficCol.maxWidth = 120
-            trafficCol.headerCell.alignment = .center
             tableView.addTableColumn(trafficCol)
+        }
+
+        // Apply tactical header styling to every XIB-defined column, too.
+        // The XIB columns kept the stock NSTableHeaderCell from Interface
+        // Builder; swap them at runtime so the whole header reads as one
+        // consistent dark band instead of mixing styles.
+        if let tableView = tableView {
+            for col in tableView.tableColumns where !(col.headerCell is TacticalTableHeaderCell) {
+                col.headerCell = TacticalTableHeaderCell(textCell: col.title)
+            }
         }
 
         // Load VMs asynchronously to avoid blocking main thread
@@ -2218,6 +2228,7 @@ class VMLibraryWindowController: NSWindowController,
         for spec in columnSpecs {
             let col = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(spec.id))
             col.title = spec.title
+            col.headerCell = TacticalTableHeaderCell(textCell: spec.title)
             col.width = spec.width
             col.minWidth = 60
             outline.addTableColumn(col)
@@ -2350,14 +2361,10 @@ class VMLibraryWindowController: NSWindowController,
         dot.frame = CGRect(x: padding, y: (height - dotSize) / 2, width: dotSize, height: dotSize)
         bar.layer?.addSublayer(dot)
         statusBarPulseDot = dot
-        // Subtle pulse animation so the dot reads as "live"
-        let pulse = CABasicAnimation(keyPath: "opacity")
-        pulse.fromValue = 1.0
-        pulse.toValue = 0.45
-        pulse.duration = 1.4
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        dot.add(pulse, forKey: "pulse")
+        // Pulse animation is managed by refreshBottomStatusBar() so the
+        // dot only pulses while at least one VM is running — a steady
+        // (paused) dot when idle stops the bar from screaming "LIVE" at
+        // the user when nothing is actually live.
 
         // Three label segments left-to-right + a right-anchored disk/version
         var x = padding + dotSize + LayoutConstants.spacingSM
@@ -2424,8 +2431,28 @@ class VMLibraryWindowController: NSWindowController,
         let runningCount = vmManager.getRunningVMsCount()
         let totalCount = vmManager.virtualMachines.count
         statusBarRunningLabel?.stringValue = "\(runningCount) of \(totalCount) running"
-        statusBarPulseDot?.fillColor = (runningCount > 0
-            ? AppColors.statusRunning : AppColors.statusStopped).cgColor
+        // Pulse + shadow are only meaningful when something is actually
+        // running — keep the dot steady (no animation, dim shadow) when
+        // idle so it doesn't send a misleading "live" signal.
+        let isActive = runningCount > 0
+        if let dot = statusBarPulseDot {
+            dot.fillColor = (isActive ? AppColors.statusRunning : AppColors.statusStopped).cgColor
+            dot.shadowOpacity = isActive ? 0.8 : 0.0
+            if isActive {
+                if dot.animation(forKey: "pulse") == nil {
+                    let pulse = CABasicAnimation(keyPath: "opacity")
+                    pulse.fromValue = 1.0
+                    pulse.toValue = 0.45
+                    pulse.duration = 1.4
+                    pulse.autoreverses = true
+                    pulse.repeatCount = .infinity
+                    dot.add(pulse, forKey: "pulse")
+                }
+            } else {
+                dot.removeAnimation(forKey: "pulse")
+                dot.opacity = 0.55
+            }
+        }
 
         // Switch state
         let stats = VirtualNetworkSwitch.shared.getStatistics()

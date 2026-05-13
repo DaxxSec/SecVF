@@ -62,6 +62,7 @@
 		THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = THBT001THBT001THBT001001 /* TacticalHoverButton.swift */; };
 		TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */; };
 		TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */; };
+		TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
 		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
@@ -143,6 +144,7 @@
 		THBT001THBT001THBT001001 /* TacticalHoverButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalHoverButton.swift; sourceTree = "<group>"; };
 		TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableRowView.swift; sourceTree = "<group>"; };
 		TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalEmptyStateView.swift; sourceTree = "<group>"; };
+		TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalTableHeaderCell.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
@@ -219,6 +221,7 @@
 				THBT001THBT001THBT001001 /* TacticalHoverButton.swift */,
 				TTRV001TTRV001TTRV001001 /* TacticalTableRowView.swift */,
 				TESV001TESV001TESV001001 /* TacticalEmptyStateView.swift */,
+				TTHC001TTHC001TTHC001001 /* TacticalTableHeaderCell.swift */,
 				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
 				UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */,
@@ -429,6 +432,7 @@
 				THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */,
 				TTRV002TTRV002TTRV002002 /* TacticalTableRowView.swift in Sources */,
 				TESV002TESV002TESV002002 /* TacticalEmptyStateView.swift in Sources */,
+				TTHC002TTHC002TTHC002002 /* TacticalTableHeaderCell.swift in Sources */,
 				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
 				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
