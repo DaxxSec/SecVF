@@ -651,6 +651,58 @@ class VMLibraryWindowController: NSWindowController,
     ///
     /// The pill's frame is sized to fit its buttons; the caller positions
     /// the pill's origin.
+    /// Build the toolbar's "More ▾" overflow button — collapses the
+    /// Configure / Clone / Rename trio that used to take three slots
+    /// in the toolbar into a single popup-menu trigger. Each menu item
+    /// fires the same @IBAction selector the original button did, so
+    /// keyboard shortcuts and any other selector-based dispatch paths
+    /// (menu bar, scriptability) keep working unchanged.
+    private func makeMoreActionsButton() -> NSButton {
+        let btn = NSButton(title: "More ▾", target: self,
+                           action: #selector(showMoreActionsMenu(_:)))
+        btn.isBordered = false
+        btn.bezelStyle = .regularSquare
+        btn.font = NSFont.systemFont(ofSize: LayoutConstants.fontSizeBody, weight: .medium)
+        btn.setAccessibilityLabel("More VM actions")
+        btn.toolTip = "VM actions: Configure, Clone, Rename"
+        // Match the same width / styling the wrapped button-pill
+        // container expects (buttonW = 80 inside the pill, set there).
+        return btn
+    }
+
+    @objc private func showMoreActionsMenu(_ sender: NSButton) {
+        let menu = NSMenu(title: "More VM actions")
+
+        if let cfg = configureButton {
+            let item = NSMenuItem(title: "Configure…",
+                                  action: #selector(configureVM(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = cfg.isEnabled
+            menu.addItem(item)
+        }
+        if let clone = cloneButton {
+            let item = NSMenuItem(title: "Clone…",
+                                  action: #selector(cloneVM(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = clone.isEnabled
+            menu.addItem(item)
+        }
+        if let rename = renameButton {
+            let item = NSMenuItem(title: "Rename…",
+                                  action: #selector(renameVM(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.isEnabled = rename.isEnabled
+            menu.addItem(item)
+        }
+
+        // Position the menu just below the button's bottom-left.
+        let origin = NSPoint(x: 0, y: sender.bounds.height + 2)
+        menu.popUp(positioning: nil, at: origin, in: sender)
+    }
+
     private func makeButtonPillContainer(_ buttons: [NSButton],
                                          borderColor: NSColor = AppColors.borderOD,
                                          fillColor: NSColor = AppColors.backgroundButton.withAlphaComponent(0.55)) -> NSView {
@@ -1257,15 +1309,29 @@ class VMLibraryWindowController: NSWindowController,
 
         toolbarPillContainers.forEach { $0.removeFromSuperview() }
 
+        // Configure / Clone / Rename collapsed into a single "More ▾"
+        // overflow button. They were three persistent toolbar buttons
+        // for actions taken occasionally; the menu version saves visible
+        // pill width without losing the action paths (each menu item
+        // calls the same @IBAction the original button did).
+        let moreButton = makeMoreActionsButton()
+
         let pills: [NSView] = [
             makeButtonPillContainer([startButton].compactMap { $0 },
                                     borderColor: AppColors.accentODGlow.withAlphaComponent(0.7),
                                     fillColor: AppColors.accentOD.withAlphaComponent(0.18)),
             makeButtonPillContainer([newButton, importButton].compactMap { $0 }),
-            makeButtonPillContainer([configureButton, cloneButton, renameButton].compactMap { $0 }),
+            makeButtonPillContainer([moreButton]),
             makeButtonPillContainer([deleteButton].compactMap { $0 },
                                     borderColor: AppColors.accentRed.withAlphaComponent(0.6)),
         ]
+
+        // The wrapped Configure / Clone / Rename buttons no longer
+        // appear in the toolbar but stay as @IBOutlet bindings so the
+        // menu can fire their @IBAction selectors. Pull them out of
+        // any prior pill container so they don't paint twice.
+        [configureButton, cloneButton, renameButton].compactMap { $0 }
+            .forEach { $0.removeFromSuperview() }
 
         var px = tableX
         for pill in pills {
