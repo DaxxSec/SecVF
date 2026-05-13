@@ -595,6 +595,18 @@ class VMLibraryWindowController: NSWindowController,
         }
     }
 
+    /// Per-column horizontal alignment for the VM-table / outline cells.
+    /// Numeric columns right-align so the column reads as a clean stack
+    /// of right-justified values; everything else stays left-aligned.
+    /// Header cell alignment is set independently in the header-cell
+    /// styling path.
+    private static func columnAlignment(forColumnID id: String) -> NSTextAlignment {
+        switch id {
+        case "CPUColumn", "MemoryColumn", "DiskColumn": return .right
+        default: return .left
+        }
+    }
+
     /// Wrap a set of NSButton instances in a rounded pill container with a
     /// shared background + border. Buttons sit edge-to-edge with thin
     /// vertical dividers between them. Used by the top toolbar to group
@@ -3819,6 +3831,11 @@ class VMLibraryWindowController: NSWindowController,
 
         guard let finalCell = cell else { return nil }
 
+        // Per-column alignment — numeric values right-align so column tens
+        // and units stack cleanly; text values stay leading-aligned.
+        let columnIdRaw = tableColumn?.identifier.rawValue ?? ""
+        finalCell.textField?.alignment = Self.columnAlignment(forColumnID: columnIdRaw)
+
         // AI Sandbox tab uses the same columns but filled from the bundle row
         if currentLibraryTab == .aiSandbox {
             guard row < aiSandboxBundles.count else { return nil }
@@ -3829,9 +3846,24 @@ class VMLibraryWindowController: NSWindowController,
             case "NameColumn":
                 finalCell.textField?.stringValue = bundle.displayName + (bundle.isBase ? " (base)" : "")
             case "StatusColumn":
-                finalCell.textField?.stringValue = bundle.isBase ? "Template" : "Session"
+                // Template vs Session is the AI Sandbox tab's analog of the
+                // standard tab's status pill. Use the same inline-pill
+                // pattern: leading glyph + tinted text so the user can
+                // see "this is a template" at a glance.
+                let (glyph, color, text): (String, NSColor, String) = bundle.isBase
+                    ? ("◆", AppColors.accentOrange,    "Template")
+                    : ("●", AppColors.statusRunning,   "Session")
+                let attr = NSMutableAttributedString(string: glyph + "  ", attributes: [
+                    .foregroundColor: color
+                ])
+                attr.append(NSAttributedString(string: text, attributes: [
+                    .foregroundColor: color.withAlphaComponent(0.92)
+                ]))
+                finalCell.textField?.attributedStringValue = attr
             case "OSColumn":
-                finalCell.textField?.stringValue = "macOS"
+                // Same ⌘ glyph treatment we use on the standard tab; AI
+                // Sandbox bundles are always macOS so this is constant.
+                finalCell.textField?.stringValue = "⌘  macOS"
             case "CPUColumn":
                 finalCell.textField?.stringValue = bundle.id?.uuidString.prefix(8).description ?? "—"
             case "MemoryColumn":
