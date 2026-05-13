@@ -3697,6 +3697,22 @@ class VMLibraryWindowController: NSWindowController,
         return cell
     }
 
+    /// Return the tactical row view so selection paints an OD-green band
+    /// with a 2pt accent stripe instead of AppKit's stock blue/grey.
+    /// Shared between the standard table and the AI Sandbox outline view
+    /// (NSOutlineView inherits this dispatch from NSTableView).
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        return TacticalTableRowView()
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let row = TacticalTableRowView()
+        // The outline view has a disclosure triangle in the leading edge,
+        // so suppress the 2pt accent stripe to avoid a visual clash.
+        row.accentStripeWidth = 0
+        return row
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         // Traffic column gets a custom SparklineView cell instead of the
         // shared NSTextField cell used by every other column. We intercept
