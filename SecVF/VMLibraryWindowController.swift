@@ -124,8 +124,8 @@ class VMLibraryWindowController: NSWindowController,
 
     // Empty-state overlay labels — one per tab, shown over the table /
     // outline view when there are no rows to display.
-    private var standardEmptyStateLabel: NSTextField?
-    private var aiSandboxEmptyStateLabel: NSTextField?
+    private var standardEmptyStateLabel: NSView?
+    private var aiSandboxEmptyStateLabel: NSView?
 
     // Top toolbar pill containers (Primary / Create / Modify / Destructive).
     // Tracked so windowDidResize can re-anchor them.
@@ -1037,30 +1037,39 @@ class VMLibraryWindowController: NSWindowController,
         }
 
         // Empty-state overlays — one per tab. Hidden when their respective
-        // data source has rows. Centered over the table region.
+        // data source has rows. Centered over the table region. Composed
+        // TacticalEmptyStateView (icon + title + hint + optional CTA).
         if standardEmptyStateLabel == nil {
-            let label = makeEmptyStateLabel(
+            let view = TacticalEmptyStateView(
+                glyph: "🖥",
                 title: "No virtual machines yet",
-                hint: "Click ⊕ New to create your first VM,\nor Import to bring in an existing bundle.")
-            label.frame = NSRect(x: tableX, y: tableY,
-                                 width: tableWidth, height: tableHeight)
-            label.autoresizingMask = [.width, .height]
-            contentView.addSubview(label)
-            standardEmptyStateLabel = label
+                hint: "Click below to create your first VM, or use ⤓ Import in the toolbar to bring in an existing bundle.",
+                ctaTitle: "⊕  Create your first VM",
+                onCTA: { [weak self] in self?.showNewVMDialog() })
+            view.frame = NSRect(x: tableX, y: tableY,
+                                width: tableWidth, height: tableHeight)
+            view.autoresizingMask = [.width, .height]
+            contentView.addSubview(view)
+            standardEmptyStateLabel = view
         } else {
             standardEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
                                                    width: tableWidth, height: tableHeight)
         }
         if aiSandboxEmptyStateLabel == nil {
-            let label = makeEmptyStateLabel(
+            // No inline CTA — the build is a multi-step Tools-menu flow,
+            // a one-click button here would mis-set expectations.
+            let view = TacticalEmptyStateView(
+                glyph: "◇",
                 title: "No AI Sandbox VM",
-                hint: "Use Tools → Create AI Sandbox VM…\nto build the base bundle (30–60 min).")
-            label.frame = NSRect(x: tableX, y: tableY,
-                                 width: tableWidth, height: tableHeight)
-            label.autoresizingMask = [.width, .height]
-            label.isHidden = true   // Standard tab is default
-            contentView.addSubview(label)
-            aiSandboxEmptyStateLabel = label
+                hint: "Use Tools → Create AI Sandbox VM… to build the base bundle. First-time setup takes 30–60 min.",
+                ctaTitle: nil,
+                onCTA: nil)
+            view.frame = NSRect(x: tableX, y: tableY,
+                                width: tableWidth, height: tableHeight)
+            view.autoresizingMask = [.width, .height]
+            view.isHidden = true   // Standard tab is default
+            contentView.addSubview(view)
+            aiSandboxEmptyStateLabel = view
         } else {
             aiSandboxEmptyStateLabel?.frame = NSRect(x: tableX, y: tableY,
                                                     width: tableWidth, height: tableHeight)
