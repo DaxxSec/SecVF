@@ -126,7 +126,8 @@ class SwitchStatisticsWindowController: NSWindowController {
         textView = NSTextView(frame: scrollView.bounds)
         textView.isEditable = false
         textView.isSelectable = true
-        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.font = NSFont.monospacedSystemFont(
+            ofSize: LayoutConstants.fontSizeBody, weight: .regular)
         textView.textColor = .labelColor
         textView.backgroundColor = NSColor.textBackgroundColor
         textView.autoresizingMask = [.width]
