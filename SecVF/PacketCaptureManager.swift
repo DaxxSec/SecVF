@@ -11,7 +11,7 @@ import Combine
 
 // MARK: - Data Structures
 
-struct CapturedPacket {
+struct CapturedPacket: PacketLike {
     let number: Int
     let timestamp: Date
     let relativeTime: Double
