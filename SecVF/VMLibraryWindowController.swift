@@ -181,6 +181,15 @@ class VMLibraryWindowController: NSWindowController,
     // live guest RAM usage isn't available without guest tools.
     private var detailMemoryBarTrack: NSView?
     private var detailMemoryBarFill: CALayer?
+    // Uptime metric cell. Empty / "—" when the selected VM isn't running;
+    // formatted as "Xh Ym" or "Ym Zs" when it is.
+    private var detailUptimeLabel: NSTextField?
+    // Packets-since-start metric cell. Reads the cumulative rx+tx packet
+    // count for the VM's port on the virtual switch.
+    private var detailPacketsLabel: NSTextField?
+    // Per-VM run timestamps, keyed by UUID. Populated when a VM
+    // transitions to .running, cleared when it transitions away.
+    private var vmStartedAt: [UUID: Date] = [:]
     private var detailDiskLabel: NSTextField?
     private var detailNetworkModeLabel: NSTextField?
     private var detailNetworkRateLabel: NSTextField?
@@ -1182,18 +1191,22 @@ class VMLibraryWindowController: NSWindowController,
         // divider region. The container's x = card.width - totalW - cellPadding,
         // and .minXMargin autoresizing keeps it glued to the right edge.
         let osW: CGFloat = 130
+        let uptimeW: CGFloat = 80    // "12h 47m" / "—"
         let cpuW: CGFloat = 110
         let diskW: CGFloat = 110
         let netModeW: CGFloat = 100
         let rateW: CGFloat = 160     // wider so creation timestamp doesn't truncate to "5..."
+        let packetsW: CGFloat = 90   // "1,234,567" upper bound for a long capture
         let dividerW: CGFloat = 1
         let dividerGap: CGFloat = LayoutConstants.spacingLG  // gap divider → first metric cell
         let metricsW = dividerW + dividerGap
                        + osW + gapMetric
+                       + uptimeW + gapMetric
                        + cpuW + gapMetric
                        + diskW + gapMetric
                        + netModeW + gapMetric
-                       + rateW
+                       + rateW + gapMetric
+                       + packetsW
 
         let metrics = NSView()
         metrics.frame = NSRect(x: frame.width - metricsW - cellPadding,
@@ -1227,6 +1240,15 @@ class VMLibraryWindowController: NSWindowController,
         metrics.addSubview(osCell.value)
         detailOSLabel = osCell.value
         mx += osW + gapMetric
+
+        let uptimeCell = makeMetricLabel(caption: "UPTIME", x: mx,
+                                         valueY: valueY, valueH: valueH,
+                                         captionY: captionY, captionH: captionH,
+                                         width: uptimeW)
+        metrics.addSubview(uptimeCell.caption)
+        metrics.addSubview(uptimeCell.value)
+        detailUptimeLabel = uptimeCell.value
+        mx += uptimeW + gapMetric
 
         let cpuCell = makeMetricLabel(caption: "CPU · RAM", x: mx,
                                       valueY: valueY, valueH: valueH,
@@ -1283,6 +1305,15 @@ class VMLibraryWindowController: NSWindowController,
         metrics.addSubview(netRateCell.caption)
         metrics.addSubview(netRateCell.value)
         detailNetworkRateLabel = netRateCell.value
+        mx += rateW + gapMetric
+
+        let packetsCell = makeMetricLabel(caption: "PACKETS", x: mx,
+                                          valueY: valueY, valueH: valueH,
+                                          captionY: captionY, captionH: captionH,
+                                          width: packetsW)
+        metrics.addSubview(packetsCell.caption)
+        metrics.addSubview(packetsCell.value)
+        detailPacketsLabel = packetsCell.value
 
         contentView.addSubview(card)
         selectedVMDetailCard = card
@@ -1418,10 +1449,12 @@ class VMLibraryWindowController: NSWindowController,
             detailOSLabel?.stringValue = "—"
             detailResourcesLabel?.stringValue = "—"
             updateMemoryAllocationBar(vmMemoryBytes: 0)
+            detailUptimeLabel?.stringValue = "—"
             detailDiskLabel?.stringValue = "—"
             detailNetworkModeLabel?.stringValue = "—"
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
+            detailPacketsLabel?.stringValue = "—"
             return
         }
 
@@ -1513,7 +1546,56 @@ class VMLibraryWindowController: NSWindowController,
             detailNetworkRateLabel?.textColor = AppColors.textMuted
             detailNetworkRateLabel?.toolTip = nil
         }
+
+        // Uptime — derived from the per-VM start stamp we capture on the
+        // .running transition. Stopped VMs show "—".
+        if vm.status == .running, let started = vmStartedAt[vm.id] {
+            let elapsed = Date().timeIntervalSince(started)
+            detailUptimeLabel?.stringValue = formatUptime(elapsed)
+        } else {
+            detailUptimeLabel?.stringValue = "—"
+        }
+
+        // Packets — cumulative rx+tx from the virtual switch port. NAT-mode
+        // VMs aren't on the switch, so they show "—" the same way the rate
+        // cell falls back to "host-routed".
+        if vm.networkConfig.mode == .virtual {
+            let total = currentPacketCount(forVMName: vm.name)
+            if let total {
+                detailPacketsLabel?.stringValue = Self.packetCountFormatter.string(
+                    from: NSNumber(value: total)) ?? "\(total)"
+            } else {
+                detailPacketsLabel?.stringValue = "—"
+            }
+        } else {
+            detailPacketsLabel?.stringValue = "—"
+        }
     }
+
+    /// Cumulative `packetsRx + packetsTx` for a VM from the virtual switch
+    /// port stats. Returns nil if the switch isn't running or no port
+    /// matches this VM name.
+    private func currentPacketCount(forVMName name: String) -> UInt64? {
+        let stats = VirtualNetworkSwitch.shared.getStatistics()
+        guard let isRunning = stats["running"] as? Bool, isRunning,
+              let ports = stats["ports"] as? [[String: Any]] else { return nil }
+        for port in ports {
+            guard let portName = port["vmName"] as? String, portName == name else { continue }
+            let rx = (port["packetsRx"] as? NSNumber)?.uint64Value ?? 0
+            let tx = (port["packetsTx"] as? NSNumber)?.uint64Value ?? 0
+            return rx + tx
+        }
+        return nil
+    }
+
+    /// Cached NumberFormatter for thousands-separated packet counts.
+    /// Reusable across every detail-card refresh.
+    private static let packetCountFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        return f
+    }()
 
     /// Poll the VirtualNetworkSwitch port stats and turn cumulative byte
     /// counters into a moving bytes/sec rate per VM. Called on a 1.5s timer
@@ -1634,10 +1716,12 @@ class VMLibraryWindowController: NSWindowController,
             detailOSLabel?.stringValue = "—"
             detailResourcesLabel?.stringValue = "—"
             updateMemoryAllocationBar(vmMemoryBytes: 0)
+            detailUptimeLabel?.stringValue = "—"
             detailDiskLabel?.stringValue = "—"
             detailNetworkModeLabel?.stringValue = "—"
             detailNetworkRateLabel?.stringValue = "—"
             detailNetworkRateLabel?.textColor = AppColors.textMuted
+            detailPacketsLabel?.stringValue = "—"
             return
         }
 
@@ -1659,6 +1743,11 @@ class VMLibraryWindowController: NSWindowController,
         // AI Sandbox bundle is fixed at 8 GB. Drive the allocation bar
         // with that same value so the bar matches the text.
         updateMemoryAllocationBar(vmMemoryBytes: 8 * 1_073_741_824)
+        // Uptime + packet counters don't apply to a bundle row (the bundle
+        // isn't a runtime VM until it's booted into a session, at which
+        // point that session would be selected separately).
+        detailUptimeLabel?.stringValue = "—"
+        detailPacketsLabel?.stringValue = "—"
         detailDiskLabel?.stringValue = ByteCountFormatter.string(
             fromByteCount: bundle.diskBytes, countStyle: .binary)
 
@@ -3241,6 +3330,12 @@ class VMLibraryWindowController: NSWindowController,
     @objc private func handleVMStatusChanged(_ notification: Notification) {
         // Refresh the table to show updated status
         DispatchQueue.main.async {
+            // Track per-VM start time so the Uptime metric in the detail
+            // card has a reference point. We don't persist this on the
+            // VMConfiguration model — start times are intrinsically a
+            // runtime concern and reset every launch.
+            self.refreshVMStartTimes()
+
             self.tableView?.reloadData()
 
             // Update status bar with current running VMs
@@ -3252,6 +3347,42 @@ class VMLibraryWindowController: NSWindowController,
             // Re-evaluate VM-VM connection brackets on running pills
             self.refreshConnectionOverlay()
         }
+    }
+
+    /// Walk the current VM list. For each VM newly in `.running` state,
+    /// stamp `Date()` if we don't already have one. For each VM not in
+    /// `.running`, drop any stored stamp. Idempotent — safe to call on
+    /// every status-change notification.
+    private func refreshVMStartTimes() {
+        let now = Date()
+        var seen = Set<UUID>()
+        for vm in vmManager.virtualMachines {
+            seen.insert(vm.id)
+            if vm.status == .running {
+                if vmStartedAt[vm.id] == nil {
+                    vmStartedAt[vm.id] = now
+                }
+            } else {
+                vmStartedAt.removeValue(forKey: vm.id)
+            }
+        }
+        // GC entries for VMs that were deleted while running.
+        vmStartedAt = vmStartedAt.filter { seen.contains($0.key) }
+    }
+
+    /// Format a TimeInterval as compact uptime ("2h 14m", "47m 12s",
+    /// "3d 4h"). Picks the highest two non-zero units.
+    private func formatUptime(_ seconds: TimeInterval) -> String {
+        guard seconds >= 1 else { return "<1s" }
+        let total = Int(seconds)
+        let d = total / 86_400
+        let h = (total % 86_400) / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return "\(h)h \(m)m" }
+        if m > 0 { return "\(m)m \(s)s" }
+        return "\(s)s"
     }
 
     @objc private func handleVMBundleSizeUpdated(_ notification: Notification) {
