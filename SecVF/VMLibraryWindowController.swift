@@ -724,9 +724,9 @@ class VMLibraryWindowController: NSWindowController,
         let buttonInset: CGFloat = 16
         for (i, entry) in logEntries.enumerated() {
             let btnY = logButtonsTopY - CGFloat(i + 1) * (buttonHeight + buttonGap)
-            let btn = NSButton(title: entry.title,
-                               target: nil,
-                               action: NSSelectorFromString(entry.selectorName))
+            let btn = TacticalHoverButton(title: entry.title,
+                                          target: nil,
+                                          action: NSSelectorFromString(entry.selectorName))
             btn.frame = NSRect(x: buttonInset, y: btnY,
                                width: sidebarWidth - buttonInset * 2,
                                height: buttonHeight)
@@ -735,7 +735,6 @@ class VMLibraryWindowController: NSWindowController,
             btn.font = NSFont.systemFont(ofSize: 11, weight: .medium)
             btn.contentTintColor = AppColors.textPrimary
             btn.alignment = .left
-            btn.wantsLayer = true
             btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
             btn.layer?.borderColor = AppColors.borderOD.cgColor
             btn.layer?.borderWidth = 1.0
@@ -747,6 +746,7 @@ class VMLibraryWindowController: NSWindowController,
             btn.toolTip = entry.tooltip
             btn.autoresizingMask = [.minYMargin, .width]
             btn.setAccessibilityLabel(entry.title.replacingOccurrences(of: "◆ ", with: "") + " logs")
+            btn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
             sidebar.addSubview(btn)
         }
 
@@ -1364,13 +1364,13 @@ class VMLibraryWindowController: NSWindowController,
     }
 
     /// Small icon-button used by the right-edge quick-action stack in the
-    /// detail card. Square, layer-backed, OD-border tactical aesthetic.
+    /// detail card. Square, layer-backed, OD-border tactical aesthetic
+    /// with built-in hover treatment via `TacticalHoverButton`.
     private func makeDetailCardActionButton(title: String,
                                             tooltip: String,
                                             action: Selector) -> NSButton {
-        let btn = NSButton(title: title, target: self, action: action)
+        let btn = TacticalHoverButton(title: title, target: self, action: action)
         btn.isBordered = false
-        btn.wantsLayer = true
         btn.layer?.backgroundColor = AppColors.backgroundButton.cgColor
         btn.layer?.borderColor = AppColors.borderOD.cgColor
         btn.layer?.borderWidth = 1.0
@@ -1380,6 +1380,7 @@ class VMLibraryWindowController: NSWindowController,
             .font: NSFont.systemFont(ofSize: 13, weight: .medium)
         ])
         btn.toolTip = tooltip
+        btn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
         return btn
     }
 
@@ -2007,9 +2008,10 @@ class VMLibraryWindowController: NSWindowController,
         // Anchored to the right side of the tabs row.
         let filterBtnWidth: CGFloat = 150
         let filterBtnX = frame.origin.x + frame.width - filterBtnWidth
-        let filterBtn = NSButton(title: "▼ Focus Running",
-                                 target: self,
-                                 action: #selector(showRunningFilterMenu(_:)))
+        let filterBtn = TacticalHoverButton(title: "▼ Focus Running",
+                                            target: self,
+                                            action: #selector(showRunningFilterMenu(_:)))
+        filterBtn.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
         filterBtn.frame = NSRect(x: filterBtnX,
                                  y: frame.origin.y + (frame.height - 22) / 2,
                                  width: filterBtnWidth,
@@ -2049,7 +2051,16 @@ class VMLibraryWindowController: NSWindowController,
             .font: NSFont.systemFont(ofSize: 11, weight: .medium)
         ])
         let isActive = runningFilterIDs != nil && !(runningFilterIDs?.isEmpty ?? true)
-        btn.layer?.borderColor = (isActive ? AppColors.accentODGlow : AppColors.borderOD).cgColor
+        // When the filter is active, the button stays glowing green
+        // even when not hovered — push the same color into the hover-
+        // button's idle slot so it doesn't get reset on mouse exit.
+        let activeIdleBorder = isActive ? AppColors.accentODGlow : AppColors.borderOD
+        if let hoverBtn = btn as? TacticalHoverButton {
+            hoverBtn.setHoverTreatment(idleBorder: activeIdleBorder,
+                                       hoverBorder: AppColors.accentODGlow)
+        } else {
+            btn.layer?.borderColor = activeIdleBorder.cgColor
+        }
     }
 
     /// Pop a menu of running VMs with check marks. Toggling an item edits
@@ -2614,14 +2625,13 @@ class VMLibraryWindowController: NSWindowController,
         // that PacketAnalysisWindowController uses. Picking a preset opens
         // the full Packet Analysis window with that filter pre-applied so
         // the user can dig in. Right-anchored, sits to the left of Expand.
-        let filterButton = NSButton(title: "⌕ Filter ▾",
-                                    target: self,
-                                    action: #selector(showPacketFilterMenu(_:)))
+        let filterButton = TacticalHoverButton(title: "⌕ Filter ▾",
+                                               target: self,
+                                               action: #selector(showPacketFilterMenu(_:)))
         filterButton.frame = NSRect(x: packetPanelWidth - 190, y: packetPanelHeight - 56,
                                     width: 90, height: 22)
         filterButton.isBordered = false
         filterButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-        filterButton.wantsLayer = true
         filterButton.layer?.backgroundColor = AppColors.backgroundButton.cgColor
         filterButton.layer?.borderColor = AppColors.borderOD.cgColor
         filterButton.layer?.borderWidth = 1.0
@@ -2632,6 +2642,7 @@ class VMLibraryWindowController: NSWindowController,
         ])
         filterButton.toolTip = "Apply a malware-analysis filter preset — opens the full Packet Analysis window with the selected filter."
         filterButton.autoresizingMask = [.minXMargin]
+        filterButton.setHoverTreatment(hoverBorder: AppColors.accentODGlow)
         packetPanel.addSubview(filterButton)
 
         // "Expand →" button (was "Open Full Analysis"). Pops the dedicated

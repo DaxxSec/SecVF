@@ -59,6 +59,7 @@
 		PFPR002PFPR002PFPR002002 /* PacketFilterPresets.swift in Sources */ = {isa = PBXBuildFile; fileRef = PFPR001PFPR001PFPR001001 /* PacketFilterPresets.swift */; };
 		VCOV002VCOV002VCOV002002 /* VMConnectionOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VCOV001VCOV001VCOV001001 /* VMConnectionOverlayView.swift */; };
 		VTFO002VTFO002VTFO002002 /* VMTrafficFallOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = VTFO001VTFO001VTFO001001 /* VMTrafficFallOverlayView.swift */; };
+		THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = THBT001THBT001THBT001001 /* TacticalHoverButton.swift */; };
 		PCPR002PCPR002PCPR002002 /* PacketCaptureProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */; };
 		PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */; };
 		PROTI002PROTI002PROTI002 /* ProtocolInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */; };
@@ -137,6 +138,7 @@
 		PFPR001PFPR001PFPR001001 /* PacketFilterPresets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketFilterPresets.swift; sourceTree = "<group>"; };
 		VCOV001VCOV001VCOV001001 /* VMConnectionOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMConnectionOverlayView.swift; sourceTree = "<group>"; };
 		VTFO001VTFO001VTFO001001 /* VMTrafficFallOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VMTrafficFallOverlayView.swift; sourceTree = "<group>"; };
+		THBT001THBT001THBT001001 /* TacticalHoverButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TacticalHoverButton.swift; sourceTree = "<group>"; };
 		PCPR001PCPR001PCPR001001 /* PacketCaptureProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketCaptureProtocol.swift; sourceTree = "<group>"; };
 		PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessExecutor.swift; sourceTree = "<group>"; };
 		PROTI001PROTI001PROTI001 /* ProtocolInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolInfo.swift; sourceTree = "<group>"; };
@@ -210,6 +212,7 @@
 				PFPR001PFPR001PFPR001001 /* PacketFilterPresets.swift */,
 				VCOV001VCOV001VCOV001001 /* VMConnectionOverlayView.swift */,
 				VTFO001VTFO001VTFO001001 /* VMTrafficFallOverlayView.swift */,
+				THBT001THBT001THBT001001 /* TacticalHoverButton.swift */,
 				NTNM001NTNM001NTNM001001 /* NotificationNames.swift */,
 				PROCX001PROCX001PROCX001 /* ProcessExecutor.swift */,
 				UTEX001UTEX001UTEX001001 /* UTTypeExtensions.swift */,
@@ -417,6 +420,7 @@
 				PFPR002PFPR002PFPR002002 /* PacketFilterPresets.swift in Sources */,
 				VCOV002VCOV002VCOV002002 /* VMConnectionOverlayView.swift in Sources */,
 				VTFO002VTFO002VTFO002002 /* VMTrafficFallOverlayView.swift in Sources */,
+				THBT002THBT002THBT002002 /* TacticalHoverButton.swift in Sources */,
 				NTNM002NTNM002NTNM002002 /* NotificationNames.swift in Sources */,
 				UTEX002UTEX002UTEX002002 /* UTTypeExtensions.swift in Sources */,
 				PROCX002PROCX002PROCX002 /* ProcessExecutor.swift in Sources */,
