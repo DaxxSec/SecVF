@@ -607,6 +607,19 @@ class VMLibraryWindowController: NSWindowController,
         }
     }
 
+    /// Whether a column's cells should use the monospaced-digit system
+    /// font instead of the proportional default. Same columns that get
+    /// right-alignment — numeric stacks read cleanest with tabular
+    /// figures so "12 GB" / "108 GB" line up exactly under each other.
+    private static func columnUsesMonospacedFont(forColumnID id: String) -> Bool {
+        switch id {
+        case "CPUColumn", "MemoryColumn", "DiskColumn", "LastUsedColumn":
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Wrap a set of NSButton instances in a rounded pill container with a
     /// shared background + border. Buttons sit edge-to-edge with thin
     /// vertical dividers between them. Used by the top toolbar to group
@@ -3835,6 +3848,16 @@ class VMLibraryWindowController: NSWindowController,
         // and units stack cleanly; text values stay leading-aligned.
         let columnIdRaw = tableColumn?.identifier.rawValue ?? ""
         finalCell.textField?.alignment = Self.columnAlignment(forColumnID: columnIdRaw)
+        // Numeric columns also get a monospaced font so digits have
+        // tabular widths — "12 GB" and "108 GB" line up exactly,
+        // which is impossible in a proportional font. Other columns
+        // stay with the system default for readability.
+        if Self.columnUsesMonospacedFont(forColumnID: columnIdRaw) {
+            finalCell.textField?.font = NSFont.monospacedDigitSystemFont(
+                ofSize: NSFont.systemFontSize, weight: .regular)
+        } else {
+            finalCell.textField?.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        }
 
         // AI Sandbox tab uses the same columns but filled from the bundle row
         if currentLibraryTab == .aiSandbox {
