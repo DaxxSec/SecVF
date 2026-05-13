@@ -3861,9 +3861,35 @@ class VMLibraryWindowController: NSWindowController,
         case "NameColumn":
             finalCell.textField?.stringValue = vm.name
         case "StatusColumn":
-            finalCell.textField?.stringValue = vm.statusDisplayString
+            // Inline status indicator: leading colored dot + status text in
+            // a matching tint. Same color palette as the detail-card pill so
+            // the table cell and the card read as the same vocabulary.
+            let (glyph, color): (String, NSColor) = {
+                switch vm.status {
+                case .running:  return ("●",  AppColors.statusRunning)
+                case .starting: return ("◐",  AppColors.statusPaused)
+                case .stopping: return ("◐",  AppColors.statusPaused)
+                case .stopped:  return ("○",  AppColors.statusStopped)
+                }
+            }()
+            let attr = NSMutableAttributedString(string: glyph + "  ", attributes: [
+                .foregroundColor: color
+            ])
+            attr.append(NSAttributedString(string: vm.statusDisplayString, attributes: [
+                .foregroundColor: color.withAlphaComponent(0.92)
+            ]))
+            finalCell.textField?.attributedStringValue = attr
         case "OSColumn":
-            finalCell.textField?.stringValue = vm.osType
+            // Leading glyph by OS family: 🐧 Linux, ⌘ macOS, generic ◇.
+            // Subtle visual key that lets the user spot guest OS at a
+            // glance without scanning the full string.
+            let osGlyph: String
+            switch vm.osType.lowercased() {
+            case let s where s.contains("linux"): osGlyph = "🐧"
+            case let s where s.contains("mac"):   osGlyph = "⌘"
+            default:                              osGlyph = "◇"
+            }
+            finalCell.textField?.stringValue = "\(osGlyph)  \(vm.osType)"
         case "CPUColumn":
             finalCell.textField?.stringValue = "\(vm.cpuCount) cores"
         case "MemoryColumn":
