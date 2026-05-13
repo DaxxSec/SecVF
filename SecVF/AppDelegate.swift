@@ -1638,8 +1638,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, @MainActor VZVirtualMachineD
 
     @objc private func handleOpenPacketAnalysis(_ notification: Notification) {
         // Funnels library-window and any future caller through the same
-        // singleton-owned analysis window.
+        // singleton-owned analysis window. If the caller embedded a
+        // "presetTitle" in the userInfo, apply that filter right after
+        // showing the window so the user lands on the pre-filtered list.
         showPacketAnalysis()
+        if let presetTitle = notification.userInfo?["presetTitle"] as? String {
+            packetAnalysisWindow?.applyPresetByTitle(presetTitle)
+        }
     }
 
     @objc private func showISOCacheLogs() {

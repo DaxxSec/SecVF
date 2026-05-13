@@ -27,6 +27,10 @@ extension Notification.Name {
     /// only PacketAnalysisWindowController; other UIs (library button, future
     /// menu items) post this notification instead of creating their own — two
     /// independent windows confused the operator and split packet rendering.
+    /// Optional userInfo:
+    ///   - "presetTitle": String — when present, AppDelegate calls the
+    ///     window's `applyPresetByTitle(_:)` immediately after showing it so
+    ///     the user lands on the pre-filtered packet list.
     static let openPacketAnalysis = Notification.Name("openPacketAnalysis")
 
     /// Request booting the AI Sandbox session VM. Posted by the library

@@ -2042,6 +2042,30 @@ class VMLibraryWindowController: NSWindowController,
         packetPanel.addSubview(arpCountLabel)
         arpFilterCountLabel = arpCountLabel
 
+        // "⌕ Filter ▾" button — pops the same malware-analysis preset menu
+        // that PacketAnalysisWindowController uses. Picking a preset opens
+        // the full Packet Analysis window with that filter pre-applied so
+        // the user can dig in. Right-anchored, sits to the left of Expand.
+        let filterButton = NSButton(title: "⌕ Filter ▾",
+                                    target: self,
+                                    action: #selector(showPacketFilterMenu(_:)))
+        filterButton.frame = NSRect(x: packetPanelWidth - 190, y: packetPanelHeight - 56,
+                                    width: 90, height: 22)
+        filterButton.isBordered = false
+        filterButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        filterButton.wantsLayer = true
+        filterButton.layer?.backgroundColor = AppColors.backgroundButton.cgColor
+        filterButton.layer?.borderColor = AppColors.borderOD.cgColor
+        filterButton.layer?.borderWidth = 1.0
+        filterButton.layer?.cornerRadius = LayoutConstants.cornerRadiusSM
+        filterButton.attributedTitle = NSAttributedString(string: "⌕ Filter ▾", attributes: [
+            .foregroundColor: AppColors.textOD,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium)
+        ])
+        filterButton.toolTip = "Apply a malware-analysis filter preset — opens the full Packet Analysis window with the selected filter."
+        filterButton.autoresizingMask = [.minXMargin]
+        packetPanel.addSubview(filterButton)
+
         // "Expand →" button (was "Open Full Analysis"). Pops the dedicated
         // Packet Analysis window. Right-anchored on row 2.
         let openButton = NSButton(title: "Expand →", target: self, action: #selector(openPacketAnalysisWindow(_:)))
@@ -2217,6 +2241,29 @@ class VMLibraryWindowController: NSWindowController,
         // Defer to AppDelegate's singleton — avoids two analysis windows
         // rendering the same packet stream independently.
         NotificationCenter.default.post(name: .openPacketAnalysis, object: nil)
+    }
+
+    /// Pop the malware-analysis preset menu anchored to the Filter button.
+    /// Selecting a preset opens the Packet Analysis window with that filter
+    /// pre-applied (see `presetFilterChosen(_:)`).
+    @objc private func showPacketFilterMenu(_ sender: NSButton) {
+        let menu = PacketFilterPresets.buildMenu(target: self,
+                                                 action: #selector(presetFilterChosen(_:)))
+        // Anchor the menu below the button's left edge.
+        let origin = NSPoint(x: 0, y: sender.bounds.height + 4)
+        menu.popUp(positioning: nil, at: origin, in: sender)
+    }
+
+    /// Called when the user picks a preset from the library packet panel's
+    /// Filter button. Opens the full Packet Analysis window with that
+    /// preset pre-applied — the library panel is a quick preview, deep
+    /// filtering happens in the dedicated window.
+    @objc private func presetFilterChosen(_ sender: NSMenuItem) {
+        NotificationCenter.default.post(
+            name: .openPacketAnalysis,
+            object: nil,
+            userInfo: ["presetTitle": sender.title]
+        )
     }
 
     @objc private func handlePacketCaptured(_ notification: Notification) {
