@@ -60,13 +60,25 @@ Security audit logging with severity levels (INFO → EMERGENCY). Real-time file
 
 <div align="center">
 
-| VM Library | Packet Analysis |
-|:---:|:---:|
-| *Multi-VM management with live packet log panel* | *Wireshark-style deep packet inspection* |
+<img src="docs/screenshots/secvf-redesign-hero.png" alt="SecVF — tactical redesign hero: VM library, sidebar filters, selected-VM detail card, live packet monitor strip in one window" width="100%"/>
 
-> 📸 Screenshots coming soon — build from source and run to see it in action.
+<sub><strong>The redesigned tactical UI</strong> · VM library, selected-VM detail card, and live packet monitor strip in one window · OD-green = operational · safety orange = capturing / attention · red = destructive · Rendered from <a href="docs/ui-redesign-mockup.html"><code>docs/ui-redesign-mockup.html</code></a> — open it in a browser for the live, theme-switchable mockup.</sub>
 
 </div>
+
+### VM library — toolbar, sidebar filters, status pills, sparkline traffic
+
+<img src="docs/screenshots/secvf-vm-library.png" alt="VM library: NSToolbar with grouped actions (Start / New / Configure / Delete), sidebar filters by state / OS / network, VM table with status pills and in-line CPU·RAM / Disk / Traffic columns" width="100%"/>
+
+### Selected-VM detail card — uptime, CPU, memory, network, packets, mode
+
+<img src="docs/screenshots/secvf-detail-card.png" alt="Detail card showing uptime, CPU, memory bar, network ↓/↑, packets, mode for the selected VM, with Console and Capture actions" width="100%"/>
+
+### Live packet monitor strip — at-a-glance situational awareness
+
+<img src="docs/screenshots/secvf-packet-strip.png" alt="Live packet monitor strip showing TLS / DNS / HTTP / TCP / ICMP / ARP rows with protocol-coded colors; CAPTURING badge and live rate counters" width="100%"/>
+
+> For deep filter/inspect work the dedicated **Packet Analysis** window (⌘⇧P) carries Wireshark-style display filters, layer-by-layer decode, and PCAP export — see the *Packet Analysis* section below.
 
 ---
 
