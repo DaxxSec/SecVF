@@ -1163,15 +1163,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             virtualMachineConfiguration.consoleDevices = [createSpiceAgentConsoleDeviceConfiguration()]
         }
 
-        // Add a virtio socket device (vsock) only for macOS guests — that's
-        // where the AI sandbox exec agent listens on port 2222. Linux VMs in
-        // SecVF (kali router etc.) don't currently use vsock, and adding the
-        // device unconditionally caused VM-startup hangs in testing. Limit to
-        // macOS for now; revisit if a Linux-side use case appears.
-        if isMacOS {
-            virtualMachineConfiguration.socketDevices = [VZVirtioSocketDeviceConfiguration()]
-            NSLog("[VM] Added virtio socket device (vsock) for host-guest IPC")
-        }
+        // No vsock device on the generic VM startup path. The AI sandbox builds
+        // its config via AISandboxMacVMConfiguration and attaches its own vsock
+        // device there; this path only runs for non-AI-sandbox VMs (regular
+        // macOS guests, Linux samples, Kali router), none of which have a
+        // legitimate use for the host-guest exec channel. Attaching it here
+        // unconditionally for any macOS guest opened a latent control-channel
+        // surface on hypothetical macOS malware-analysis VMs — see the purple
+        // team proposal in anthropic-detections-platform for context.
 
         NSLog("[VM] Validating virtual machine configuration...")
         do {
@@ -1262,13 +1261,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, VZVirtualMachineDelegate, NS
             // SECURITY: Start security monitoring for this VM
             VMSecurityMonitor.shared.startMonitoring(vm: vmConfig, virtualMachine: virtualMachine)
 
-            // Expose the AI Sandbox vsock exec channel as a UDS at
-            // /tmp/secvf-exec-<vmid>.sock so cross-process / cross-user
-            // clients (e.g. ai-mon's SecVFTracer, secvf-cli vm exec) can
-            // drive the guest. No-op for VMs without a vsock device.
-            VsockExecBridgeManager.shared.startBridge(
-                vmId: vmConfig.id, vmName: vmConfig.name, vm: virtualMachine
-            )
+            // Intentionally no VsockExecBridgeManager.startBridge() here. AI
+            // Sandbox VMs do not flow through this generic createVirtualMachine
+            // path — they boot via the AISandboxMacVMConfiguration code path,
+            // which calls startBridge at its own session-boot site. Starting
+            // the bridge here would either be a no-op (no vsock device on this
+            // path, post-hardening) or, if a vsock device ever re-appeared,
+            // would expose a host-guest control channel on a non-AI-sandbox
+            // VM. Keep the attach surface confined to the AI Sandbox path.
 
             let needsInstall = self.needsInstallFlags[vmId] ?? false
 
