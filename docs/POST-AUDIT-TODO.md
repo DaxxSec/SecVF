@@ -124,6 +124,7 @@ The AI sandbox subsystem belongs to the AIMon project, not SecVF 1.0. Items flag
 - [ ] `.github/FUNDING.yml` for GitHub Sponsors (quiet, just the repo header button)
 - [ ] Memory note update: `~/.claude/projects/.../memory/project_distribution_model.md` still describes the two-forks App Store plan. Rewrite to "direct distribution via daxxsec.tech, notarized DMG, donations-only."
 - [ ] Sweep website + wiki (in [`daxxsec.tech`](https://github.com/DaxxSec/daxxsec.tech) private repo) for "Coming to App Store" / paid-tier copy. Drop it.
+- [x] In-repo doc sweep for the dropped $6.99 App Store fork: `docs/LICENSE-REVIEW.md` rewritten to direct-distribution-only, `siem/yara-scanner/rules/README.md` rewording dropped (2026-05-18). `docs/PRE-LAUNCH-PLAN.md` retained as historical rationale for why the App Store wasn't pursued.
 - [ ] Re-enable downloads on the website once the notarized DMG is real (currently disabled per user request)
 
 ### Submissions / discovery

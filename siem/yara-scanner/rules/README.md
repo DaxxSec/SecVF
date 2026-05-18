@@ -33,7 +33,7 @@ docker compose logs -f yara-scanner    # confirm "Compiling N YARA rule files"
 When you ship SecVF builds that include rule packs:
 
 - MIT/Apache-2.0 rules: re-distributable.
-- CC BY-NC 4.0 (signature-base): **NOT** re-distributable as part of a commercial product (e.g. an App Store paid build). For the App Store edition, omit these or replace with permissive alternatives.
+- CC BY-NC 4.0 (signature-base): **NOT** re-distributable as part of a commercial product. SecVF itself ships as a free direct download under MIT, so bundling CC BY-NC 4.0 rules is fine for the official build; flag this constraint for any downstream redistributor considering a commercial channel, and consider permissive alternatives if that path opens up.
 - Elastic License 2.0: restricted; check terms before bundling.
 
 Auditing: `find . -name '*.yar' -o -name '*.yara' | xargs head -20 | grep -iE "license|copyright"`.
