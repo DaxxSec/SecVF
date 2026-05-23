@@ -56,13 +56,20 @@ final class TacticalSidebarSection: NSView {
 
         super.init(frame: .zero)
 
-        addSubview(titleLabel)
         rebuild(rows: rows)
     }
 
     required init?(coder: NSCoder) {
         fatalError("Use init(title:rows:)")
     }
+
+    // Layout constants captured so `layout()` can re-flow without a
+    // second `rebuild` call when the frame finally resolves.
+    private static let labelH: CGFloat = 14
+    private static let rowH: CGFloat = 26
+    private static let rowGap: CGFloat = 2
+    private static let belowLabelGap: CGFloat = 6
+    private static let inset: CGFloat = 12
 
     /// Replace the row set in place. Called when counts update (which
     /// happens on every VM list reload — see refreshCounts(rows:)).
@@ -73,36 +80,24 @@ final class TacticalSidebarSection: NSView {
         rowViews.values.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
 
-        let labelH: CGFloat = 14
-        let rowH: CGFloat = 26
-        let rowGap: CGFloat = 2
-        let belowLabelGap: CGFloat = 6
-        let inset: CGFloat = 12
-
-        // Lay out from top (y=0 is bottom in standard AppKit coords;
-        // but this view's frame's origin will be positioned by the
-        // caller, so we build assuming top-down placement and then
-        // size ourselves accordingly).
-        let totalRowsHeight = CGFloat(rows.count) * rowH + CGFloat(max(0, rows.count - 1)) * rowGap
-        let total = labelH + belowLabelGap + totalRowsHeight
+        let totalRowsHeight = CGFloat(rows.count) * Self.rowH +
+                              CGFloat(max(0, rows.count - 1)) * Self.rowGap
+        let total = Self.labelH + Self.belowLabelGap + totalRowsHeight
         _intrinsicHeight = total
 
-        // Width follows the parent — we'll resize via autoresizing.
         autoresizingMask = [.width]
 
-        // Title sits at the top of our bounds
-        titleLabel.frame = NSRect(x: inset, y: total - labelH,
-                                  width: bounds.width - inset * 2,
-                                  height: labelH)
+        // Build views without trying to size them yet — `layoutSubviews`
+        // (called once the section's frame is set by the controller)
+        // gives them their final widths based on the section's real
+        // bounds. This avoids the "bounds.width is 0 during init →
+        // sub-views get width = -24" trap that previously truncated
+        // section titles to "ERATING SYSTEM" / "TWORK" / "GS".
         titleLabel.autoresizingMask = [.width, .minYMargin]
+        addSubview(titleLabel)
 
-        // Rows below, top-down
-        var y = total - labelH - belowLabelGap - rowH
         for row in rows {
-            let view = SidebarRowView(row: row, height: rowH)
-            view.frame = NSRect(x: inset, y: y,
-                                width: bounds.width - inset * 2,
-                                height: rowH)
+            let view = SidebarRowView(row: row, height: Self.rowH)
             view.autoresizingMask = [.width, .minYMargin]
             view.onTap = { [weak self] id in
                 guard let self = self else { return }
@@ -113,10 +108,35 @@ final class TacticalSidebarSection: NSView {
             }
             addSubview(view)
             rowViews[row.id] = view
-            y -= (rowH + rowGap)
         }
 
         refreshSelectionStyling()
+        relayoutContents()
+    }
+
+    /// Position the title + rows based on the section's CURRENT bounds.
+    /// Called from `layout()` (Cocoa hook fired after frame resolves
+    /// from the parent) and from `rebuild` so initial paint is right.
+    private func relayoutContents() {
+        let usableW = max(0, bounds.width - Self.inset * 2)
+        let total = _intrinsicHeight
+
+        titleLabel.frame = NSRect(x: Self.inset, y: total - Self.labelH,
+                                  width: usableW, height: Self.labelH)
+
+        // Rows below, top-down. Iterate in the same order rebuild built
+        // them so the visual order matches the data order.
+        var y = total - Self.labelH - Self.belowLabelGap - Self.rowH
+        for subview in subviews {
+            guard let row = subview as? SidebarRowView else { continue }
+            row.frame = NSRect(x: Self.inset, y: y, width: usableW, height: Self.rowH)
+            y -= (Self.rowH + Self.rowGap)
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        relayoutContents()
     }
 
     /// Update just the count badges + (optionally) the selection state

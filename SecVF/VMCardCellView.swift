@@ -183,12 +183,24 @@ final class VMCardCellView: NSTableCellView {
         // Row 1
         nameLabel.stringValue = vm.name + (vm.networkConfig.isRouter ? "  ⬡ ROUTER" : "")
 
+        // VM-card row 1 status pill. Use attributedStringValue with an
+        // explicit centered NSMutableParagraphStyle — NSTextField's
+        // plain `alignment = .center` drifts leftward on layer-backed
+        // borderless labels on some macOS revs, producing the dead-
+        // space halo the user reported as "pill is still spaced wrong".
         let (pillGlyph, pillText, pillColor) = Self.statusPillSpec(for: vm.status)
+        let pillPara = NSMutableParagraphStyle()
+        pillPara.alignment = .center
+        let pillFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
         let pillAttr = NSMutableAttributedString(string: pillGlyph + " ", attributes: [
-            .foregroundColor: pillColor
+            .foregroundColor: pillColor,
+            .font: pillFont,
+            .paragraphStyle: pillPara,
         ])
         pillAttr.append(NSAttributedString(string: pillText, attributes: [
-            .foregroundColor: pillColor.withAlphaComponent(0.95)
+            .foregroundColor: pillColor.withAlphaComponent(0.95),
+            .font: pillFont,
+            .paragraphStyle: pillPara,
         ]))
         statusPill.attributedStringValue = pillAttr
         statusPill.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
@@ -254,14 +266,24 @@ final class VMCardCellView: NSTableCellView {
         let suffix = bundle.isBase ? "  (base)" : ""
         nameLabel.stringValue = bundle.displayName + suffix
 
+        // AI Sandbox tab uses the same widget; apply the same
+        // paragraph-style centering as the running-state path above so
+        // the TEMPLATE / SESSION pill doesn't drift inside its bounds.
         let (pillGlyph, pillText, pillColor): (String, String, NSColor) = bundle.isBase
             ? ("◆", "TEMPLATE", AppColors.accentOrange)
             : ("●", "SESSION",  AppColors.statusRunning)
+        let pillPara = NSMutableParagraphStyle()
+        pillPara.alignment = .center
+        let pillFont = NSFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
         let pillAttr = NSMutableAttributedString(string: pillGlyph + " ", attributes: [
-            .foregroundColor: pillColor
+            .foregroundColor: pillColor,
+            .font: pillFont,
+            .paragraphStyle: pillPara,
         ])
         pillAttr.append(NSAttributedString(string: pillText, attributes: [
-            .foregroundColor: pillColor.withAlphaComponent(0.95)
+            .foregroundColor: pillColor.withAlphaComponent(0.95),
+            .font: pillFont,
+            .paragraphStyle: pillPara,
         ]))
         statusPill.attributedStringValue = pillAttr
         statusPill.layer?.backgroundColor = pillColor.withAlphaComponent(0.12).cgColor
